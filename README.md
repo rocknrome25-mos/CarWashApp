@@ -51,10 +51,10 @@
 
 ## Управление проектом
 - Project Management Dashboard:  
-  **[ссылка будет добавлена]**
+  https://rocknrome.openproject.eu/projects/carwashapp/boards/9
 
 - Функциональная блок-схема:  
-  **[ссылка будет добавлена]**
+ https://app.diagrams.net/#G18212T-XOnh1cDxNtyiejXh6QeJ_tvQCp#%7B%22pageId%22%3A%2226mbamY5ix3XSY37QD4T%22%7D
 
 ---
 
