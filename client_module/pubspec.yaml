@@ -1,0 +1,30 @@
+name: client_module
+description: Client module for car wash booking MVP-0
+publish_to: 'none' # private project
+
+version: 0.1.0+1
+
+environment:
+  sdk: '^3.10.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # UI / formatting
+  intl: ^0.19.0
+
+  # Material icons
+  cupertino_icons: ^1.0.6
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^3.0.1
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/
