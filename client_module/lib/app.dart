@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+
 import 'core/data/demo_repository.dart';
 import 'features/bookings/bookings_page.dart';
 import 'features/cars/cars_page.dart';
@@ -26,23 +28,30 @@ class _ClientModuleAppState extends State<ClientModuleApp> {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Автомойка',
-      theme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.red),
-      ),
+      locale: const Locale('ru', 'RU'),
+      supportedLocales: const [Locale('ru', 'RU'), Locale('en', 'US')],
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.red),
       home: Scaffold(
-        appBar: AppBar(
-          title: const Text('Автомойка'),
-          centerTitle: true,
-        ),
+        appBar: AppBar(title: const Text('Автомойка')),
         body: pages[index],
         bottomNavigationBar: NavigationBar(
           selectedIndex: index,
           onDestinationSelected: (v) => setState(() => index = v),
           destinations: const [
-            NavigationDestination(icon: Icon(Icons.directions_car), label: 'Мои авто'),
-            NavigationDestination(icon: Icon(Icons.local_car_wash), label: 'Услуги'),
-            NavigationDestination(icon: Icon(Icons.event_available), label: 'Записи'),
+            NavigationDestination(
+              icon: Icon(Icons.directions_car),
+              label: 'Авто',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.local_car_wash),
+              label: 'Услуги',
+            ),
+            NavigationDestination(icon: Icon(Icons.event), label: 'Записи'),
           ],
         ),
       ),
