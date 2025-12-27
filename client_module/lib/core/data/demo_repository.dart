@@ -2,13 +2,30 @@ import '../models/booking.dart';
 import '../models/car.dart';
 import '../models/service.dart';
 
+class BookingDetails {
+  final Booking booking;
+  final Car? car;
+  final Service? service;
+
+  BookingDetails({
+    required this.booking,
+    required this.car,
+    required this.service,
+  });
+}
+
 class DemoRepository {
   final List<Car> _cars = [];
 
-  final List<Service> _services = const [
-    Service(id: 's1', name: 'Экспресс мойка', priceRub: 800, durationMin: 20),
-    Service(id: 's2', name: 'Комплекс', priceRub: 1500, durationMin: 45),
-    Service(
+  final List<Service> _services = [
+    const Service(
+      id: 's1',
+      name: 'Экспресс мойка',
+      priceRub: 800,
+      durationMin: 20,
+    ),
+    const Service(id: 's2', name: 'Комплекс', priceRub: 1500, durationMin: 45),
+    const Service(
       id: 's3',
       name: 'Химчистка салона',
       priceRub: 6000,
@@ -34,6 +51,24 @@ class DemoRepository {
       if (s.id == id) return s;
     }
     return null;
+  }
+
+  Booking? findBooking(String id) {
+    for (final b in _bookings) {
+      if (b.id == id) return b;
+    }
+    return null;
+  }
+
+  BookingDetails? getBookingDetails(String bookingId) {
+    final b = findBooking(bookingId);
+    if (b == null) return null;
+
+    return BookingDetails(
+      booking: b,
+      car: findCar(b.carId),
+      service: findService(b.serviceId),
+    );
   }
 
   void addCar({
