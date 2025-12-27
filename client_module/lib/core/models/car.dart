@@ -1,13 +1,15 @@
 class Car {
   final String id;
-  final String make;
+  final String brand;
   final String model;
   final String plate;
 
-  Car({
+  const Car({
     required this.id,
-    required this.make,
+    required this.brand,
     required this.model,
     required this.plate,
   });
+
+  String get title => '$brand $model';
 }

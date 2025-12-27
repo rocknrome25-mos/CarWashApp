@@ -4,27 +4,72 @@ import '../models/service.dart';
 
 class DemoRepository {
   final List<Car> _cars = [];
-  final List<Service> _services = [];
+
+  final List<Service> _services = const [
+    Service(id: 's1', name: 'Экспресс мойка', priceRub: 800, durationMin: 20),
+    Service(id: 's2', name: 'Комплекс', priceRub: 1500, durationMin: 45),
+    Service(
+      id: 's3',
+      name: 'Химчистка салона',
+      priceRub: 6000,
+      durationMin: 180,
+    ),
+  ];
+
   final List<Booking> _bookings = [];
 
-  DemoRepository() {
-    _services.addAll(const [
-      Service(id: 's1', name: 'Мойка кузова', price: 1000, durationMinutes: 30),
-      Service(
-        id: 's2',
-        name: 'Мойка + салон',
-        price: 1800,
-        durationMinutes: 60,
-      ),
-      Service(id: 's3', name: 'Детейлинг', price: 3500, durationMinutes: 120),
-    ]);
+  List<Car> getCars() => List.unmodifiable(_cars);
+  List<Service> getServices() => List.unmodifiable(_services);
+  List<Booking> getBookings() => List.unmodifiable(_bookings);
+
+  Car? findCar(String id) {
+    for (final c in _cars) {
+      if (c.id == id) return c;
+    }
+    return null;
   }
 
-  List<Car> getCars() => List.unmodifiable(_cars);
-  void addCar(Car car) => _cars.insert(0, car);
+  Service? findService(String id) {
+    for (final s in _services) {
+      if (s.id == id) return s;
+    }
+    return null;
+  }
 
-  List<Service> getServices() => List.unmodifiable(_services);
+  void addCar({
+    required String brand,
+    required String model,
+    required String plate,
+  }) {
+    final id = DateTime.now().microsecondsSinceEpoch.toString();
+    _cars.add(
+      Car(
+        id: id,
+        brand: brand.trim(),
+        model: model.trim(),
+        plate: plate.trim().toUpperCase(),
+      ),
+    );
+  }
 
-  List<Booking> getBookings() => List.unmodifiable(_bookings);
-  void addBooking(Booking booking) => _bookings.insert(0, booking);
+  void deleteCar(String id) {
+    _cars.removeWhere((c) => c.id == id);
+    _bookings.removeWhere((b) => b.carId == id);
+  }
+
+  void addBooking({
+    required String carId,
+    required String serviceId,
+    required DateTime dateTime,
+  }) {
+    final id = DateTime.now().microsecondsSinceEpoch.toString();
+    _bookings.add(
+      Booking(id: id, carId: carId, serviceId: serviceId, dateTime: dateTime),
+    );
+    _bookings.sort((a, b) => a.dateTime.compareTo(b.dateTime));
+  }
+
+  void deleteBooking(String id) {
+    _bookings.removeWhere((b) => b.id == id);
+  }
 }

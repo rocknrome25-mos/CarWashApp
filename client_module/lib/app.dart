@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-
 import 'core/data/demo_repository.dart';
 import 'features/bookings/bookings_page.dart';
 import 'features/cars/cars_page.dart';
@@ -13,12 +12,12 @@ class ClientModuleApp extends StatefulWidget {
 }
 
 class _ClientModuleAppState extends State<ClientModuleApp> {
-  final repo = DemoRepository();
+  final DemoRepository repo = DemoRepository();
   int index = 0;
 
   @override
   Widget build(BuildContext context) {
-    final pages = [
+    final pages = <Widget>[
       CarsPage(repo: repo),
       ServicesPage(repo: repo),
       BookingsPage(repo: repo),
@@ -27,23 +26,23 @@ class _ClientModuleAppState extends State<ClientModuleApp> {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Автомойка',
-      theme: ThemeData(useMaterial3: true),
+      theme: ThemeData(
+        useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.red),
+      ),
       home: Scaffold(
-        appBar: AppBar(title: const Text('Автомойка')),
+        appBar: AppBar(
+          title: const Text('Автомойка'),
+          centerTitle: true,
+        ),
         body: pages[index],
         bottomNavigationBar: NavigationBar(
           selectedIndex: index,
           onDestinationSelected: (v) => setState(() => index = v),
           destinations: const [
-            NavigationDestination(
-              icon: Icon(Icons.directions_car),
-              label: 'Авто',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.local_car_wash),
-              label: 'Услуги',
-            ),
-            NavigationDestination(icon: Icon(Icons.event), label: 'Записи'),
+            NavigationDestination(icon: Icon(Icons.directions_car), label: 'Мои авто'),
+            NavigationDestination(icon: Icon(Icons.local_car_wash), label: 'Услуги'),
+            NavigationDestination(icon: Icon(Icons.event_available), label: 'Записи'),
           ],
         ),
       ),

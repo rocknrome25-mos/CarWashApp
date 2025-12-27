@@ -1,18 +1,13 @@
-import 'car.dart';
-import 'service.dart';
-
 class Booking {
   final String id;
-  final Car car;
-  final Service service;
-  final DateTime startAt;
-  final String status;
+  final String carId;
+  final String serviceId;
+  final DateTime dateTime;
 
-  Booking({
+  const Booking({
     required this.id,
-    required this.car,
-    required this.service,
-    required this.startAt,
-    this.status = 'pending',
+    required this.carId,
+    required this.serviceId,
+    required this.dateTime,
   });
 }
