@@ -17,6 +17,8 @@ class BookingDetails {
 class DemoRepository {
   final List<Car> _cars = [];
 
+  final Set<String> _protectedServiceIds = {'s1', 's2', 's3'};
+
   final List<Service> _services = [
     const Service(
       id: 's1',
@@ -90,6 +92,31 @@ class DemoRepository {
   void deleteCar(String id) {
     _cars.removeWhere((c) => c.id == id);
     _bookings.removeWhere((b) => b.carId == id);
+  }
+
+  bool isServiceProtected(String id) => _protectedServiceIds.contains(id);
+
+  void addService({
+    required String name,
+    required int priceRub,
+    required int durationMin,
+  }) {
+    final id = DateTime.now().microsecondsSinceEpoch.toString();
+    _services.add(
+      Service(
+        id: id,
+        name: name.trim(),
+        priceRub: priceRub,
+        durationMin: durationMin,
+      ),
+    );
+  }
+
+  bool deleteService(String id) {
+    if (isServiceProtected(id)) return false;
+    _services.removeWhere((s) => s.id == id);
+    _bookings.removeWhere((b) => b.serviceId == id);
+    return true;
   }
 
   void addBooking({

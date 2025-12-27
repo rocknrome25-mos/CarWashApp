@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../core/data/demo_repository.dart';
 import '../../widgets/empty_state.dart';
-import 'add_car_sheet.dart';
 
 class CarsPage extends StatefulWidget {
   final DemoRepository repo;
@@ -13,58 +12,133 @@ class CarsPage extends StatefulWidget {
 }
 
 class _CarsPageState extends State<CarsPage> {
-  void _openAddCar() async {
-    final added = await showModalBottomSheet<bool>(
+  Future<void> _addCar() async {
+    final brandCtrl = TextEditingController();
+    final modelCtrl = TextEditingController();
+    final plateCtrl = TextEditingController();
+
+    final ok = await showDialog<bool>(
       context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (_) => AddCarSheet(repo: widget.repo),
+      builder: (ctx) => AlertDialog(
+        title: const Text('Добавить авто'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: brandCtrl,
+              decoration: const InputDecoration(labelText: 'Марка'),
+            ),
+            TextField(
+              controller: modelCtrl,
+              decoration: const InputDecoration(labelText: 'Модель'),
+            ),
+            TextField(
+              controller: plateCtrl,
+              decoration: const InputDecoration(labelText: 'Номер'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Добавить'),
+          ),
+        ],
+      ),
     );
-    if (added == true) setState(() {});
+
+    if (ok != true) return;
+
+    final brand = brandCtrl.text.trim();
+    final model = modelCtrl.text.trim();
+    final plate = plateCtrl.text.trim();
+
+    if (brand.isEmpty || model.isEmpty || plate.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Заполни все поля')));
+      return;
+    }
+
+    widget.repo.addCar(brand: brand, model: model, plate: plate);
+    if (!mounted) return;
+    setState(() {});
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Авто добавлено')));
+  }
+
+  Future<void> _confirmDeleteCar(String carId) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Удалить авто?'),
+        content: const Text(
+          'Также будут удалены все записи, связанные с этим авто.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Удалить'),
+          ),
+        ],
+      ),
+    );
+
+    if (ok != true) return;
+
+    widget.repo.deleteCar(carId);
+    if (!mounted) return;
+    setState(() {});
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Авто удалено')));
   }
 
   @override
   Widget build(BuildContext context) {
     final cars = widget.repo.getCars();
 
-    if (cars.isEmpty) {
-      return EmptyState(
-        icon: Icons.directions_car,
-        title: 'Нет авто',
-        subtitle: 'Добавь машину, чтобы записаться на мойку.',
-        action: FilledButton(
-          onPressed: _openAddCar,
-          child: const Text('Добавить авто'),
-        ),
-      );
-    }
-
-    return ListView(
-      padding: const EdgeInsets.all(12),
-      children: [
-        FilledButton.icon(
-          onPressed: _openAddCar,
-          icon: const Icon(Icons.add),
-          label: const Text('Добавить авто'),
-        ),
-        const SizedBox(height: 12),
-        ...cars.map((c) {
-          return Card(
-            child: ListTile(
-              leading: const Icon(Icons.directions_car),
-              title: Text(c.title),
-              subtitle: Text('Номер: ${c.plate}'),
-              trailing: IconButton(
-                icon: const Icon(Icons.delete_outline),
-                onPressed: () {
-                  widget.repo.deleteCar(c.id);
-                  setState(() {});
-                },
-              ),
+    return Scaffold(
+      body: cars.isEmpty
+          ? const EmptyState(
+              icon: Icons.directions_car,
+              title: 'Нет авто',
+              subtitle:
+                  'Добавь машину, чтобы можно было записываться на услуги.',
+            )
+          : ListView.separated(
+              padding: const EdgeInsets.all(12),
+              itemCount: cars.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 8),
+              itemBuilder: (context, i) {
+                final c = cars[i];
+                return Card(
+                  child: ListTile(
+                    leading: const Icon(Icons.directions_car),
+                    title: Text('${c.brand} ${c.model}'),
+                    subtitle: Text(c.plate),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.delete_outline),
+                      onPressed: () => _confirmDeleteCar(c.id),
+                    ),
+                  ),
+                );
+              },
             ),
-          );
-        }),
-      ],
+      floatingActionButton: FloatingActionButton(
+        onPressed: _addCar,
+        child: const Icon(Icons.add),
+      ),
     );
   }
 }

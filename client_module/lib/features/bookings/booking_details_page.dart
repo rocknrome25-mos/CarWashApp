@@ -85,6 +85,9 @@ class BookingDetailsPage extends StatelessWidget {
                 if (ok == true && context.mounted) {
                   repo.deleteBooking(b.id);
                   Navigator.of(context).pop(true);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Запись удалена')),
+                  );
                 }
               },
               icon: const Icon(Icons.delete_outline),
@@ -113,9 +116,7 @@ class _Row extends StatelessWidget {
           width: 110,
           child: Text(
             label,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: Colors.grey[700],
-            ),
+            style: theme.textTheme.bodyMedium?.copyWith(color: Colors.grey),
           ),
         ),
         const SizedBox(width: 12),
