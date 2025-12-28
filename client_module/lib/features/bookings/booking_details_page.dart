@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
-
 import '../../core/data/demo_repository.dart';
 
 class BookingDetailsPage extends StatelessWidget {
@@ -15,83 +13,61 @@ class BookingDetailsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final details = repo.getBookingDetails(bookingId);
+    final booking = repo
+        .getBookings()
+        .where((b) => b.id == bookingId)
+        .cast()
+        .toList()
+        .firstOrNull;
 
-    if (details == null) {
+    if (booking == null) {
       return Scaffold(
         appBar: AppBar(title: const Text('Детали записи')),
         body: const Center(child: Text('Запись не найдена')),
       );
     }
 
-    final b = details.booking;
-    final car = details.car;
-    final service = details.service;
+    final car = repo.findCar(booking.carId);
+    final service = repo.findService(booking.serviceId);
 
-    final dateStr = DateFormat('dd.MM.yyyy').format(b.dateTime);
-    final timeStr = DateFormat('HH:mm').format(b.dateTime);
+    final dt = booking.dateTime;
+    final dtText =
+        '${dt.day.toString().padLeft(2, '0')}.${dt.month.toString().padLeft(2, '0')}.${dt.year} '
+        '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
 
     return Scaffold(
       appBar: AppBar(title: const Text('Детали записи')),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _Row(label: 'Дата', value: dateStr),
-            const SizedBox(height: 10),
-            _Row(label: 'Время', value: timeStr),
-            const Divider(height: 28),
-            _Row(
-              label: 'Авто',
-              value: car == null
-                  ? 'Удалено'
-                  : '${car.brand} ${car.model} (${car.plate})',
+            Text(
+              service?.name ?? 'Услуга удалена',
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
             ),
-            const SizedBox(height: 10),
-            _Row(
-              label: 'Услуга',
-              value: service == null ? 'Удалено' : service.name,
+            const SizedBox(height: 8),
+            Text(dtText),
+            const SizedBox(height: 16),
+            const Text('Авто', style: TextStyle(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 6),
+            Text(car == null ? 'Авто удалено' : '${car.make} ${car.model}'),
+            if (car != null) Text(car.subtitle),
+            const SizedBox(height: 16),
+            const Text(
+              'Стоимость',
+              style: TextStyle(fontWeight: FontWeight.w600),
             ),
-            if (service != null) ...[
-              const SizedBox(height: 10),
-              _Row(label: 'Цена', value: '${service.priceRub} ₽'),
-              const SizedBox(height: 10),
-              _Row(label: 'Длительность', value: '${service.durationMin} мин'),
-            ],
+            const SizedBox(height: 6),
+            Text(service == null ? '—' : '${service.priceRub} ₽'),
             const Spacer(),
-            FilledButton.icon(
-              onPressed: () async {
-                final ok = await showDialog<bool>(
-                  context: context,
-                  builder: (ctx) => AlertDialog(
-                    title: const Text('Удалить запись?'),
-                    content: const Text(
-                      'Запись будет удалена без возможности восстановления.',
-                    ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.of(ctx).pop(false),
-                        child: const Text('Отмена'),
-                      ),
-                      FilledButton(
-                        onPressed: () => Navigator.of(ctx).pop(true),
-                        child: const Text('Удалить'),
-                      ),
-                    ],
-                  ),
-                );
-
-                if (ok == true && context.mounted) {
-                  repo.deleteBooking(b.id);
-                  Navigator.of(context).pop(true);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Запись удалена')),
-                  );
-                }
-              },
-              icon: const Icon(Icons.delete_outline),
-              label: const Text('Удалить запись'),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: () => Navigator.of(context).pop(),
+                icon: const Icon(Icons.arrow_back),
+                label: const Text('Назад'),
+              ),
             ),
           ],
         ),
@@ -100,28 +76,6 @@ class BookingDetailsPage extends StatelessWidget {
   }
 }
 
-class _Row extends StatelessWidget {
-  final String label;
-  final String value;
-
-  const _Row({required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(
-          width: 110,
-          child: Text(
-            label,
-            style: theme.textTheme.bodyMedium?.copyWith(color: Colors.grey),
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(child: Text(value, style: theme.textTheme.titleMedium)),
-      ],
-    );
-  }
+extension _FirstOrNull<T> on List<T> {
+  T? get firstOrNull => isEmpty ? null : first;
 }

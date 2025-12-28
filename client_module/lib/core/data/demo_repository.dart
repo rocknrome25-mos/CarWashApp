@@ -1,23 +1,10 @@
 import '../models/booking.dart';
 import '../models/car.dart';
 import '../models/service.dart';
-
-class BookingDetails {
-  final Booking booking;
-  final Car? car;
-  final Service? service;
-
-  BookingDetails({
-    required this.booking,
-    required this.car,
-    required this.service,
-  });
-}
+import '../utils/normalize.dart';
 
 class DemoRepository {
   final List<Car> _cars = [];
-
-  final Set<String> _protectedServiceIds = {'s1', 's2', 's3'};
 
   final List<Service> _services = [
     const Service(
@@ -55,36 +42,32 @@ class DemoRepository {
     return null;
   }
 
-  Booking? findBooking(String id) {
-    for (final b in _bookings) {
-      if (b.id == id) return b;
-    }
-    return null;
-  }
-
-  BookingDetails? getBookingDetails(String bookingId) {
-    final b = findBooking(bookingId);
-    if (b == null) return null;
-
-    return BookingDetails(
-      booking: b,
-      car: findCar(b.carId),
-      service: findService(b.serviceId),
-    );
+  bool plateExists(String plateNormalized) {
+    final norm = plateNormalized.trim();
+    if (norm.isEmpty) return false;
+    return _cars.any((c) => c.plateNormalized == norm);
   }
 
   void addCar({
-    required String brand,
+    required String make,
     required String model,
     required String plate,
+    int? year,
+    String? color,
+    String? bodyType,
   }) {
     final id = DateTime.now().microsecondsSinceEpoch.toString();
+    final plateNorm = normalizePlate(plate);
     _cars.add(
       Car(
         id: id,
-        brand: brand.trim(),
+        make: make.trim(),
         model: model.trim(),
-        plate: plate.trim().toUpperCase(),
+        plateDisplay: plate.trim().toUpperCase(),
+        plateNormalized: plateNorm,
+        year: year,
+        color: color,
+        bodyType: bodyType,
       ),
     );
   }
@@ -92,31 +75,6 @@ class DemoRepository {
   void deleteCar(String id) {
     _cars.removeWhere((c) => c.id == id);
     _bookings.removeWhere((b) => b.carId == id);
-  }
-
-  bool isServiceProtected(String id) => _protectedServiceIds.contains(id);
-
-  void addService({
-    required String name,
-    required int priceRub,
-    required int durationMin,
-  }) {
-    final id = DateTime.now().microsecondsSinceEpoch.toString();
-    _services.add(
-      Service(
-        id: id,
-        name: name.trim(),
-        priceRub: priceRub,
-        durationMin: durationMin,
-      ),
-    );
-  }
-
-  bool deleteService(String id) {
-    if (isServiceProtected(id)) return false;
-    _services.removeWhere((s) => s.id == id);
-    _bookings.removeWhere((b) => b.serviceId == id);
-    return true;
   }
 
   void addBooking({

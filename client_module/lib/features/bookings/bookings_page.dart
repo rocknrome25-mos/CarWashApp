@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
-
 import '../../core/data/demo_repository.dart';
 import '../../widgets/empty_state.dart';
 import 'booking_details_page.dart';
@@ -21,49 +19,77 @@ class _BookingsPageState extends State<BookingsPage> {
 
     if (bookings.isEmpty) {
       return const EmptyState(
-        icon: Icons.event_available,
-        title: 'Нет записей',
-        subtitle: 'Создай запись через вкладку “Услуги”.',
+        icon: Icons.event_busy,
+        title: 'Пока нет записей',
+        subtitle: 'Создай запись на услугу — она появится здесь.',
       );
     }
 
-    return ListView.separated(
+    return ListView.builder(
       padding: const EdgeInsets.all(12),
       itemCount: bookings.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 8),
       itemBuilder: (context, i) {
         final b = bookings[i];
         final car = widget.repo.findCar(b.carId);
         final service = widget.repo.findService(b.serviceId);
 
-        final dateStr = DateFormat('dd.MM.yyyy').format(b.dateTime);
-        final timeStr = DateFormat('HH:mm').format(b.dateTime);
+        final carTitle = car == null
+            ? 'Авто удалено'
+            : '${car.make} ${car.model} (${car.plateDisplay})';
+        final serviceTitle = service?.name ?? 'Услуга удалена';
 
-        final title = service?.name ?? 'Услуга';
-        final subtitle =
-            '${car == null ? 'Авто удалено' : '${car.brand} ${car.model} (${car.plate})'} • $dateStr $timeStr';
+        final dt = b.dateTime;
+        final dtText =
+            '${dt.day.toString().padLeft(2, '0')}.${dt.month.toString().padLeft(2, '0')}.${dt.year} '
+            '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
 
         return Card(
           child: ListTile(
-            leading: const Icon(Icons.event_note),
-            title: Text(title),
-            subtitle: Text(subtitle),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () async {
-              final changed = await Navigator.of(context).push<bool>(
+            leading: const Icon(Icons.event),
+            title: Text(serviceTitle),
+            subtitle: Text('$carTitle\n$dtText'),
+            isThreeLine: true,
+            onTap: () {
+              Navigator.of(context).push(
                 MaterialPageRoute(
                   builder: (_) =>
                       BookingDetailsPage(repo: widget.repo, bookingId: b.id),
                 ),
               );
-
-              if (changed == true && mounted) {
-                setState(() {});
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Запись обновлена')),
-                );
-              }
             },
+            trailing: IconButton(
+              icon: const Icon(Icons.delete_outline),
+              onPressed: () async {
+                final ok = await showDialog<bool>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: const Text('Удалить запись?'),
+                    content: const Text(
+                      'Запись будет удалена без возможности восстановления.',
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.of(ctx).pop(false),
+                        child: const Text('Отмена'),
+                      ),
+                      FilledButton(
+                        onPressed: () => Navigator.of(ctx).pop(true),
+                        child: const Text('Удалить'),
+                      ),
+                    ],
+                  ),
+                );
+
+                if (ok != true) return;
+
+                widget.repo.deleteBooking(b.id);
+                if (!mounted) return;
+                setState(() {});
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(const SnackBar(content: Text('Запись удалена')));
+              },
+            ),
           ),
         );
       },

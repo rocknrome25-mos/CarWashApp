@@ -25,7 +25,11 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     super.initState();
     final cars = widget.repo.getCars();
     final services = widget.repo.getServices();
-    if (cars.isNotEmpty) carId = cars.first.id;
+
+    if (cars.isNotEmpty) {
+      carId = cars.first.id;
+    }
+
     serviceId =
         widget.preselectedServiceId ??
         (services.isNotEmpty ? services.first.id : null);
@@ -70,6 +74,11 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     final cars = widget.repo.getCars();
     final services = widget.repo.getServices();
 
+    String two(int n) => n.toString().padLeft(2, '0');
+    final dt =
+        '${two(dateTime.day)}.${two(dateTime.month)}.${dateTime.year} '
+        '${two(dateTime.hour)}:${two(dateTime.minute)}';
+
     return Scaffold(
       appBar: AppBar(title: const Text('Создать запись')),
       body: Padding(
@@ -77,16 +86,16 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
         child: Column(
           children: [
             DropdownButtonFormField<String>(
-              initialValue: carId,
+              value: carId,
               decoration: const InputDecoration(
                 labelText: 'Авто',
                 border: OutlineInputBorder(),
               ),
               items: cars
                   .map(
-                    (c) => DropdownMenuItem(
+                    (c) => DropdownMenuItem<String>(
                       value: c.id,
-                      child: Text('${c.brand} ${c.model} (${c.plate})'),
+                      child: Text('${c.make} ${c.model} (${c.plateDisplay})'),
                     ),
                   )
                   .toList(),
@@ -94,14 +103,14 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
             ),
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
-              initialValue: serviceId,
+              value: serviceId,
               decoration: const InputDecoration(
                 labelText: 'Услуга',
                 border: OutlineInputBorder(),
               ),
               items: services
                   .map(
-                    (s) => DropdownMenuItem(
+                    (s) => DropdownMenuItem<String>(
                       value: s.id,
                       child: Text('${s.name} (${s.priceRub} ₽)'),
                     ),
@@ -115,17 +124,14 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
               child: OutlinedButton.icon(
                 onPressed: _pickDateTime,
                 icon: const Icon(Icons.schedule),
-                label: Text(
-                  '${dateTime.day.toString().padLeft(2, '0')}.${dateTime.month.toString().padLeft(2, '0')}.${dateTime.year} '
-                  '${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}',
-                ),
+                label: Text(dt),
               ),
             ),
             const Spacer(),
             SizedBox(
               width: double.infinity,
               child: FilledButton(
-                onPressed: _save,
+                onPressed: (cars.isEmpty || services.isEmpty) ? null : _save,
                 child: const Text('Сохранить'),
               ),
             ),
