@@ -5,8 +5,13 @@ import '../bookings/create_booking_page.dart';
 
 class ServicesPage extends StatelessWidget {
   final DemoRepository repo;
+  final VoidCallback onBookingCreated;
 
-  const ServicesPage({super.key, required this.repo});
+  const ServicesPage({
+    super.key,
+    required this.repo,
+    required this.onBookingCreated,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -41,10 +46,16 @@ class ServicesPage extends StatelessWidget {
                       ),
                     ),
                   );
-                  if (created == true && context.mounted) {
+
+                  if (!context.mounted) return;
+
+                  if (created == true) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(content: Text('Запись создана')),
                     );
+
+                    // ✅ Переключаем tab на "Записи"
+                    onBookingCreated();
                   }
                 },
                 child: const Text('Записаться'),

@@ -17,11 +17,15 @@ class _ClientModuleAppState extends State<ClientModuleApp> {
   final DemoRepository repo = DemoRepository();
   int index = 0;
 
+  void _goToBookings() {
+    setState(() => index = 2); // 0=Авто, 1=Услуги, 2=Записи
+  }
+
   @override
   Widget build(BuildContext context) {
     final pages = <Widget>[
       CarsPage(repo: repo),
-      ServicesPage(repo: repo),
+      ServicesPage(repo: repo, onBookingCreated: _goToBookings),
       BookingsPage(repo: repo),
     ];
 
