@@ -1,0 +1,59 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Car {
+  id              String   @id @default(cuid())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Display (как ввёл пользователь / как показываем в UI)
+  makeDisplay     String
+  modelDisplay    String
+  plateDisplay    String
+
+  // Normalized (для уникальности/отчётов)
+  makeNormalized  String
+  modelNormalized String
+  plateNormalized String @unique
+
+  year            Int?
+  color           String?
+  bodyType        String?
+
+  bookings        Booking[]
+}
+
+model Service {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  name      String
+  priceRub  Int
+
+  bookings  Booking[]
+}
+
+model Booking {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  dateTime  DateTime
+
+  carId     String
+  serviceId String
+
+  car       Car     @relation(fields: [carId], references: [id], onDelete: Cascade)
+  service   Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@index([carId])
+  @@index([serviceId])
+  @@index([dateTime])
+}

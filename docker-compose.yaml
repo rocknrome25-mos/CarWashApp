@@ -1,0 +1,23 @@
+name: carwash
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: carwash-postgres
+    environment:
+      POSTGRES_USER: carwash
+      POSTGRES_PASSWORD: carwash
+      POSTGRES_DB: carwash
+    ports:
+      - "55432:5432"
+    volumes:
+      - carwash_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U carwash -d carwash"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  carwash_pgdata:
