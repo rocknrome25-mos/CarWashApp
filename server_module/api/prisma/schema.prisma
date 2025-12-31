@@ -8,25 +8,25 @@ datasource db {
 }
 
 model Car {
-  id              String   @id @default(cuid())
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Display (как ввёл пользователь / как показываем в UI)
-  makeDisplay     String
-  modelDisplay    String
-  plateDisplay    String
+  makeDisplay  String
+  modelDisplay String
+  plateDisplay String
 
   // Normalized (для уникальности/отчётов)
   makeNormalized  String
   modelNormalized String
   plateNormalized String @unique
 
-  year            Int?
-  color           String?
-  bodyType        String?
+  year     Int?
+  color    String?
+  bodyType String?
 
-  bookings        Booking[]
+  bookings Booking[]
 }
 
 model Service {
@@ -34,10 +34,15 @@ model Service {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  name      String
-  priceRub  Int
+  name     String
+  priceRub Int
 
-  bookings  Booking[]
+  bookings Booking[]
+}
+
+enum BookingStatus {
+  ACTIVE
+  CANCELED
 }
 
 model Booking {
@@ -45,15 +50,19 @@ model Booking {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  dateTime  DateTime
+  dateTime DateTime
+
+  status     BookingStatus @default(ACTIVE)
+  canceledAt DateTime?
 
   carId     String
   serviceId String
 
-  car       Car     @relation(fields: [carId], references: [id], onDelete: Cascade)
-  service   Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  car     Car     @relation(fields: [carId], references: [id], onDelete: Cascade)
+  service Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
 
   @@index([carId])
   @@index([serviceId])
   @@index([dateTime])
+  @@index([status])
 }

@@ -1,0 +1,37 @@
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common';
+import { BookingsService } from './bookings.service';
+
+@Controller('bookings')
+export class BookingsController {
+  constructor(private readonly bookingsService: BookingsService) {}
+
+  // GET /bookings?includeCanceled=true
+  @Get()
+  getAll(@Query('includeCanceled') includeCanceled?: string) {
+    const flag = includeCanceled === '1' || includeCanceled === 'true';
+    return this.bookingsService.findAll(flag);
+  }
+
+  // POST /bookings
+  @Post()
+  create(
+    @Body()
+    body: { carId: string; serviceId: string; dateTime: string },
+  ) {
+    return this.bookingsService.create(body);
+  }
+
+  // DELETE /bookings/:id -> soft cancel
+  @Delete(':id')
+  cancel(@Param('id') id: string) {
+    return this.bookingsService.cancel(id);
+  }
+}
