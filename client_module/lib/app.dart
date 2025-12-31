@@ -4,7 +4,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'core/data/demo_repository.dart';
 import 'features/bookings/bookings_page.dart';
 import 'features/cars/cars_page.dart';
-import 'features/services/services_page.dart';
+import 'screens/services_screen.dart';
 
 class ClientModuleApp extends StatefulWidget {
   const ClientModuleApp({super.key});
@@ -17,15 +17,14 @@ class _ClientModuleAppState extends State<ClientModuleApp> {
   final DemoRepository repo = DemoRepository();
   int index = 0;
 
-  void _goToBookings() {
-    setState(() => index = 2); // 0=Авто, 1=Услуги, 2=Записи
-  }
-
   @override
   Widget build(BuildContext context) {
     final pages = <Widget>[
       CarsPage(repo: repo),
-      ServicesPage(repo: repo, onBookingCreated: _goToBookings),
+
+      // ⬇️ ВАЖНО: вместо ServicesPage используем ServicesScreen
+      const ServicesScreen(),
+
       BookingsPage(repo: repo),
     ];
 
