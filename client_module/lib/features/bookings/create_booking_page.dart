@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
-import '../../core/data/demo_repository.dart';
+import '../../core/data/app_repository.dart';
+import '../../core/models/car.dart';
+import '../../core/models/service.dart';
 
 class CreateBookingPage extends StatefulWidget {
-  final DemoRepository repo;
+  final AppRepository repo;
   final String? preselectedServiceId;
 
   const CreateBookingPage({
@@ -16,23 +18,62 @@ class CreateBookingPage extends StatefulWidget {
 }
 
 class _CreateBookingPageState extends State<CreateBookingPage> {
+  final _formKey = GlobalKey<FormState>();
+
+  List<Car> _cars = const [];
+  List<Service> _services = const [];
+
   String? carId;
   String? serviceId;
   DateTime dateTime = DateTime.now().add(const Duration(hours: 2));
 
+  bool _loading = true;
+  Object? _error;
+
   @override
   void initState() {
     super.initState();
-    final cars = widget.repo.getCars();
-    final services = widget.repo.getServices();
+    _bootstrap();
+  }
 
-    if (cars.isNotEmpty) {
-      carId = cars.first.id;
+  Future<void> _bootstrap() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
+    try {
+      final cars = await widget.repo.getCars();
+      final services = await widget.repo.getServices();
+
+      String? selectedCarId;
+      if (cars.isNotEmpty) selectedCarId = cars.first.id;
+
+      String? selectedServiceId =
+          widget.preselectedServiceId ??
+          (services.isNotEmpty ? services.first.id : null);
+
+      if (widget.preselectedServiceId != null &&
+          !services.any((s) => s.id == widget.preselectedServiceId)) {
+        selectedServiceId = services.isNotEmpty ? services.first.id : null;
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        _cars = cars;
+        _services = services;
+        carId = selectedCarId;
+        serviceId = selectedServiceId;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e;
+        _loading = false;
+      });
     }
-
-    serviceId =
-        widget.preselectedServiceId ??
-        (services.isNotEmpty ? services.first.id : null);
   }
 
   Future<void> _pickDateTime() async {
@@ -44,12 +85,14 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
       lastDate: now.add(const Duration(days: 60)),
       initialDate: dateTime,
     );
+
     if (!mounted || d == null) return;
 
     final t = await showTimePicker(
       context: context,
       initialTime: TimeOfDay.fromDateTime(dateTime),
     );
+
     if (!mounted || t == null) return;
 
     setState(() {
@@ -57,22 +100,65 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     });
   }
 
-  void _save() {
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) return;
     if (carId == null || serviceId == null) return;
 
-    widget.repo.addBooking(
-      carId: carId!,
-      serviceId: serviceId!,
-      dateTime: dateTime,
-    );
+    final messenger = ScaffoldMessenger.of(context);
 
-    Navigator.of(context).pop(true);
+    try {
+      await widget.repo.createBooking(
+        carId: carId!,
+        serviceId: serviceId!,
+        dateTime: dateTime,
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+    } catch (e) {
+      if (!mounted) return;
+      messenger.showSnackBar(SnackBar(content: Text('Ошибка: $e')));
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final cars = widget.repo.getCars();
-    final services = widget.repo.getServices();
+    if (_loading) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Создать запись')),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (_error != null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Создать запись')),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('Error: $_error'),
+                const SizedBox(height: 12),
+                FilledButton(
+                  onPressed: _bootstrap,
+                  child: const Text('Повторить'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    // защита: initialValue должен быть в items
+    final carIds = _cars.map((c) => c.id).toSet();
+    final serviceIds = _services.map((s) => s.id).toSet();
+
+    final safeCarId = (carId != null && carIds.contains(carId)) ? carId : null;
+    final safeServiceId = (serviceId != null && serviceIds.contains(serviceId))
+        ? serviceId
+        : null;
 
     String two(int n) => n.toString().padLeft(2, '0');
     final dt =
@@ -83,59 +169,74 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
       appBar: AppBar(title: const Text('Создать запись')),
       body: Padding(
         padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            DropdownButtonFormField<String>(
-              value: carId,
-              decoration: const InputDecoration(
-                labelText: 'Авто',
-                border: OutlineInputBorder(),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            children: [
+              DropdownButtonFormField<String>(
+                initialValue: safeCarId,
+                decoration: const InputDecoration(
+                  labelText: 'Авто',
+                  border: OutlineInputBorder(),
+                ),
+                items: _cars
+                    .map(
+                      (c) => DropdownMenuItem<String>(
+                        value: c.id,
+                        child: Text('${c.make} ${c.model} (${c.plateDisplay})'),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (v) => setState(() => carId = v),
+                validator: (_) {
+                  if (_cars.isEmpty) return 'Сначала добавь авто';
+                  if (carId == null) return 'Выбери авто';
+                  return null;
+                },
               ),
-              items: cars
-                  .map(
-                    (c) => DropdownMenuItem<String>(
-                      value: c.id,
-                      child: Text('${c.make} ${c.model} (${c.plateDisplay})'),
-                    ),
-                  )
-                  .toList(),
-              onChanged: (v) => setState(() => carId = v),
-            ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              value: serviceId,
-              decoration: const InputDecoration(
-                labelText: 'Услуга',
-                border: OutlineInputBorder(),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: safeServiceId,
+                decoration: const InputDecoration(
+                  labelText: 'Услуга',
+                  border: OutlineInputBorder(),
+                ),
+                items: _services
+                    .map(
+                      (s) => DropdownMenuItem<String>(
+                        value: s.id,
+                        child: Text('${s.name} (${s.priceRub} ₽)'),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (v) => setState(() => serviceId = v),
+                validator: (_) {
+                  if (_services.isEmpty) return 'Нет услуг';
+                  if (serviceId == null) return 'Выбери услугу';
+                  return null;
+                },
               ),
-              items: services
-                  .map(
-                    (s) => DropdownMenuItem<String>(
-                      value: s.id,
-                      child: Text('${s.name} (${s.priceRub} ₽)'),
-                    ),
-                  )
-                  .toList(),
-              onChanged: (v) => setState(() => serviceId = v),
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: _pickDateTime,
-                icon: const Icon(Icons.schedule),
-                label: Text(dt),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _pickDateTime,
+                  icon: const Icon(Icons.schedule),
+                  label: Text(dt),
+                ),
               ),
-            ),
-            const Spacer(),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                onPressed: (cars.isEmpty || services.isEmpty) ? null : _save,
-                child: const Text('Сохранить'),
+              const Spacer(),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: (_cars.isEmpty || _services.isEmpty)
+                      ? null
+                      : _save,
+                  child: const Text('Сохранить'),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

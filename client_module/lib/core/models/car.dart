@@ -23,14 +23,13 @@ class Car {
     required this.model,
     required this.plateDisplay,
     required this.plateNormalized,
-    int? year,
+    this.year,
     String? color,
     String? bodyType,
-  }) : year = year,
-       color = (color == null || color.trim().isEmpty) ? null : color.trim(),
+  }) : color = (color == null || color.trim().isEmpty) ? null : color.trim(),
        bodyType = (bodyType == null || bodyType.trim().isEmpty)
            ? null
-           : bodyType,
+           : bodyType.trim(),
        makeNormalized = normalizeName(make),
        modelNormalized = normalizeName(model);
 
@@ -44,5 +43,32 @@ class Car {
     return parts.isEmpty
         ? plateDisplay
         : '$plateDisplay • ${parts.join(' • ')}';
+  }
+
+  /// ---- API mapping ----
+  /// Backend fields: makeDisplay/modelDisplay/plateDisplay/plateNormalized
+  factory Car.fromJson(Map<String, dynamic> j) {
+    return Car(
+      id: j['id'] as String,
+      make: (j['makeDisplay'] ?? j['make'] ?? '') as String,
+      model: (j['modelDisplay'] ?? j['model'] ?? '') as String,
+      plateDisplay: (j['plateDisplay'] ?? '') as String,
+      plateNormalized: (j['plateNormalized'] ?? '') as String,
+      year: j['year'] as int?,
+      color: j['color'] as String?,
+      bodyType: j['bodyType'] as String?,
+    );
+  }
+
+  Map<String, dynamic> toCreateJson() {
+    // Что ждёт backend на POST /cars
+    return {
+      'makeDisplay': make.trim(),
+      'modelDisplay': model.trim(),
+      'plateDisplay': plateDisplay.trim(),
+      'year': year,
+      'color': color,
+      'bodyType': bodyType,
+    };
   }
 }

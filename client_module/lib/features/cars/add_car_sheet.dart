@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import '../../core/constants/car_catalog.dart';
-import '../../core/data/demo_repository.dart';
+import '../../core/data/app_repository.dart';
 import '../../core/utils/normalize.dart';
 
 class AddCarSheet extends StatefulWidget {
-  final DemoRepository repo;
+  final AppRepository repo;
 
   const AddCarSheet({super.key, required this.repo});
 
@@ -23,6 +23,8 @@ class _AddCarSheetState extends State<AddCarSheet> {
   int? _year;
   String? _bodyType;
 
+  bool _saving = false;
+
   List<String> get _modelsForSelectedMake {
     final make = _makeController.text.trim();
     return kCarModelsByMake[make] ?? const <String>[];
@@ -37,33 +39,39 @@ class _AddCarSheetState extends State<AddCarSheet> {
     super.dispose();
   }
 
-  void _save() {
-    if (!_formKey.currentState!.validate()) return;
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
+    if (_saving) return;
+    setState(() => _saving = true);
+
+    final messenger = ScaffoldMessenger.of(context);
 
     final make = _makeController.text.trim();
     final model = _modelController.text.trim();
     final plate = _plateController.text.trim();
-    final plateNorm = normalizePlate(plate);
 
-    if (widget.repo.plateExists(plateNorm)) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Такой номер уже добавлен')));
-      return;
+    try {
+      await widget.repo.addCar(
+        makeDisplay: make,
+        modelDisplay: model,
+        plateDisplay: plate,
+        year: _year,
+        color: _colorController.text.trim().isEmpty
+            ? null
+            : _colorController.text.trim(),
+        bodyType: _bodyType,
+      );
+
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+    } catch (e) {
+      if (!mounted) return;
+      messenger.showSnackBar(SnackBar(content: Text('Ошибка: $e')));
+      setState(() => _saving = false);
     }
-
-    widget.repo.addCar(
-      make: make,
-      model: model,
-      plate: plate,
-      year: _year,
-      color: _colorController.text.trim().isEmpty
-          ? null
-          : _colorController.text.trim(),
-      bodyType: _bodyType,
-    );
-
-    Navigator.of(context).pop(true);
   }
 
   @override
@@ -88,7 +96,9 @@ class _AddCarSheetState extends State<AddCarSheet> {
                   Autocomplete<String>(
                     optionsBuilder: (value) {
                       final q = value.text.trim().toLowerCase();
-                      if (q.isEmpty) return kCarMakes;
+                      if (q.isEmpty) {
+                        return kCarMakes;
+                      }
                       return kCarMakes.where(
                         (m) => m.toLowerCase().contains(q),
                       );
@@ -118,9 +128,12 @@ class _AddCarSheetState extends State<AddCarSheet> {
                         ),
                         validator: (v) {
                           final s = (v ?? '').trim();
-                          if (s.isEmpty) return 'Укажи марку';
-                          if (!kCarMakes.contains(s))
+                          if (s.isEmpty) {
+                            return 'Укажи марку';
+                          }
+                          if (!kCarMakes.contains(s)) {
                             return 'Выбери марку из списка';
+                          }
                           return null;
                         },
                       );
@@ -131,7 +144,9 @@ class _AddCarSheetState extends State<AddCarSheet> {
                     optionsBuilder: (value) {
                       final list = _modelsForSelectedMake;
                       final q = value.text.trim().toLowerCase();
-                      if (q.isEmpty) return list;
+                      if (q.isEmpty) {
+                        return list;
+                      }
                       return list.where((m) => m.toLowerCase().contains(q));
                     },
                     onSelected: (v) =>
@@ -154,11 +169,16 @@ class _AddCarSheetState extends State<AddCarSheet> {
                         ),
                         validator: (v) {
                           final s = (v ?? '').trim();
-                          if (s.isEmpty) return 'Укажи модель';
+                          if (s.isEmpty) {
+                            return 'Укажи модель';
+                          }
                           final list = _modelsForSelectedMake;
-                          if (list.isEmpty) return 'Сначала выбери марку';
-                          if (!list.contains(s))
+                          if (list.isEmpty) {
+                            return 'Сначала выбери марку';
+                          }
+                          if (!list.contains(s)) {
                             return 'Выбери модель из списка';
+                          }
                           return null;
                         },
                       );
@@ -166,7 +186,7 @@ class _AddCarSheetState extends State<AddCarSheet> {
                   ),
                   const SizedBox(height: 12),
                   DropdownButtonFormField<int>(
-                    value: _year,
+                    initialValue: _year,
                     decoration: const InputDecoration(
                       labelText: 'Год',
                       border: OutlineInputBorder(),
@@ -191,7 +211,7 @@ class _AddCarSheetState extends State<AddCarSheet> {
                   ),
                   const SizedBox(height: 12),
                   DropdownButtonFormField<String>(
-                    value: _bodyType,
+                    initialValue: _bodyType,
                     decoration: const InputDecoration(
                       labelText: 'Кузов',
                       border: OutlineInputBorder(),
@@ -216,9 +236,12 @@ class _AddCarSheetState extends State<AddCarSheet> {
                     ),
                     validator: (v) {
                       final s = (v ?? '').trim();
-                      if (s.isEmpty) return 'Укажи гос номер';
-                      if (normalizePlate(s).isEmpty)
+                      if (s.isEmpty) {
+                        return 'Укажи гос номер';
+                      }
+                      if (normalizePlate(s).isEmpty) {
                         return 'Некорректный номер';
+                      }
                       return null;
                     },
                   ),
@@ -226,8 +249,8 @@ class _AddCarSheetState extends State<AddCarSheet> {
                   SizedBox(
                     width: double.infinity,
                     child: FilledButton(
-                      onPressed: _save,
-                      child: const Text('Сохранить'),
+                      onPressed: _saving ? null : _save,
+                      child: Text(_saving ? 'Сохраняю...' : 'Сохранить'),
                     ),
                   ),
                 ],

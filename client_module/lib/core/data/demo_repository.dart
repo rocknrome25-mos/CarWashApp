@@ -1,9 +1,10 @@
+import '../data/app_repository.dart';
 import '../models/booking.dart';
 import '../models/car.dart';
 import '../models/service.dart';
 import '../utils/normalize.dart';
 
-class DemoRepository {
+class DemoRepository implements AppRepository {
   final List<Car> _cars = [];
 
   final List<Service> _services = [
@@ -24,22 +25,16 @@ class DemoRepository {
 
   final List<Booking> _bookings = [];
 
-  List<Car> getCars() => List.unmodifiable(_cars);
-  List<Service> getServices() => List.unmodifiable(_services);
-  List<Booking> getBookings() => List.unmodifiable(_bookings);
-
-  Car? findCar(String id) {
-    for (final c in _cars) {
-      if (c.id == id) return c;
-    }
-    return null;
+  // ---- SERVICES ----
+  @override
+  Future<List<Service>> getServices({bool forceRefresh = false}) async {
+    return List.unmodifiable(_services);
   }
 
-  Service? findService(String id) {
-    for (final s in _services) {
-      if (s.id == id) return s;
-    }
-    return null;
+  // ---- CARS ----
+  @override
+  Future<List<Car>> getCars({bool forceRefresh = false}) async {
+    return List.unmodifiable(_cars);
   }
 
   bool plateExists(String plateNormalized) {
@@ -48,48 +43,97 @@ class DemoRepository {
     return _cars.any((c) => c.plateNormalized == norm);
   }
 
-  void addCar({
-    required String make,
-    required String model,
-    required String plate,
+  @override
+  Future<Car> addCar({
+    required String makeDisplay,
+    required String modelDisplay,
+    required String plateDisplay,
     int? year,
     String? color,
     String? bodyType,
-  }) {
+  }) async {
     final id = DateTime.now().microsecondsSinceEpoch.toString();
-    final plateNorm = normalizePlate(plate);
-    _cars.add(
-      Car(
-        id: id,
-        make: make.trim(),
-        model: model.trim(),
-        plateDisplay: plate.trim().toUpperCase(),
-        plateNormalized: plateNorm,
-        year: year,
-        color: color,
-        bodyType: bodyType,
-      ),
+    final plateNorm = normalizePlate(plateDisplay);
+
+    final car = Car(
+      id: id,
+      make: makeDisplay.trim(),
+      model: modelDisplay.trim(),
+      plateDisplay: plateDisplay.trim().toUpperCase(),
+      plateNormalized: plateNorm,
+      year: year,
+      color: color,
+      bodyType: bodyType,
     );
+
+    _cars.add(car);
+    return car;
   }
 
-  void deleteCar(String id) {
+  @override
+  Future<void> deleteCar(String id) async {
     _cars.removeWhere((c) => c.id == id);
     _bookings.removeWhere((b) => b.carId == id);
   }
 
-  void addBooking({
+  // ---- BOOKINGS ----
+  @override
+  Future<List<Booking>> getBookings({
+    bool includeCanceled = false,
+    bool forceRefresh = false,
+  }) async {
+    final list = includeCanceled
+        ? _bookings
+        : _bookings.where((b) => b.status == BookingStatus.active).toList();
+
+    return List.unmodifiable(list);
+  }
+
+  @override
+  Future<Booking> createBooking({
     required String carId,
     required String serviceId,
     required DateTime dateTime,
-  }) {
+  }) async {
     final id = DateTime.now().microsecondsSinceEpoch.toString();
-    _bookings.add(
-      Booking(id: id, carId: carId, serviceId: serviceId, dateTime: dateTime),
+
+    final b = Booking(
+      id: id,
+      carId: carId,
+      serviceId: serviceId,
+      dateTime: dateTime,
+      status: BookingStatus.active,
     );
+
+    _bookings.add(b);
     _bookings.sort((a, b) => a.dateTime.compareTo(b.dateTime));
+    return b;
   }
 
-  void deleteBooking(String id) {
-    _bookings.removeWhere((b) => b.id == id);
+  @override
+  Future<Booking> cancelBooking(String id) async {
+    final idx = _bookings.indexWhere((b) => b.id == id);
+    if (idx == -1) {
+      // в демо просто игнор, можно и throw
+      return Booking(
+        id: id,
+        carId: '',
+        serviceId: '',
+        dateTime: DateTime.now(),
+        status: BookingStatus.canceled,
+      );
+    }
+
+    final old = _bookings[idx];
+    final updated = Booking(
+      id: old.id,
+      carId: old.carId,
+      serviceId: old.serviceId,
+      dateTime: old.dateTime,
+      status: BookingStatus.canceled,
+    );
+
+    _bookings[idx] = updated;
+    return updated;
   }
 }

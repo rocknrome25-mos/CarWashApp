@@ -10,4 +10,13 @@ class Service {
     required this.priceRub,
     this.durationMin,
   });
+
+  factory Service.fromJson(Map<String, dynamic> j) {
+    return Service(
+      id: j['id'] as String,
+      name: j['name'] as String,
+      priceRub: j['priceRub'] as int,
+      durationMin: j['durationMin'] as int?,
+    );
+  }
 }

@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
-import 'core/data/demo_repository.dart';
+import 'core/api/api_client.dart';
+import 'core/cache/memory_cache.dart';
+import 'core/data/api_app_repository.dart';
+import 'core/data/app_repository.dart';
+
 import 'features/bookings/bookings_page.dart';
 import 'features/cars/cars_page.dart';
 import 'screens/services_screen.dart';
@@ -14,17 +18,25 @@ class ClientModuleApp extends StatefulWidget {
 }
 
 class _ClientModuleAppState extends State<ClientModuleApp> {
-  final DemoRepository repo = DemoRepository();
+  late final AppRepository repo;
+
   int index = 0;
+
+  @override
+  void initState() {
+    super.initState();
+
+    repo = ApiAppRepository(
+      api: ApiClient(baseUrl: 'http://10.0.2.2:3000'),
+      cache: MemoryCache(),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final pages = <Widget>[
       CarsPage(repo: repo),
-
-      // ⬇️ ВАЖНО: вместо ServicesPage используем ServicesScreen
-      const ServicesScreen(),
-
+      ServicesScreen(repo: repo),
       BookingsPage(repo: repo),
     ];
 
