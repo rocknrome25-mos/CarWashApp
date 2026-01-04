@@ -22,6 +22,13 @@ class _ClientModuleAppState extends State<ClientModuleApp> {
 
   int index = 0;
 
+  // signal: bookings should refresh (after create/cancel/delete car etc.)
+  int bookingsRefreshToken = 0;
+
+  void _notifyBookingChanged() {
+    setState(() => bookingsRefreshToken++);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -36,8 +43,8 @@ class _ClientModuleAppState extends State<ClientModuleApp> {
   Widget build(BuildContext context) {
     final pages = <Widget>[
       CarsPage(repo: repo),
-      ServicesScreen(repo: repo),
-      BookingsPage(repo: repo),
+      ServicesScreen(repo: repo, onBookingCreated: _notifyBookingChanged),
+      BookingsPage(repo: repo, refreshToken: bookingsRefreshToken),
     ];
 
     return MaterialApp(

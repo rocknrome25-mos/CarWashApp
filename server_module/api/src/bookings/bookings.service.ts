@@ -11,15 +11,43 @@ import { BookingStatus } from '@prisma/client';
 export class BookingsService {
   constructor(private prisma: PrismaService) {}
 
+  // Variant A: auto-complete past ACTIVE bookings
+  private async _autoCompletePastActive(): Promise<void> {
+    const now = new Date();
+    await this.prisma.booking.updateMany({
+      where: {
+        status: BookingStatus.ACTIVE,
+        dateTime: { lt: now },
+      },
+      data: {
+        status: BookingStatus.COMPLETED,
+      },
+    });
+  }
+
   async findAll(includeCanceled: boolean) {
+    // ✅ make sure old ACTIVE become COMPLETED
+    await this._autoCompletePastActive();
+
+    // show:
+    // - if includeCanceled = true: ACTIVE + CANCELED + COMPLETED
+    // - else: ACTIVE + COMPLETED (hide only canceled)
+    const where = includeCanceled
+      ? {}
+      : { status: { not: BookingStatus.CANCELED } };
+
     return this.prisma.booking.findMany({
-      where: includeCanceled ? {} : { status: BookingStatus.ACTIVE },
+      where,
       orderBy: { dateTime: 'asc' },
       include: { car: true, service: true },
     });
   }
 
   async create(body: { carId: string; serviceId: string; dateTime: string }) {
+    if (!body || !body.carId || !body.serviceId || !body.dateTime) {
+      throw new BadRequestException('carId, serviceId and dateTime are required');
+    }
+
     // 1) validate date
     const dt = new Date(body.dateTime);
     if (isNaN(dt.getTime())) {
@@ -98,7 +126,7 @@ export class BookingsService {
       return existing;
     }
 
-    // can't cancel past bookings
+    // can't cancel past bookings (Variant A: past should become COMPLETED anyway)
     if (existing.dateTime.getTime() < Date.now()) {
       throw new BadRequestException('Cannot cancel a past booking');
     }

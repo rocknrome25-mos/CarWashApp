@@ -11,12 +11,16 @@ class ApiAppRepository implements AppRepository {
 
   ApiAppRepository({required this.api, required this.cache});
 
+  static const _kServices = 'services';
+  static const _kCars = 'cars';
+  static const _kBookingsAll = 'bookings_all';
+  static const _kBookingsActive = 'bookings_active';
+
   // ---- SERVICES ----
   @override
   Future<List<Service>> getServices({bool forceRefresh = false}) async {
-    const key = 'services';
     if (!forceRefresh) {
-      final cached = cache.get<List<Service>>(key);
+      final cached = cache.get<List<Service>>(_kServices);
       if (cached != null) return cached;
     }
 
@@ -25,16 +29,15 @@ class ApiAppRepository implements AppRepository {
         .map((e) => Service.fromJson(e as Map<String, dynamic>))
         .toList();
 
-    cache.set(key, list, ttl: const Duration(minutes: 2));
+    cache.set(_kServices, list, ttl: const Duration(minutes: 2));
     return list;
   }
 
   // ---- CARS ----
   @override
   Future<List<Car>> getCars({bool forceRefresh = false}) async {
-    const key = 'cars';
     if (!forceRefresh) {
-      final cached = cache.get<List<Car>>(key);
+      final cached = cache.get<List<Car>>(_kCars);
       if (cached != null) return cached;
     }
 
@@ -43,7 +46,7 @@ class ApiAppRepository implements AppRepository {
         .map((e) => Car.fromJson(e as Map<String, dynamic>))
         .toList();
 
-    cache.set(key, list, ttl: const Duration(seconds: 30));
+    cache.set(_kCars, list, ttl: const Duration(seconds: 30));
     return list;
   }
 
@@ -71,17 +74,18 @@ class ApiAppRepository implements AppRepository {
             })
             as Map<String, dynamic>;
 
-    cache.invalidate('cars');
+    cache.invalidate(_kCars);
+    // авто влияет на создание/отображение записей
+    cache.invalidateMany([_kBookingsAll, _kBookingsActive]);
+
     return Car.fromJson(j);
   }
 
   @override
   Future<void> deleteCar(String id) async {
     await api.deleteJson('/cars/$id');
-    cache.invalidate('cars');
-    // на всякий случай — списки записей тоже могли зависеть от авто
-    cache.invalidate('bookings_all');
-    cache.invalidate('bookings_active');
+
+    cache.invalidateMany([_kCars, _kBookingsAll, _kBookingsActive]);
   }
 
   // ---- BOOKINGS ----
@@ -90,7 +94,7 @@ class ApiAppRepository implements AppRepository {
     bool includeCanceled = false,
     bool forceRefresh = false,
   }) async {
-    final key = includeCanceled ? 'bookings_all' : 'bookings_active';
+    final key = includeCanceled ? _kBookingsAll : _kBookingsActive;
 
     if (!forceRefresh) {
       final cached = cache.get<List<Booking>>(key);
@@ -126,8 +130,7 @@ class ApiAppRepository implements AppRepository {
             })
             as Map<String, dynamic>;
 
-    cache.invalidate('bookings_all');
-    cache.invalidate('bookings_active');
+    cache.invalidateMany([_kBookingsAll, _kBookingsActive]);
     return Booking.fromJson(j);
   }
 
@@ -135,8 +138,7 @@ class ApiAppRepository implements AppRepository {
   Future<Booking> cancelBooking(String id) async {
     final j = await api.deleteJson('/bookings/$id') as Map<String, dynamic>;
 
-    cache.invalidate('bookings_all');
-    cache.invalidate('bookings_active');
+    cache.invalidateMany([_kBookingsAll, _kBookingsActive]);
     return Booking.fromJson(j);
   }
 }

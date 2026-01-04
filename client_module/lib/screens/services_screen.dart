@@ -6,8 +6,13 @@ import '../features/bookings/create_booking_page.dart';
 
 class ServicesScreen extends StatefulWidget {
   final AppRepository repo;
+  final VoidCallback onBookingCreated;
 
-  const ServicesScreen({super.key, required this.repo});
+  const ServicesScreen({
+    super.key,
+    required this.repo,
+    required this.onBookingCreated,
+  });
 
   @override
   State<ServicesScreen> createState() => _ServicesScreenState();
@@ -116,6 +121,7 @@ class _ServicesScreenState extends State<ServicesScreen> {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(content: Text('Запись создана')),
                         );
+                        widget.onBookingCreated();
                       }
                     },
                     child: const Text('Записаться'),

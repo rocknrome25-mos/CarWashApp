@@ -8,8 +8,13 @@ import 'booking_details_page.dart';
 
 class BookingsPage extends StatefulWidget {
   final AppRepository repo;
+  final int refreshToken;
 
-  const BookingsPage({super.key, required this.repo});
+  const BookingsPage({
+    super.key,
+    required this.repo,
+    required this.refreshToken,
+  });
 
   @override
   State<BookingsPage> createState() => _BookingsPageState();
@@ -22,6 +27,14 @@ class _BookingsPageState extends State<BookingsPage> {
   void initState() {
     super.initState();
     _future = _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant BookingsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.refreshToken != widget.refreshToken) {
+      _refresh();
+    }
   }
 
   Future<_BookingsBundle> _load({bool forceRefresh = false}) async {
@@ -41,8 +54,23 @@ class _BookingsPageState extends State<BookingsPage> {
     );
   }
 
-  void _refresh() {
-    setState(() => _future = _load(forceRefresh: true));
+  void _refresh() => setState(() => _future = _load(forceRefresh: true));
+
+  String _dateKey(DateTime dt) =>
+      '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
+
+  String _dateHeader(DateTime dt) =>
+      '${dt.day.toString().padLeft(2, '0')}.${dt.month.toString().padLeft(2, '0')}.${dt.year}';
+
+  String _timeText(DateTime dt) =>
+      '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+
+  Widget _statusChip(BookingStatus status) {
+    final isCanceled = status == BookingStatus.canceled;
+    return Chip(
+      label: Text(isCanceled ? 'ОТМЕНЕНА' : 'АКТИВНА'),
+      side: BorderSide.none,
+    );
   }
 
   @override
@@ -74,7 +102,7 @@ class _BookingsPageState extends State<BookingsPage> {
         }
 
         final data = snapshot.data!;
-        final bookings = data.bookings;
+        final bookings = [...data.bookings];
 
         if (bookings.isEmpty) {
           return const EmptyState(
@@ -84,16 +112,47 @@ class _BookingsPageState extends State<BookingsPage> {
           );
         }
 
+        // sort newest first
+        bookings.sort((a, b) => b.dateTime.compareTo(a.dateTime));
+
         final carsById = {for (final c in data.cars) c.id: c};
         final servicesById = {for (final s in data.services) s.id: s};
+
+        // build grouped rows
+        final rows = <_Row>[];
+        String? currentDay;
+
+        for (final b in bookings) {
+          final day = _dateKey(b.dateTime);
+          if (day != currentDay) {
+            currentDay = day;
+            rows.add(_Row.header(_dateHeader(b.dateTime)));
+          }
+          rows.add(_Row.booking(b));
+        }
 
         return RefreshIndicator(
           onRefresh: () async => _refresh(),
           child: ListView.builder(
             padding: const EdgeInsets.all(12),
-            itemCount: bookings.length,
+            itemCount: rows.length,
             itemBuilder: (context, i) {
-              final b = bookings[i];
+              final row = rows[i];
+
+              if (row.kind == _RowKind.header) {
+                return Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 14, 8, 6),
+                  child: Text(
+                    row.headerText!,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                );
+              }
+
+              final b = row.booking!;
               final car = carsById[b.carId];
               final service = servicesById[b.serviceId];
 
@@ -101,22 +160,15 @@ class _BookingsPageState extends State<BookingsPage> {
                   ? 'Авто удалено'
                   : '${car.make} ${car.model} (${car.plateDisplay})';
               final serviceTitle = service?.name ?? 'Услуга удалена';
-
-              final dt = b.dateTime;
-              final dtText =
-                  '${dt.day.toString().padLeft(2, '0')}.${dt.month.toString().padLeft(2, '0')}.${dt.year} '
-                  '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
-
-              final statusText = (b.status == BookingStatus.canceled)
-                  ? 'ОТМЕНЕНА'
-                  : 'АКТИВНА';
+              final timeText = _timeText(b.dateTime);
 
               return Card(
                 child: ListTile(
                   leading: const Icon(Icons.event),
                   title: Text(serviceTitle),
-                  subtitle: Text('$carTitle\n$dtText\n$statusText'),
+                  subtitle: Text('$carTitle\n$timeText'),
                   isThreeLine: true,
+                  trailing: _statusChip(b.status),
                   onTap: () async {
                     await Navigator.of(context).push(
                       MaterialPageRoute(
@@ -149,4 +201,16 @@ class _BookingsBundle {
     required this.cars,
     required this.services,
   });
+}
+
+enum _RowKind { header, booking }
+
+class _Row {
+  final _RowKind kind;
+  final String? headerText;
+  final Booking? booking;
+
+  _Row.header(this.headerText) : kind = _RowKind.header, booking = null;
+
+  _Row.booking(this.booking) : kind = _RowKind.booking, headerText = null;
 }

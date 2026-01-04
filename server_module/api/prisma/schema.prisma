@@ -12,12 +12,10 @@ model Car {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // Display (как ввёл пользователь / как показываем в UI)
   makeDisplay  String
   modelDisplay String
   plateDisplay String
 
-  // Normalized (для уникальности/отчётов)
   makeNormalized  String
   modelNormalized String
   plateNormalized String @unique
@@ -43,6 +41,7 @@ model Service {
 enum BookingStatus {
   ACTIVE
   CANCELED
+  COMPLETED
 }
 
 model Booking {

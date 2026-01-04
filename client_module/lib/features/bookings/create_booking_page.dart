@@ -25,6 +25,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
   String? carId;
   String? serviceId;
+
   DateTime dateTime = DateTime.now().add(const Duration(hours: 2));
 
   bool _loading = true;
@@ -33,7 +34,14 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
   @override
   void initState() {
     super.initState();
+    dateTime = _roundTo15(dateTime);
     _bootstrap();
+  }
+
+  DateTime _roundTo15(DateTime dt) {
+    final minutes = (dt.minute / 15).round() * 15;
+    final base = DateTime(dt.year, dt.month, dt.day, dt.hour, 0);
+    return base.add(Duration(minutes: minutes));
   }
 
   Future<void> _bootstrap() async {
@@ -53,6 +61,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
           widget.preselectedServiceId ??
           (services.isNotEmpty ? services.first.id : null);
 
+      // if preselected service not found -> fallback
       if (widget.preselectedServiceId != null &&
           !services.any((s) => s.id == widget.preselectedServiceId)) {
         selectedServiceId = services.isNotEmpty ? services.first.id : null;
@@ -96,7 +105,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     if (!mounted || t == null) return;
 
     setState(() {
-      dateTime = DateTime(d.year, d.month, d.day, t.hour, t.minute);
+      dateTime = _roundTo15(DateTime(d.year, d.month, d.day, t.hour, t.minute));
     });
   }
 
@@ -105,6 +114,16 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     if (carId == null || serviceId == null) return;
 
     final messenger = ScaffoldMessenger.of(context);
+
+    // бизнес-валидация времени
+    final now = DateTime.now();
+    final minAllowed = now.add(const Duration(minutes: 30));
+    if (dateTime.isBefore(minAllowed)) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Выбери время минимум через 30 минут')),
+      );
+      return;
+    }
 
     try {
       await widget.repo.createBooking(

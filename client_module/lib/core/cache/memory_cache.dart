@@ -28,5 +28,12 @@ class MemoryCache {
   }
 
   void invalidate(String key) => _map.remove(key);
+
+  void invalidateMany(Iterable<String> keys) {
+    for (final k in keys) {
+      _map.remove(k);
+    }
+  }
+
   void clear() => _map.clear();
 }

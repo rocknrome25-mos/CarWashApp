@@ -20,6 +20,7 @@ class BookingDetailsPage extends StatefulWidget {
 
 class _BookingDetailsPageState extends State<BookingDetailsPage> {
   late Future<_Details> _future;
+  bool _canceling = false;
 
   @override
   void initState() {
@@ -27,12 +28,12 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
     _future = _load();
   }
 
-  Future<_Details> _load() async {
-    final bookings = await widget.repo.getBookings();
+  Future<_Details> _load({bool forceRefresh = false}) async {
+    final bookings = await widget.repo.getBookings(forceRefresh: forceRefresh);
     final booking = bookings.where((b) => b.id == widget.bookingId).firstOrNull;
 
-    final cars = await widget.repo.getCars();
-    final services = await widget.repo.getServices();
+    final cars = await widget.repo.getCars(forceRefresh: forceRefresh);
+    final services = await widget.repo.getServices(forceRefresh: forceRefresh);
 
     final car = booking == null
         ? null
@@ -48,6 +49,64 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
   String _dtText(DateTime dt) {
     String two(int n) => n.toString().padLeft(2, '0');
     return '${two(dt.day)}.${two(dt.month)}.${dt.year} ${two(dt.hour)}:${two(dt.minute)}';
+  }
+
+  Widget _statusChip(BookingStatus status) {
+    final isCanceled = status == BookingStatus.canceled;
+    return Chip(
+      label: Text(isCanceled ? 'ОТМЕНЕНА' : 'АКТИВНА'),
+      side: BorderSide.none,
+    );
+  }
+
+  Future<void> _confirmAndCancel(String bookingId) async {
+    if (_canceling) return;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Отменить запись?'),
+        content: const Text('Запись будет помечена как отменённая.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Нет'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Отменить'),
+          ),
+        ],
+      ),
+    );
+
+    if (!mounted) return;
+    if (ok != true) return;
+
+    setState(() => _canceling = true);
+
+    final messenger = ScaffoldMessenger.of(context);
+
+    try {
+      await widget.repo.cancelBooking(bookingId);
+      if (!mounted) return;
+
+      messenger.showSnackBar(const SnackBar(content: Text('Запись отменена')));
+
+      // force refresh details
+      setState(() {
+        _canceling = false;
+        _future = _load(forceRefresh: true);
+      });
+
+      // return "changed" to previous screen (optional but useful)
+      // ignore: use_build_context_synchronously
+      Navigator.of(context).pop(true);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _canceling = false);
+      messenger.showSnackBar(SnackBar(content: Text('Ошибка: $e')));
+    }
   }
 
   @override
@@ -71,7 +130,8 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                     Text('Error: ${snapshot.error}'),
                     const SizedBox(height: 12),
                     FilledButton(
-                      onPressed: () => setState(() => _future = _load()),
+                      onPressed: () =>
+                          setState(() => _future = _load(forceRefresh: true)),
                       child: const Text('Повторить'),
                     ),
                   ],
@@ -90,6 +150,8 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
           final car = data?.car;
           final service = data?.service;
 
+          final isCanceled = booking.status == BookingStatus.canceled;
+
           return Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -104,6 +166,8 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                 ),
                 const SizedBox(height: 8),
                 Text(_dtText(booking.dateTime)),
+                const SizedBox(height: 8),
+                _statusChip(booking.status),
                 const SizedBox(height: 16),
                 const Text(
                   'Авто',
@@ -120,6 +184,21 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                 const SizedBox(height: 6),
                 Text(service == null ? '—' : '${service.priceRub} ₽'),
                 const Spacer(),
+
+                // Cancel button
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: (isCanceled || _canceling)
+                        ? null
+                        : () => _confirmAndCancel(booking.id),
+                    icon: const Icon(Icons.cancel_outlined),
+                    label: Text(_canceling ? 'Отменяю...' : 'Отменить запись'),
+                  ),
+                ),
+                const SizedBox(height: 10),
+
+                // Back button
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton.icon(
