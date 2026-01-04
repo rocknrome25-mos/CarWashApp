@@ -29,7 +29,10 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
   }
 
   Future<_Details> _load({bool forceRefresh = false}) async {
-    final bookings = await widget.repo.getBookings(forceRefresh: forceRefresh);
+    final bookings = await widget.repo.getBookings(
+      includeCanceled: true,
+      forceRefresh: forceRefresh,
+    );
     final booking = bookings.where((b) => b.id == widget.bookingId).firstOrNull;
 
     final cars = await widget.repo.getCars(forceRefresh: forceRefresh);
@@ -52,11 +55,14 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
   }
 
   Widget _statusChip(BookingStatus status) {
-    final isCanceled = status == BookingStatus.canceled;
-    return Chip(
-      label: Text(isCanceled ? 'ОТМЕНЕНА' : 'АКТИВНА'),
-      side: BorderSide.none,
-    );
+    switch (status) {
+      case BookingStatus.canceled:
+        return const Chip(label: Text('ОТМЕНЕНА'), side: BorderSide.none);
+      case BookingStatus.completed:
+        return const Chip(label: Text('ЗАВЕРШЕНА'), side: BorderSide.none);
+      case BookingStatus.active:
+        return const Chip(label: Text('АКТИВНА'), side: BorderSide.none);
+    }
   }
 
   Future<void> _confirmAndCancel(String bookingId) async {
@@ -93,13 +99,11 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
 
       messenger.showSnackBar(const SnackBar(content: Text('Запись отменена')));
 
-      // force refresh details
       setState(() {
         _canceling = false;
         _future = _load(forceRefresh: true);
       });
 
-      // return "changed" to previous screen (optional but useful)
       // ignore: use_build_context_synchronously
       Navigator.of(context).pop(true);
     } catch (e) {
@@ -151,6 +155,8 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
           final service = data?.service;
 
           final isCanceled = booking.status == BookingStatus.canceled;
+          final isCompleted = booking.status == BookingStatus.completed;
+          final canCancel = !(isCanceled || isCompleted);
 
           return Padding(
             padding: const EdgeInsets.all(16),
@@ -189,9 +195,9 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton.icon(
-                    onPressed: (isCanceled || _canceling)
-                        ? null
-                        : () => _confirmAndCancel(booking.id),
+                    onPressed: (canCancel && !_canceling)
+                        ? () => _confirmAndCancel(booking.id)
+                        : null,
                     icon: const Icon(Icons.cancel_outlined),
                     label: Text(_canceling ? 'Отменяю...' : 'Отменить запись'),
                   ),

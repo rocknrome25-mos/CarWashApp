@@ -6,11 +6,13 @@ import '../features/bookings/create_booking_page.dart';
 
 class ServicesScreen extends StatefulWidget {
   final AppRepository repo;
+  final int refreshToken;
   final VoidCallback onBookingCreated;
 
   const ServicesScreen({
     super.key,
     required this.repo,
+    required this.refreshToken,
     required this.onBookingCreated,
   });
 
@@ -27,6 +29,14 @@ class _ServicesScreenState extends State<ServicesScreen> {
     _future = _load();
   }
 
+  @override
+  void didUpdateWidget(covariant ServicesScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.refreshToken != widget.refreshToken) {
+      _refreshSync(force: true);
+    }
+  }
+
   Future<_ServicesBundle> _load({bool forceRefresh = false}) async {
     final results = await Future.wait([
       widget.repo.getCars(forceRefresh: forceRefresh),
@@ -39,7 +49,18 @@ class _ServicesScreenState extends State<ServicesScreen> {
     );
   }
 
-  void _refresh() => setState(() => _future = _load(forceRefresh: true));
+  void _refreshSync({bool force = true}) {
+    setState(() {
+      _future = _load(forceRefresh: force);
+    });
+  }
+
+  Future<void> _pullToRefresh() async {
+    _refreshSync(force: true);
+    try {
+      await _future;
+    } catch (_) {}
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -60,7 +81,7 @@ class _ServicesScreenState extends State<ServicesScreen> {
                   Text('Ошибка: ${snapshot.error}'),
                   const SizedBox(height: 12),
                   FilledButton(
-                    onPressed: _refresh,
+                    onPressed: () => _refreshSync(force: true),
                     child: const Text('Повторить'),
                   ),
                 ],
@@ -89,7 +110,7 @@ class _ServicesScreenState extends State<ServicesScreen> {
         }
 
         return RefreshIndicator(
-          onRefresh: () async => _refresh(),
+          onRefresh: _pullToRefresh,
           child: ListView.builder(
             padding: const EdgeInsets.all(12),
             itemCount: services.length,
@@ -121,7 +142,9 @@ class _ServicesScreenState extends State<ServicesScreen> {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(content: Text('Запись создана')),
                         );
-                        widget.onBookingCreated();
+
+                        widget.onBookingCreated(); // обновить вкладку "Записи"
+                        _refreshSync(force: true); // и услуги/машины освежить
                       }
                     },
                     child: const Text('Записаться'),

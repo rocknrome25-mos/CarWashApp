@@ -1,3 +1,6 @@
+import 'dart:io' show Platform;
+
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
@@ -22,19 +25,28 @@ class _ClientModuleAppState extends State<ClientModuleApp> {
 
   int index = 0;
 
-  // signal: bookings should refresh (after create/cancel/delete car etc.)
-  int bookingsRefreshToken = 0;
+  /// Общий триггер обновлений для вкладок Services/Bookings.
+  int refreshToken = 0;
 
-  void _notifyBookingChanged() {
-    setState(() => bookingsRefreshToken++);
+  String _resolveBaseUrl() {
+    // Web
+    if (kIsWeb) return 'http://localhost:3000';
+
+    // Android Emulator -> host machine
+    if (Platform.isAndroid) return 'http://10.0.2.2:3000';
+
+    // Windows/macOS/Linux desktop
+    return 'http://localhost:3000';
   }
+
+  void _bumpRefresh() => setState(() => refreshToken++);
 
   @override
   void initState() {
     super.initState();
 
     repo = ApiAppRepository(
-      api: ApiClient(baseUrl: 'http://10.0.2.2:3000'),
+      api: ApiClient(baseUrl: _resolveBaseUrl()),
       cache: MemoryCache(),
     );
   }
@@ -43,8 +55,12 @@ class _ClientModuleAppState extends State<ClientModuleApp> {
   Widget build(BuildContext context) {
     final pages = <Widget>[
       CarsPage(repo: repo),
-      ServicesScreen(repo: repo, onBookingCreated: _notifyBookingChanged),
-      BookingsPage(repo: repo, refreshToken: bookingsRefreshToken),
+      ServicesScreen(
+        repo: repo,
+        refreshToken: refreshToken,
+        onBookingCreated: _bumpRefresh,
+      ),
+      BookingsPage(repo: repo, refreshToken: refreshToken),
     ];
 
     return MaterialApp(

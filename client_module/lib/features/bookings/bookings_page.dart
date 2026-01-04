@@ -33,7 +33,7 @@ class _BookingsPageState extends State<BookingsPage> {
   void didUpdateWidget(covariant BookingsPage oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.refreshToken != widget.refreshToken) {
-      _refresh();
+      _refreshSync(force: true);
     }
   }
 
@@ -54,7 +54,20 @@ class _BookingsPageState extends State<BookingsPage> {
     );
   }
 
-  void _refresh() => setState(() => _future = _load(forceRefresh: true));
+  void _refreshSync({bool force = true}) {
+    setState(() {
+      _future = _load(forceRefresh: force);
+    });
+  }
+
+  Future<void> _pullToRefresh() async {
+    _refreshSync(force: true);
+    try {
+      await _future;
+    } catch (_) {
+      // FutureBuilder покажет ошибку сам
+    }
+  }
 
   String _dateKey(DateTime dt) =>
       '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
@@ -66,11 +79,14 @@ class _BookingsPageState extends State<BookingsPage> {
       '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
 
   Widget _statusChip(BookingStatus status) {
-    final isCanceled = status == BookingStatus.canceled;
-    return Chip(
-      label: Text(isCanceled ? 'ОТМЕНЕНА' : 'АКТИВНА'),
-      side: BorderSide.none,
-    );
+    switch (status) {
+      case BookingStatus.canceled:
+        return const Chip(label: Text('ОТМЕНЕНА'), side: BorderSide.none);
+      case BookingStatus.completed:
+        return const Chip(label: Text('ЗАВЕРШЕНА'), side: BorderSide.none);
+      case BookingStatus.active:
+        return const Chip(label: Text('АКТИВНА'), side: BorderSide.none);
+    }
   }
 
   @override
@@ -92,7 +108,7 @@ class _BookingsPageState extends State<BookingsPage> {
                   Text('Ошибка: ${snapshot.error}'),
                   const SizedBox(height: 12),
                   FilledButton(
-                    onPressed: _refresh,
+                    onPressed: () => _refreshSync(force: true),
                     child: const Text('Повторить'),
                   ),
                 ],
@@ -112,27 +128,30 @@ class _BookingsPageState extends State<BookingsPage> {
           );
         }
 
-        // sort newest first
-        bookings.sort((a, b) => b.dateTime.compareTo(a.dateTime));
+        // сортируем по локальному времени (чтобы "сегодня/вчера" не съезжало)
+        bookings.sort(
+          (a, b) => b.dateTime.toLocal().compareTo(a.dateTime.toLocal()),
+        );
 
         final carsById = {for (final c in data.cars) c.id: c};
         final servicesById = {for (final s in data.services) s.id: s};
 
-        // build grouped rows
         final rows = <_Row>[];
         String? currentDay;
 
         for (final b in bookings) {
-          final day = _dateKey(b.dateTime);
+          final localDt = b.dateTime.toLocal();
+          final day = _dateKey(localDt);
+
           if (day != currentDay) {
             currentDay = day;
-            rows.add(_Row.header(_dateHeader(b.dateTime)));
+            rows.add(_Row.header(_dateHeader(localDt)));
           }
           rows.add(_Row.booking(b));
         }
 
         return RefreshIndicator(
-          onRefresh: () async => _refresh(),
+          onRefresh: _pullToRefresh,
           child: ListView.builder(
             padding: const EdgeInsets.all(12),
             itemCount: rows.length,
@@ -160,7 +179,9 @@ class _BookingsPageState extends State<BookingsPage> {
                   ? 'Авто удалено'
                   : '${car.make} ${car.model} (${car.plateDisplay})';
               final serviceTitle = service?.name ?? 'Услуга удалена';
-              final timeText = _timeText(b.dateTime);
+
+              final localDt = b.dateTime.toLocal();
+              final timeText = _timeText(localDt);
 
               return Card(
                 child: ListTile(
@@ -179,7 +200,7 @@ class _BookingsPageState extends State<BookingsPage> {
                       ),
                     );
                     if (!mounted) return;
-                    _refresh();
+                    _refreshSync(force: true);
                   },
                 ),
               );

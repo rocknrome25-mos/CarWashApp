@@ -96,9 +96,13 @@ class DemoRepository implements AppRepository {
     required DateTime dateTime,
   }) async {
     final id = DateTime.now().microsecondsSinceEpoch.toString();
+    final now = DateTime.now();
 
     final b = Booking(
       id: id,
+      createdAt: now,
+      updatedAt: now,
+      canceledAt: null,
       carId: carId,
       serviceId: serviceId,
       dateTime: dateTime,
@@ -113,13 +117,18 @@ class DemoRepository implements AppRepository {
   @override
   Future<Booking> cancelBooking(String id) async {
     final idx = _bookings.indexWhere((b) => b.id == id);
+    final now = DateTime.now();
+
     if (idx == -1) {
       // в демо просто игнор, можно и throw
       return Booking(
         id: id,
+        createdAt: now,
+        updatedAt: now,
+        canceledAt: now,
         carId: '',
         serviceId: '',
-        dateTime: DateTime.now(),
+        dateTime: now,
         status: BookingStatus.canceled,
       );
     }
@@ -127,6 +136,9 @@ class DemoRepository implements AppRepository {
     final old = _bookings[idx];
     final updated = Booking(
       id: old.id,
+      createdAt: old.createdAt,
+      updatedAt: now,
+      canceledAt: now,
       carId: old.carId,
       serviceId: old.serviceId,
       dateTime: old.dateTime,
