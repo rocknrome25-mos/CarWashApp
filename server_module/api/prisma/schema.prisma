@@ -34,7 +34,7 @@ model Service {
 
   name        String
   priceRub    Int
-  durationMin Int   // 👈 временно optional
+  durationMin Int      @default(30)  // ✅ дефолт на уровне БД
 
   bookings Booking[]
 }

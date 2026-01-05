@@ -1,6 +1,9 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
+/// A clean API exception designed for UI.
+/// - message: already humanized (Russian-friendly) when possible
+/// - details/raw: kept for debugging if you want
 class ApiException implements Exception {
   final int statusCode;
   final String message;
@@ -14,7 +17,8 @@ class ApiException implements Exception {
   ApiException(this.statusCode, this.message, {this.details, this.raw});
 
   @override
-  String toString() => 'ApiException($statusCode): $message';
+  // IMPORTANT: do not include statusCode here, so `$e` won't print "409" in UI
+  String toString() => message;
 }
 
 class ApiClient {
@@ -53,9 +57,7 @@ class ApiClient {
 
     // OK
     if (res.statusCode >= 200 && res.statusCode < 300) {
-      if (!isJson) {
-        return text;
-      }
+      if (!isJson) return text;
       return text.isEmpty ? null : jsonDecode(text);
     }
 
@@ -63,18 +65,18 @@ class ApiClient {
     Object? details;
     String? raw = text.isEmpty ? null : text;
 
+    // Start with default message by status
     String msg = _defaultMessageForStatus(res.statusCode);
 
+    // Try to parse JSON error shape (NestJS typical: {statusCode, message, error})
     if (isJson && text.isNotEmpty) {
       try {
         final j = jsonDecode(text);
         details = j;
 
-        // NestJS typical: { statusCode, message, error }
         if (j is Map) {
           final m = j['message'];
 
-          // message could be string OR list
           if (m is String && m.trim().isNotEmpty) {
             msg = m.trim();
           } else if (m is List && m.isNotEmpty) {
@@ -87,13 +89,14 @@ class ApiClient {
           msg = j.toString();
         }
       } catch (_) {
-        // bad JSON -> keep defaults
+        // bad JSON -> fallback to raw/default
         msg = raw ?? msg;
       }
     } else if (text.isNotEmpty) {
       msg = text;
     }
 
+    // Humanize backend tech text -> RU UI
     msg = _humanizeMessage(res.statusCode, msg);
 
     throw ApiException(res.statusCode, msg, details: details, raw: raw);
@@ -125,24 +128,37 @@ class ApiClient {
   String _humanizeMessage(int code, String msg) {
     final m = msg.toLowerCase();
 
-    // --- based on your real backend messages ---
+    // --- business / domain mapping ---
 
-    // 409 on car delete
+    // Car delete forbidden due to active bookings
     if (code == 409 &&
-        m.contains('cannot delete car') &&
-        m.contains('active')) {
-      return 'Нельзя удалить авто: есть активные записи. Сначала отмените запись.';
+        (m.contains('cannot delete car') ||
+            (m.contains('delete') && m.contains('car'))) &&
+        (m.contains('active') || m.contains('booking'))) {
+      return 'Нельзя удалить авто: есть активные записи. Сначала отмените записи.';
     }
 
-    // 400 on cancel past booking
+    // Booking cancel: past booking
     if ((code == 400 || code == 422) &&
-        m.contains('cannot cancel a past booking')) {
+        (m.contains('cannot cancel a past booking') ||
+            (m.contains('cannot cancel') && m.contains('past')))) {
       return 'Нельзя отменить прошедшую запись.';
     }
 
-    // slot occupied (we will refine when you show exact message)
+    // Booking cancel: completed booking
+    if (code == 409 &&
+        (m.contains('completed booking') ||
+            (m.contains('cannot cancel') && m.contains('completed')))) {
+      return 'Нельзя отменить завершённую запись.';
+    }
+
+    // Slot occupied / conflict
     if (code == 409) {
-      if (m.contains('slot') || m.contains('busy') || m.contains('занят')) {
+      if (m.contains('slot') ||
+          m.contains('busy') ||
+          m.contains('already booked') ||
+          m.contains('занят') ||
+          m.contains('время уже занято')) {
         return 'Выбранное время уже занято. Выбери другой слот.';
       }
       if (m.contains('duplicate') || m.contains('unique')) {
@@ -151,23 +167,21 @@ class ApiClient {
       return 'Конфликт: данные изменились. Обнови список и попробуй снова.';
     }
 
+    // Not found mapping
     if (code == 404) {
-      if (m.contains('car')) {
-        return 'Авто не найдено (возможно, удалено).';
-      }
-      if (m.contains('service')) {
+      if (m.contains('booking')) return 'Запись не найдена.';
+      if (m.contains('car')) return 'Авто не найдено (возможно, удалено).';
+      if (m.contains('service'))
         return 'Услуга не найдена (возможно, удалена).';
-      }
-      if (m.contains('booking')) {
-        return 'Запись не найдена.';
-      }
       return 'Ресурс не найден.';
     }
 
+    // Validation / bad request mapping
     if (code == 400 || code == 422) {
       if (m.contains('date') || m.contains('time') || m.contains('datetime')) {
         return 'Некорректная дата/время. Проверь и попробуй снова.';
       }
+      // Keep backend message if it's already decent
       return msg;
     }
 

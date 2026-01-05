@@ -25,11 +25,11 @@ export class BookingsService {
   }
 
   private _serviceDurationOrDefault(durationMin?: number | null) {
-    // дефолт, если durationMin не задан в БД
+    // на всякий случай, но после @default(30) в БД почти не нужен
     return typeof durationMin === 'number' && durationMin > 0 ? durationMin : 30;
   }
 
-  // ✅ auto-complete: помечаем COMPLETED только те, которые уже точно закончились (end < now)
+  // ✅ auto-complete: COMPLETED только если услуга уже закончилась (end < now)
   private async _autoCompletePastActive(): Promise<void> {
     const now = new Date();
 
@@ -88,9 +88,9 @@ export class BookingsService {
     }
 
     // запретим создавать в прошлом (с небольшой форой)
-    const now = Date.now();
+    const nowMs = Date.now();
     const graceMs = 30 * 1000;
-    if (dt.getTime() < now - graceMs) {
+    if (dt.getTime() < nowMs - graceMs) {
       throw new BadRequestException('Cannot create booking in the past');
     }
 
@@ -107,18 +107,15 @@ export class BookingsService {
     const newStart = dt;
     const newEnd = this._end(newStart, newDur);
 
-    // Чтобы проверять пересечения, берём все активные брони “поблизости”.
-    // Для простоты: за тот же день (обычно достаточно).
-    const startOfDay = new Date(newStart);
-    startOfDay.setHours(0, 0, 0, 0);
+    // ✅ Чтобы не пропускать пересечения около полуночи,
+    // берём окно пошире вокруг новой записи (±1 день).
+    const windowStart = new Date(newStart.getTime() - 24 * 60 * 60 * 1000);
+    const windowEnd = new Date(newEnd.getTime() + 24 * 60 * 60 * 1000);
 
-    const endOfDay = new Date(newStart);
-    endOfDay.setHours(23, 59, 59, 999);
-
-    const activeThatDay = await this.prisma.booking.findMany({
+    const activeNearby = await this.prisma.booking.findMany({
       where: {
         status: BookingStatus.ACTIVE,
-        dateTime: { gte: startOfDay, lte: endOfDay },
+        dateTime: { gte: windowStart, lte: windowEnd },
       },
       select: {
         id: true,
@@ -129,7 +126,7 @@ export class BookingsService {
     });
 
     // 1) Любая активная бронь пересекает интервал? -> слот занят
-    const anyOverlap = activeThatDay.find((b) => {
+    const anyOverlap = activeNearby.find((b) => {
       const dur = this._serviceDurationOrDefault(b.service?.durationMin);
       const bStart = b.dateTime;
       const bEnd = this._end(bStart, dur);
@@ -139,8 +136,8 @@ export class BookingsService {
       throw new ConflictException('Selected time slot is already booked');
     }
 
-    // 2) Эта машина пересекается по времени? (если завтра добавишь “несколько дорожек”, это останется полезным)
-    const carOverlap = activeThatDay.find((b) => {
+    // 2) Эта машина пересекается по времени?
+    const carOverlap = activeNearby.find((b) => {
       if (b.carId !== body.carId) return false;
       const dur = this._serviceDurationOrDefault(b.service?.durationMin);
       const bStart = b.dateTime;
@@ -165,17 +162,32 @@ export class BookingsService {
   async cancel(id: string) {
     await this._autoCompletePastActive();
 
-    const existing = await this.prisma.booking.findUnique({ where: { id } });
-    if (!existing) throw new NotFoundException('Booking not found');
+    // ✅ тут важно взять service.durationMin, чтобы решить “завершено или нет”
+    const existing = await this.prisma.booking.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        status: true,
+        dateTime: true,
+        service: { select: { durationMin: true } },
+      },
+    });
 
+    if (!existing) throw new NotFoundException('Booking not found');
     if (existing.status === BookingStatus.CANCELED) return existing;
 
-    if (existing.status === BookingStatus.COMPLETED) {
+    const dur = this._serviceDurationOrDefault(existing.service?.durationMin);
+    const end = this._end(existing.dateTime, dur);
+    const now = new Date();
+
+    // ✅ если уже закончилось — это COMPLETED (и отменять нельзя)
+    if (end.getTime() <= now.getTime() || existing.status === BookingStatus.COMPLETED) {
       throw new ConflictException('Cannot cancel a completed booking');
     }
 
-    if (existing.dateTime.getTime() < Date.now()) {
-      throw new BadRequestException('Cannot cancel a past booking');
+    // ✅ если уже началось (но ещё не закончилось) — тоже отменять нельзя
+    if (existing.dateTime.getTime() <= now.getTime()) {
+      throw new BadRequestException('Cannot cancel a started booking');
     }
 
     return this.prisma.booking.update({
