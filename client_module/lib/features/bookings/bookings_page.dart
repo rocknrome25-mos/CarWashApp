@@ -69,14 +69,23 @@ class _BookingsPageState extends State<BookingsPage> {
     }
   }
 
-  String _dateKey(DateTime dt) =>
-      '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
+  // ✅ важно: для UI используем локальное время
+  DateTime _local(DateTime dt) => dt.toLocal();
 
-  String _dateHeader(DateTime dt) =>
-      '${dt.day.toString().padLeft(2, '0')}.${dt.month.toString().padLeft(2, '0')}.${dt.year}';
+  String _dateKey(DateTime dt) {
+    final x = _local(dt);
+    return '${x.year}-${x.month.toString().padLeft(2, '0')}-${x.day.toString().padLeft(2, '0')}';
+  }
 
-  String _timeText(DateTime dt) =>
-      '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+  String _dateHeader(DateTime dt) {
+    final x = _local(dt);
+    return '${x.day.toString().padLeft(2, '0')}.${x.month.toString().padLeft(2, '0')}.${x.year}';
+  }
+
+  String _timeText(DateTime dt) {
+    final x = _local(dt);
+    return '${x.hour.toString().padLeft(2, '0')}:${x.minute.toString().padLeft(2, '0')}';
+  }
 
   Widget _statusChip(BookingStatus status) {
     switch (status) {
@@ -87,6 +96,103 @@ class _BookingsPageState extends State<BookingsPage> {
       case BookingStatus.active:
         return const Chip(label: Text('АКТИВНА'), side: BorderSide.none);
     }
+  }
+
+  /// Стабильная сортировка внутри вкладки:
+  /// 1) dateTime (новые сверху, как у тебя было)
+  /// 2) carTitle (чтобы при равном времени не прыгало)
+  int _compareBookings(
+    Booking a,
+    Booking b,
+    String carTitleA,
+    String carTitleB,
+  ) {
+    final byTime = b.dateTime.compareTo(a.dateTime); // newest first
+    if (byTime != 0) return byTime;
+    return carTitleA.toLowerCase().compareTo(carTitleB.toLowerCase());
+  }
+
+  Widget _buildList({
+    required List<Booking> bookings,
+    required Map<String, Car> carsById,
+    required Map<String, Service> servicesById,
+    required String emptyTitle,
+    required String emptySubtitle,
+  }) {
+    if (bookings.isEmpty) {
+      return EmptyState(
+        icon: Icons.event_busy,
+        title: emptyTitle,
+        subtitle: emptySubtitle,
+      );
+    }
+
+    // build grouped rows by date
+    final rows = <_Row>[];
+    String? currentDay;
+
+    for (final b in bookings) {
+      final day = _dateKey(b.dateTime);
+      if (day != currentDay) {
+        currentDay = day;
+        rows.add(_Row.header(_dateHeader(b.dateTime)));
+      }
+      rows.add(_Row.booking(b));
+    }
+
+    return RefreshIndicator(
+      onRefresh: _pullToRefresh,
+      child: ListView.builder(
+        padding: const EdgeInsets.all(12),
+        itemCount: rows.length,
+        itemBuilder: (context, i) {
+          final row = rows[i];
+
+          if (row.kind == _RowKind.header) {
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(8, 14, 8, 6),
+              child: Text(
+                row.headerText!,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            );
+          }
+
+          final b = row.booking!;
+          final car = carsById[b.carId];
+          final service = servicesById[b.serviceId];
+
+          final carTitle = car == null
+              ? 'Авто удалено'
+              : '${car.make} ${car.model} (${car.plateDisplay})';
+          final serviceTitle = service?.name ?? 'Услуга удалена';
+          final timeText = _timeText(b.dateTime);
+
+          return Card(
+            child: ListTile(
+              leading: const Icon(Icons.event),
+              title: Text(serviceTitle),
+              subtitle: Text('$carTitle\n$timeText'),
+              isThreeLine: true,
+              trailing: _statusChip(b.status),
+              onTap: () async {
+                await Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        BookingDetailsPage(repo: widget.repo, bookingId: b.id),
+                  ),
+                );
+                if (!mounted) return;
+                _refreshSync(force: true);
+              },
+            ),
+          );
+        },
+      ),
+    );
   }
 
   @override
@@ -118,93 +224,83 @@ class _BookingsPageState extends State<BookingsPage> {
         }
 
         final data = snapshot.data!;
-        final bookings = [...data.bookings];
-
-        if (bookings.isEmpty) {
-          return const EmptyState(
-            icon: Icons.event_busy,
-            title: 'Пока нет записей',
-            subtitle: 'Создай запись на услугу — она появится здесь.',
-          );
-        }
-
-        // сортируем по локальному времени (чтобы "сегодня/вчера" не съезжало)
-        bookings.sort(
-          (a, b) => b.dateTime.toLocal().compareTo(a.dateTime.toLocal()),
-        );
+        final all = [...data.bookings];
 
         final carsById = {for (final c in data.cars) c.id: c};
         final servicesById = {for (final s in data.services) s.id: s};
 
-        final rows = <_Row>[];
-        String? currentDay;
+        // split by status
+        final active = all
+            .where((b) => b.status == BookingStatus.active)
+            .toList();
+        final completed = all
+            .where((b) => b.status == BookingStatus.completed)
+            .toList();
+        final canceled = all
+            .where((b) => b.status == BookingStatus.canceled)
+            .toList();
 
-        for (final b in bookings) {
-          final localDt = b.dateTime.toLocal();
-          final day = _dateKey(localDt);
-
-          if (day != currentDay) {
-            currentDay = day;
-            rows.add(_Row.header(_dateHeader(localDt)));
-          }
-          rows.add(_Row.booking(b));
+        // sort each bucket (stable)
+        void sortBucket(List<Booking> list) {
+          list.sort((a, b) {
+            final carA = carsById[a.carId];
+            final carB = carsById[b.carId];
+            final carTitleA = carA == null
+                ? 'Авто удалено'
+                : '${carA.make} ${carA.model} (${carA.plateDisplay})';
+            final carTitleB = carB == null
+                ? 'Авто удалено'
+                : '${carB.make} ${carB.model} (${carB.plateDisplay})';
+            return _compareBookings(a, b, carTitleA, carTitleB);
+          });
         }
 
-        return RefreshIndicator(
-          onRefresh: _pullToRefresh,
-          child: ListView.builder(
-            padding: const EdgeInsets.all(12),
-            itemCount: rows.length,
-            itemBuilder: (context, i) {
-              final row = rows[i];
+        sortBucket(active);
+        sortBucket(completed);
+        sortBucket(canceled);
 
-              if (row.kind == _RowKind.header) {
-                return Padding(
-                  padding: const EdgeInsets.fromLTRB(8, 14, 8, 6),
-                  child: Text(
-                    row.headerText!,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                );
-              }
-
-              final b = row.booking!;
-              final car = carsById[b.carId];
-              final service = servicesById[b.serviceId];
-
-              final carTitle = car == null
-                  ? 'Авто удалено'
-                  : '${car.make} ${car.model} (${car.plateDisplay})';
-              final serviceTitle = service?.name ?? 'Услуга удалена';
-
-              final localDt = b.dateTime.toLocal();
-              final timeText = _timeText(localDt);
-
-              return Card(
-                child: ListTile(
-                  leading: const Icon(Icons.event),
-                  title: Text(serviceTitle),
-                  subtitle: Text('$carTitle\n$timeText'),
-                  isThreeLine: true,
-                  trailing: _statusChip(b.status),
-                  onTap: () async {
-                    await Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => BookingDetailsPage(
-                          repo: widget.repo,
-                          bookingId: b.id,
-                        ),
-                      ),
-                    );
-                    if (!mounted) return;
-                    _refreshSync(force: true);
-                  },
+        return DefaultTabController(
+          length: 3,
+          child: Column(
+            children: [
+              const Material(
+                child: TabBar(
+                  tabs: [
+                    Tab(text: 'Активные'),
+                    Tab(text: 'Завершённые'),
+                    Tab(text: 'Отменённые'),
+                  ],
                 ),
-              );
-            },
+              ),
+              Expanded(
+                child: TabBarView(
+                  children: [
+                    _buildList(
+                      bookings: active,
+                      carsById: carsById,
+                      servicesById: servicesById,
+                      emptyTitle: 'Нет активных записей',
+                      emptySubtitle:
+                          'Создай запись на услугу — она появится здесь.',
+                    ),
+                    _buildList(
+                      bookings: completed,
+                      carsById: carsById,
+                      servicesById: servicesById,
+                      emptyTitle: 'Нет завершённых записей',
+                      emptySubtitle: 'Здесь будут прошедшие записи.',
+                    ),
+                    _buildList(
+                      bookings: canceled,
+                      carsById: carsById,
+                      servicesById: servicesById,
+                      emptyTitle: 'Нет отменённых записей',
+                      emptySubtitle: 'Здесь будут отменённые записи.',
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         );
       },

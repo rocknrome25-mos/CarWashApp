@@ -39,7 +39,15 @@ class _ClientModuleAppState extends State<ClientModuleApp> {
     return 'http://localhost:3000';
   }
 
-  void _bumpRefresh() => setState(() => refreshToken++);
+  /// ✅ после создания брони:
+  /// 1) обновляем refreshToken
+  /// 2) переключаемся на вкладку "Записи" (index = 2)
+  void _onBookingCreated() {
+    setState(() {
+      refreshToken++;
+      index = 2;
+    });
+  }
 
   @override
   void initState() {
@@ -58,7 +66,7 @@ class _ClientModuleAppState extends State<ClientModuleApp> {
       ServicesScreen(
         repo: repo,
         refreshToken: refreshToken,
-        onBookingCreated: _bumpRefresh,
+        onBookingCreated: _onBookingCreated, // ✅ поменяли
       ),
       BookingsPage(repo: repo, refreshToken: refreshToken),
     ];

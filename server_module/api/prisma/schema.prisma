@@ -32,8 +32,9 @@ model Service {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  name     String
-  priceRub Int
+  name        String
+  priceRub    Int
+  durationMin Int   // 👈 временно optional
 
   bookings Booking[]
 }
