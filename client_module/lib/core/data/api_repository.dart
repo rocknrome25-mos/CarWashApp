@@ -58,9 +58,9 @@ class ApiRepository implements AppRepository {
   }) async {
     final j =
         await api.postJson('/cars', {
-              'makeDisplay': makeDisplay,
-              'modelDisplay': modelDisplay,
-              'plateDisplay': plateDisplay,
+              'makeDisplay': makeDisplay.trim(),
+              'modelDisplay': modelDisplay.trim(),
+              'plateDisplay': plateDisplay.trim(),
               'year': year,
               'color': color,
               'bodyType': bodyType,
@@ -68,6 +68,9 @@ class ApiRepository implements AppRepository {
             as Map<String, dynamic>;
 
     cache.invalidate('cars');
+    // авто влияет на бронирования
+    cache.invalidate('bookings_all');
+    cache.invalidate('bookings_active');
     return Car.fromJson(j);
   }
 
@@ -75,6 +78,8 @@ class ApiRepository implements AppRepository {
   Future<void> deleteCar(String id) async {
     await api.deleteJson('/cars/$id');
     cache.invalidate('cars');
+    cache.invalidate('bookings_all');
+    cache.invalidate('bookings_active');
   }
 
   // ---- BOOKINGS ----
@@ -116,6 +121,22 @@ class ApiRepository implements AppRepository {
               'carId': carId,
               'serviceId': serviceId,
               'dateTime': dateTime.toUtc().toIso8601String(),
+            })
+            as Map<String, dynamic>;
+
+    cache.invalidate('bookings_all');
+    cache.invalidate('bookings_active');
+    return Booking.fromJson(j);
+  }
+
+  @override
+  Future<Booking> payBooking({
+    required String bookingId,
+    String? method,
+  }) async {
+    final j =
+        await api.postJson('/bookings/$bookingId/pay', {
+              if (method != null) 'method': method,
             })
             as Map<String, dynamic>;
 

@@ -24,6 +24,7 @@ abstract class AppRepository {
     bool forceRefresh = false,
   });
 
+  /// Создаём бронь как PENDING_PAYMENT (держим слот до оплаты)
   Future<Booking> createBooking({
     required String carId,
     required String serviceId,
@@ -31,4 +32,10 @@ abstract class AppRepository {
   });
 
   Future<Booking> cancelBooking(String id);
+
+  /// Тестовая оплата: переводим PENDING_PAYMENT -> ACTIVE
+  Future<Booking> payBooking({
+    required String bookingId,
+    String? method, // пока просто для будущего (card/sbp)
+  });
 }

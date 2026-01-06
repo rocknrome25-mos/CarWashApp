@@ -50,12 +50,15 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
   }
 
   String _dtText(DateTime dt) {
+    final x = dt.toLocal();
     String two(int n) => n.toString().padLeft(2, '0');
-    return '${two(dt.day)}.${two(dt.month)}.${dt.year} ${two(dt.hour)}:${two(dt.minute)}';
+    return '${two(x.day)}.${two(x.month)}.${x.year} ${two(x.hour)}:${two(x.minute)}';
   }
 
   Widget _statusChip(BookingStatus status) {
     switch (status) {
+      case BookingStatus.pendingPayment:
+        return const Chip(label: Text('ОЖИДАЕТ ОПЛАТЫ'), side: BorderSide.none);
       case BookingStatus.canceled:
         return const Chip(label: Text('ОТМЕНЕНА'), side: BorderSide.none);
       case BookingStatus.completed:
@@ -63,6 +66,29 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
       case BookingStatus.active:
         return const Chip(label: Text('АКТИВНА'), side: BorderSide.none);
     }
+  }
+
+  Widget _paidChip() {
+    return const Chip(label: Text('ОПЛАЧЕНО'), side: BorderSide.none);
+  }
+
+  String? _paymentHint(Booking b) {
+    if (b.status != BookingStatus.pendingPayment) return null;
+    if (b.paymentDueAt == null) return 'Ожидается оплата';
+    return 'Оплатить до: ${_dtText(b.paymentDueAt!)}';
+  }
+
+  String _paymentStatusLine(Booking b) {
+    if (b.paidAt != null) {
+      return 'Оплата: оплачено • ${_dtText(b.paidAt!)}';
+    }
+    if (b.status == BookingStatus.pendingPayment) {
+      return 'Оплата: ожидается';
+    }
+    if (b.status == BookingStatus.active) {
+      return 'Оплата: не подтверждена';
+    }
+    return 'Оплата: —';
   }
 
   Future<void> _confirmAndCancel(String bookingId) async {
@@ -156,7 +182,9 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
 
           final isCanceled = booking.status == BookingStatus.canceled;
           final isCompleted = booking.status == BookingStatus.completed;
+
           final canCancel = !(isCanceled || isCompleted);
+          final paymentHint = _paymentHint(booking);
 
           return Padding(
             padding: const EdgeInsets.all(16),
@@ -173,7 +201,24 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                 const SizedBox(height: 8),
                 Text(_dtText(booking.dateTime)),
                 const SizedBox(height: 8),
-                _statusChip(booking.status),
+
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _statusChip(booking.status),
+                    if (booking.paidAt != null) _paidChip(),
+                  ],
+                ),
+
+                const SizedBox(height: 8),
+                Text(_paymentStatusLine(booking)),
+
+                if (paymentHint != null) ...[
+                  const SizedBox(height: 8),
+                  Text(paymentHint),
+                ],
+
                 const SizedBox(height: 16),
                 const Text(
                   'Авто',
@@ -182,6 +227,7 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                 const SizedBox(height: 6),
                 Text(car == null ? 'Авто удалено' : '${car.make} ${car.model}'),
                 if (car != null) Text(car.subtitle),
+
                 const SizedBox(height: 16),
                 const Text(
                   'Стоимость',
@@ -189,9 +235,9 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                 ),
                 const SizedBox(height: 6),
                 Text(service == null ? '—' : '${service.priceRub} ₽'),
+
                 const Spacer(),
 
-                // Cancel button
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton.icon(
@@ -204,7 +250,6 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                 ),
                 const SizedBox(height: 10),
 
-                // Back button
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton.icon(

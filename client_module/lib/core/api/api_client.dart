@@ -57,13 +57,15 @@ class ApiClient {
 
     // OK
     if (res.statusCode >= 200 && res.statusCode < 300) {
-      if (!isJson) return text;
+      if (!isJson) {
+        return text;
+      }
       return text.isEmpty ? null : jsonDecode(text);
     }
 
     // ERROR
     Object? details;
-    String? raw = text.isEmpty ? null : text;
+    final String? raw = text.isEmpty ? null : text;
 
     // Start with default message by status
     String msg = _defaultMessageForStatus(res.statusCode);
@@ -98,6 +100,9 @@ class ApiClient {
 
     // Humanize backend tech text -> RU UI
     msg = _humanizeMessage(res.statusCode, msg);
+
+    // Last safety net: ensure we never leak "ApiException(409)" or plain status codes
+    msg = _sanitizeForUi(msg);
 
     throw ApiException(res.statusCode, msg, details: details, raw: raw);
   }
@@ -145,6 +150,13 @@ class ApiClient {
       return 'Нельзя отменить прошедшую запись.';
     }
 
+    // Booking cancel: started booking
+    if ((code == 400 || code == 422) &&
+        (m.contains('cannot cancel a started booking') ||
+            (m.contains('cannot cancel') && m.contains('started')))) {
+      return 'Нельзя отменить запись, которая уже началась.';
+    }
+
     // Booking cancel: completed booking
     if (code == 409 &&
         (m.contains('completed booking') ||
@@ -169,10 +181,15 @@ class ApiClient {
 
     // Not found mapping
     if (code == 404) {
-      if (m.contains('booking')) return 'Запись не найдена.';
-      if (m.contains('car')) return 'Авто не найдено (возможно, удалено).';
-      if (m.contains('service'))
+      if (m.contains('booking')) {
+        return 'Запись не найдена.';
+      }
+      if (m.contains('car')) {
+        return 'Авто не найдено (возможно, удалено).';
+      }
+      if (m.contains('service')) {
         return 'Услуга не найдена (возможно, удалена).';
+      }
       return 'Ресурс не найден.';
     }
 
@@ -186,5 +203,19 @@ class ApiClient {
     }
 
     return msg;
+  }
+
+  String _sanitizeForUi(String msg) {
+    var out = msg.trim();
+
+    // If somehow someone passed Exception.toString() string into message
+    // remove a typical prefix "ApiException(409): "
+    out = out.replaceAll(RegExp(r'ApiException\(\d+\):\s*'), '');
+
+    // If message is empty after sanitizing -> fallback
+    if (out.isEmpty) {
+      out = 'Ошибка запроса';
+    }
+    return out;
   }
 }

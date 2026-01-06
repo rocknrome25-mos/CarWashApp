@@ -6,7 +6,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'core/api/api_client.dart';
 import 'core/cache/memory_cache.dart';
-import 'core/data/api_app_repository.dart';
+import 'core/data/api_repository.dart'; // ✅ было api_app_repository.dart
 import 'core/data/app_repository.dart';
 
 import 'features/bookings/bookings_page.dart';
@@ -53,7 +53,8 @@ class _ClientModuleAppState extends State<ClientModuleApp> {
   void initState() {
     super.initState();
 
-    repo = ApiAppRepository(
+    repo = ApiRepository(
+      // ✅ было ApiAppRepository
       api: ApiClient(baseUrl: _resolveBaseUrl()),
       cache: MemoryCache(),
     );
@@ -66,7 +67,7 @@ class _ClientModuleAppState extends State<ClientModuleApp> {
       ServicesScreen(
         repo: repo,
         refreshToken: refreshToken,
-        onBookingCreated: _onBookingCreated, // ✅ поменяли
+        onBookingCreated: _onBookingCreated,
       ),
       BookingsPage(repo: repo, refreshToken: refreshToken),
     ];

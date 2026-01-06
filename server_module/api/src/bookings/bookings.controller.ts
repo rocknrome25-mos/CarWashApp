@@ -29,6 +29,12 @@ export class BookingsController {
     return this.bookingsService.create(body);
   }
 
+  // POST /bookings/:id/pay
+  @Post(':id/pay')
+  pay(@Param('id') id: string, @Body() body?: { method?: string }) {
+    return this.bookingsService.pay(id, body);
+  }
+
   // DELETE /bookings/:id -> soft cancel
   @Delete(':id')
   cancel(@Param('id') id: string) {

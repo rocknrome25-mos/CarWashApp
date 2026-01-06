@@ -34,7 +34,7 @@ model Service {
 
   name        String
   priceRub    Int
-  durationMin Int      @default(30)  // ✅ дефолт на уровне БД
+  durationMin Int @default(30)
 
   bookings Booking[]
 }
@@ -43,6 +43,7 @@ enum BookingStatus {
   ACTIVE
   CANCELED
   COMPLETED
+  PENDING_PAYMENT
 }
 
 model Booking {
@@ -52,8 +53,15 @@ model Booking {
 
   dateTime DateTime
 
-  status     BookingStatus @default(ACTIVE)
+  status BookingStatus @default(PENDING_PAYMENT)
   canceledAt DateTime?
+
+  // --- payment flow ---
+  paymentDueAt DateTime?
+  paidAt       DateTime?
+
+  // --- debug/audit ---
+  cancelReason String?
 
   carId     String
   serviceId String
@@ -65,4 +73,5 @@ model Booking {
   @@index([serviceId])
   @@index([dateTime])
   @@index([status])
+  @@index([paymentDueAt])
 }

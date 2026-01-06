@@ -25,6 +25,8 @@ class DemoRepository implements AppRepository {
 
   final List<Booking> _bookings = [];
 
+  Duration _paymentHold() => const Duration(minutes: 15);
+
   // ---- SERVICES ----
   @override
   Future<List<Service>> getServices({bool forceRefresh = false}) async {
@@ -82,9 +84,32 @@ class DemoRepository implements AppRepository {
     bool includeCanceled = false,
     bool forceRefresh = false,
   }) async {
+    // демо “хаускипинг”: просроченные pending -> canceled
+    final now = DateTime.now();
+    for (var i = 0; i < _bookings.length; i++) {
+      final b = _bookings[i];
+      if (b.status == BookingStatus.pendingPayment &&
+          b.paymentDueAt != null &&
+          b.paymentDueAt!.isBefore(now)) {
+        _bookings[i] = Booking(
+          id: b.id,
+          createdAt: b.createdAt,
+          updatedAt: now,
+          dateTime: b.dateTime,
+          status: BookingStatus.canceled,
+          canceledAt: now,
+          cancelReason: 'PAYMENT_EXPIRED',
+          paymentDueAt: b.paymentDueAt,
+          paidAt: b.paidAt,
+          carId: b.carId,
+          serviceId: b.serviceId,
+        );
+      }
+    }
+
     final list = includeCanceled
         ? _bookings
-        : _bookings.where((b) => b.status == BookingStatus.active).toList();
+        : _bookings.where((b) => b.status != BookingStatus.canceled).toList();
 
     return List.unmodifiable(list);
   }
@@ -97,21 +122,88 @@ class DemoRepository implements AppRepository {
   }) async {
     final id = DateTime.now().microsecondsSinceEpoch.toString();
     final now = DateTime.now();
+    final due = now.add(_paymentHold());
 
     final b = Booking(
       id: id,
       createdAt: now,
       updatedAt: now,
       canceledAt: null,
+      cancelReason: null,
+      paymentDueAt: due,
+      paidAt: null,
       carId: carId,
       serviceId: serviceId,
       dateTime: dateTime,
-      status: BookingStatus.active,
+      status: BookingStatus.pendingPayment,
     );
 
     _bookings.add(b);
     _bookings.sort((a, b) => a.dateTime.compareTo(b.dateTime));
     return b;
+  }
+
+  @override
+  Future<Booking> payBooking({
+    required String bookingId,
+    String? method,
+  }) async {
+    final idx = _bookings.indexWhere((b) => b.id == bookingId);
+    final now = DateTime.now();
+
+    if (idx == -1) {
+      // в демо можно и throw, но оставим мягко
+      return Booking(
+        id: bookingId,
+        createdAt: now,
+        updatedAt: now,
+        dateTime: now,
+        status: BookingStatus.active,
+        carId: '',
+        serviceId: '',
+        paidAt: now,
+      );
+    }
+
+    final old = _bookings[idx];
+
+    // если просрочено — считаем отмененным
+    if (old.status == BookingStatus.pendingPayment &&
+        old.paymentDueAt != null &&
+        old.paymentDueAt!.isBefore(now)) {
+      final canceled = Booking(
+        id: old.id,
+        createdAt: old.createdAt,
+        updatedAt: now,
+        dateTime: old.dateTime,
+        status: BookingStatus.canceled,
+        canceledAt: now,
+        cancelReason: 'PAYMENT_EXPIRED',
+        paymentDueAt: old.paymentDueAt,
+        paidAt: old.paidAt,
+        carId: old.carId,
+        serviceId: old.serviceId,
+      );
+      _bookings[idx] = canceled;
+      return canceled;
+    }
+
+    final updated = Booking(
+      id: old.id,
+      createdAt: old.createdAt,
+      updatedAt: now,
+      dateTime: old.dateTime,
+      status: BookingStatus.active,
+      canceledAt: null,
+      cancelReason: null,
+      paymentDueAt: old.paymentDueAt,
+      paidAt: now,
+      carId: old.carId,
+      serviceId: old.serviceId,
+    );
+
+    _bookings[idx] = updated;
+    return updated;
   }
 
   @override
@@ -126,10 +218,11 @@ class DemoRepository implements AppRepository {
         createdAt: now,
         updatedAt: now,
         canceledAt: now,
-        carId: '',
-        serviceId: '',
         dateTime: now,
         status: BookingStatus.canceled,
+        cancelReason: 'NOT_FOUND_DEMO',
+        carId: '',
+        serviceId: '',
       );
     }
 
@@ -139,6 +232,11 @@ class DemoRepository implements AppRepository {
       createdAt: old.createdAt,
       updatedAt: now,
       canceledAt: now,
+      cancelReason: old.status == BookingStatus.pendingPayment
+          ? 'USER_CANCELED_PENDING'
+          : 'USER_CANCELED',
+      paymentDueAt: old.paymentDueAt,
+      paidAt: old.paidAt,
       carId: old.carId,
       serviceId: old.serviceId,
       dateTime: old.dateTime,

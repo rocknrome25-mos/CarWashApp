@@ -64,12 +64,9 @@ class _BookingsPageState extends State<BookingsPage> {
     _refreshSync(force: true);
     try {
       await _future;
-    } catch (_) {
-      // FutureBuilder покажет ошибку сам
-    }
+    } catch (_) {}
   }
 
-  // ✅ важно: для UI используем локальное время
   DateTime _local(DateTime dt) => dt.toLocal();
 
   String _dateKey(DateTime dt) {
@@ -87,8 +84,16 @@ class _BookingsPageState extends State<BookingsPage> {
     return '${x.hour.toString().padLeft(2, '0')}:${x.minute.toString().padLeft(2, '0')}';
   }
 
+  String _dateTimeText(DateTime dt) {
+    final x = _local(dt);
+    return '${x.day.toString().padLeft(2, '0')}.${x.month.toString().padLeft(2, '0')}.${x.year} '
+        '${x.hour.toString().padLeft(2, '0')}:${x.minute.toString().padLeft(2, '0')}';
+  }
+
   Widget _statusChip(BookingStatus status) {
     switch (status) {
+      case BookingStatus.pendingPayment:
+        return const Chip(label: Text('ОЖИДАЕТ ОПЛАТЫ'), side: BorderSide.none);
       case BookingStatus.canceled:
         return const Chip(label: Text('ОТМЕНЕНА'), side: BorderSide.none);
       case BookingStatus.completed:
@@ -98,9 +103,10 @@ class _BookingsPageState extends State<BookingsPage> {
     }
   }
 
-  /// Стабильная сортировка внутри вкладки:
-  /// 1) dateTime (новые сверху, как у тебя было)
-  /// 2) carTitle (чтобы при равном времени не прыгало)
+  Widget _paidChip() {
+    return const Chip(label: Text('ОПЛАЧЕНО'), side: BorderSide.none);
+  }
+
   int _compareBookings(
     Booking a,
     Booking b,
@@ -127,7 +133,6 @@ class _BookingsPageState extends State<BookingsPage> {
       );
     }
 
-    // build grouped rows by date
     final rows = <_Row>[];
     String? currentDay;
 
@@ -171,13 +176,39 @@ class _BookingsPageState extends State<BookingsPage> {
           final serviceTitle = service?.name ?? 'Услуга удалена';
           final timeText = _timeText(b.dateTime);
 
+          // payment line
+          String? paymentLine;
+          if (b.status == BookingStatus.pendingPayment &&
+              b.paymentDueAt != null) {
+            paymentLine = 'Оплатить до: ${_timeText(b.paymentDueAt!)}';
+          } else if (b.status == BookingStatus.active && b.paidAt == null) {
+            // активна, но paidAt нет — теоретически не должно быть, но лучше подсветить
+            paymentLine = 'Оплата: не подтверждена';
+          } else if (b.paidAt != null) {
+            paymentLine = 'Оплата: ${_dateTimeText(b.paidAt!)}';
+          }
+
+          final subtitle = paymentLine == null
+              ? '$carTitle\n$timeText'
+              : '$carTitle\n$timeText • $paymentLine';
+
+          // trailing chips: статус + (оплачено)
+          final trailing = Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              _statusChip(b.status),
+              if (b.paidAt != null) ...[const SizedBox(height: 6), _paidChip()],
+            ],
+          );
+
           return Card(
             child: ListTile(
               leading: const Icon(Icons.event),
               title: Text(serviceTitle),
-              subtitle: Text('$carTitle\n$timeText'),
+              subtitle: Text(subtitle),
               isThreeLine: true,
-              trailing: _statusChip(b.status),
+              trailing: trailing,
               onTap: () async {
                 await Navigator.of(context).push(
                   MaterialPageRoute(
@@ -229,10 +260,15 @@ class _BookingsPageState extends State<BookingsPage> {
         final carsById = {for (final c in data.cars) c.id: c};
         final servicesById = {for (final s in data.services) s.id: s};
 
-        // split by status
+        // active bucket includes pendingPayment
         final active = all
-            .where((b) => b.status == BookingStatus.active)
+            .where(
+              (b) =>
+                  b.status == BookingStatus.active ||
+                  b.status == BookingStatus.pendingPayment,
+            )
             .toList();
+
         final completed = all
             .where((b) => b.status == BookingStatus.completed)
             .toList();
@@ -240,7 +276,6 @@ class _BookingsPageState extends State<BookingsPage> {
             .where((b) => b.status == BookingStatus.canceled)
             .toList();
 
-        // sort each bucket (stable)
         void sortBucket(List<Booking> list) {
           list.sort((a, b) {
             final carA = carsById[a.carId];
