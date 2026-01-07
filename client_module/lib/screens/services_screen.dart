@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../core/data/app_repository.dart';
 import '../core/models/service.dart';
 import '../widgets/empty_state.dart';
-import '../features/bookings/create_booking_page.dart';
+import 'service_details_page.dart';
 
 class ServicesScreen extends StatefulWidget {
   final AppRepository repo;
@@ -62,6 +62,50 @@ class _ServicesScreenState extends State<ServicesScreen> {
     } catch (_) {}
   }
 
+  String _priceLine(Service s) {
+    final dur = s.durationMin ?? 30;
+    return '${s.priceRub} ₽  •  $dur мин';
+  }
+
+  ImageProvider _serviceThumb(Service s) {
+    if (s.imageUrl != null && s.imageUrl!.isNotEmpty) {
+      return NetworkImage(s.imageUrl!);
+    }
+
+    final n = s.name.toLowerCase();
+    if (n.contains('воск')) {
+      return const AssetImage('assets/images/services/vosk_1080.jpg');
+    }
+    if (n.contains('комплекс')) {
+      return const AssetImage('assets/images/services/kompleks_1080.jpg');
+    }
+    if (n.contains('кузов')) {
+      return const AssetImage('assets/images/services/kuzov_1080.jpg');
+    }
+
+    return const AssetImage('assets/images/services/kuzov_1080.jpg');
+  }
+
+  Future<void> _openDetails(Service s) async {
+    final nav = Navigator.of(context);
+
+    final booked = await nav.push<bool>(
+      MaterialPageRoute(
+        builder: (_) => ServiceDetailsPage(repo: widget.repo, service: s),
+      ),
+    );
+
+    if (!mounted) return;
+
+    if (booked == true) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Запись создана')));
+      widget.onBookingCreated();
+      _refreshSync(force: true);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<_ServicesBundle>(
@@ -109,49 +153,147 @@ class _ServicesScreenState extends State<ServicesScreen> {
           );
         }
 
+        final primary = Theme.of(context).colorScheme.primary;
+
         return RefreshIndicator(
           onRefresh: _pullToRefresh,
-          child: ListView.builder(
-            padding: const EdgeInsets.all(12),
-            itemCount: services.length,
-            itemBuilder: (context, i) {
-              final s = services[i];
-              final durationText = s.durationMin == null
-                  ? ''
-                  : ' • ${s.durationMin} мин';
-
-              return Card(
-                child: ListTile(
-                  leading: const Icon(Icons.local_car_wash),
-                  title: Text(s.name),
-                  subtitle: Text('${s.priceRub} ₽$durationText'),
-                  trailing: FilledButton(
-                    onPressed: () async {
-                      final created = await Navigator.of(context).push<bool>(
-                        MaterialPageRoute(
-                          builder: (_) => CreateBookingPage(
-                            repo: widget.repo,
-                            preselectedServiceId: s.id,
-                          ),
-                        ),
-                      );
-
-                      if (!context.mounted) return;
-
-                      if (created == true) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Запись создана')),
-                        );
-
-                        widget.onBookingCreated(); // обновить вкладку "Записи"
-                        _refreshSync(force: true); // и услуги/машины освежить
-                      }
-                    },
-                    child: const Text('Записаться'),
-                  ),
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+            children: [
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: primary.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: primary.withValues(alpha: 0.15)),
                 ),
-              );
-            },
+                child: Row(
+                  children: [
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: primary.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Icon(Icons.local_car_wash, color: primary),
+                    ),
+                    const SizedBox(width: 12),
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Выбери услугу и время',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          SizedBox(height: 4),
+                          Text(
+                            'Сначала открой услугу, затем нажми “Записаться”.',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                'Услуги',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
+              ),
+              const SizedBox(height: 10),
+
+              // ✅ Карточки услуг: без кнопки "Записаться"
+              ...services.map((s) {
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(18),
+                    onTap: () => _openDetails(s),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).cardColor,
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(
+                          color: Colors.black.withValues(alpha: 0.06),
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            blurRadius: 10,
+                            offset: const Offset(0, 6),
+                            color: Colors.black.withValues(alpha: 0.04),
+                          ),
+                        ],
+                      ),
+                      clipBehavior: Clip.antiAlias,
+                      child: IntrinsicHeight(
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            SizedBox(
+                              width: 118,
+                              child: Image(
+                                image: _serviceThumb(s),
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => Container(
+                                  color: Colors.black.withValues(alpha: 0.04),
+                                  child: const Center(
+                                    child: Icon(Icons.local_car_wash),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            Expanded(
+                              child: Padding(
+                                padding: const EdgeInsets.all(14),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Text(
+                                      s.name,
+                                      style: const TextStyle(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w900,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      _priceLine(s),
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.black.withValues(
+                                          alpha: 0.65,
+                                        ),
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      'Посмотреть > ',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: primary.withValues(alpha: 0.85),
+                                        fontWeight: FontWeight.w900,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              }),
+            ],
           ),
         );
       },
@@ -162,6 +304,5 @@ class _ServicesScreenState extends State<ServicesScreen> {
 class _ServicesBundle {
   final int carsCount;
   final List<Service> services;
-
   const _ServicesBundle({required this.carsCount, required this.services});
 }

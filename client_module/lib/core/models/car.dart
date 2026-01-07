@@ -45,6 +45,45 @@ class Car {
         : '$plateDisplay • ${parts.join(' • ')}';
   }
 
+  /// Единообразная аватарка по марке (используй везде в UI)
+  /// Ожидаемые файлы:
+  /// assets/images/cars/mercedes.png
+  /// assets/images/cars/bmw.png
+  /// assets/images/cars/audi.png
+  /// assets/images/cars/default.png
+  String get avatarAsset {
+    final key = _makeKey(makeNormalized);
+
+    switch (key) {
+      case 'mercedes':
+        return 'assets/images/cars/mercedes.png';
+      case 'bmw':
+        return 'assets/images/cars/bmw.png';
+      case 'audi':
+        return 'assets/images/cars/audi.png';
+      default:
+        return 'assets/images/cars/default.png';
+    }
+  }
+
+  /// Приводим любые варианты ввода к ключам.
+  /// normalizeName() уже убирает регистр/пробелы, но "мерседес" всё равно будет кириллицей.
+  String _makeKey(String makeNorm) {
+    final m = makeNorm.toLowerCase();
+
+    // RU варианты
+    if (m.contains('мерсед')) return 'mercedes';
+    if (m.contains('бмв')) return 'bmw';
+    if (m.contains('ауди')) return 'audi';
+
+    // EN варианты
+    if (m.contains('mercedes')) return 'mercedes';
+    if (m == 'bmw' || m.contains('bmw')) return 'bmw';
+    if (m.contains('audi')) return 'audi';
+
+    return m;
+  }
+
   /// ---- API mapping ----
   /// Backend fields: makeDisplay/modelDisplay/plateDisplay/plateNormalized
   factory Car.fromJson(Map<String, dynamic> j) {

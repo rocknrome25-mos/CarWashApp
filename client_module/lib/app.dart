@@ -6,7 +6,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'core/api/api_client.dart';
 import 'core/cache/memory_cache.dart';
-import 'core/data/api_repository.dart'; // ✅ было api_app_repository.dart
+import 'core/data/api_repository.dart';
 import 'core/data/app_repository.dart';
 
 import 'features/bookings/bookings_page.dart';
@@ -54,7 +54,6 @@ class _ClientModuleAppState extends State<ClientModuleApp> {
     super.initState();
 
     repo = ApiRepository(
-      // ✅ было ApiAppRepository
       api: ApiClient(baseUrl: _resolveBaseUrl()),
       cache: MemoryCache(),
     );
@@ -84,7 +83,20 @@ class _ClientModuleAppState extends State<ClientModuleApp> {
       ],
       theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.red),
       home: Scaffold(
-        appBar: AppBar(title: const Text('Автомойка')),
+        appBar: AppBar(
+          title: Row(
+            children: [
+              Image.asset(
+                'assets/images/logo/carwash_logo_512.png',
+                width: 26,
+                height: 26,
+                fit: BoxFit.contain,
+              ),
+              const SizedBox(width: 10),
+              const Text('Автомойка'),
+            ],
+          ),
+        ),
         body: pages[index],
         bottomNavigationBar: NavigationBar(
           selectedIndex: index,

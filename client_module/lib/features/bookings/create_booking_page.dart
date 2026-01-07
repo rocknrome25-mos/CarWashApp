@@ -30,7 +30,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
   static const int _quickPinnedDays = 2; // Сегодня + Завтра(датой)
 
   final _formKey = GlobalKey<FormState>();
-
   final Map<DateTime, GlobalKey> _dateKeys = {};
 
   List<Car> _cars = const [];
@@ -65,12 +64,16 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
     final today = _dateOnly(DateTime.now());
     final diff = dd.difference(today).inDays;
-    if (diff < _quickPinnedDays) return;
+    if (diff < _quickPinnedDays) {
+      return;
+    }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final key = _dateKeys[dd];
       final ctx = key?.currentContext;
-      if (ctx == null) return;
+      if (ctx == null) {
+        return;
+      }
 
       Scrollable.ensureVisible(
         ctx,
@@ -93,11 +96,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     final s = _findService(sid);
     final d = s?.durationMin;
     return (d != null && d > 0) ? d : 30;
-  }
-
-  String _fmtDate(DateTime d) {
-    String two(int n) => n.toString().padLeft(2, '0');
-    return '${two(d.day)}.${two(d.month)}.${d.year}';
   }
 
   String _fmtDateShort(DateTime d) {
@@ -145,11 +143,13 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
     final busy = _bookings.where((b) {
       if (b.status == BookingStatus.active) return true;
+
       if (b.status == BookingStatus.pendingPayment) {
         final due = b.paymentDueAt;
         if (due == null) return false;
         return due.isAfter(now);
       }
+
       return false;
     });
 
@@ -182,7 +182,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     var cur = start;
 
     while (cur.isBefore(end)) {
-      if (_endsBeforeClose(cur, selectedServiceMin)) slots.add(cur);
+      if (_endsBeforeClose(cur, selectedServiceMin)) {
+        slots.add(cur);
+      }
       cur = cur.add(const Duration(minutes: _slotStepMin));
     }
     return slots;
@@ -212,7 +214,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
         final isToday = _selectedDate == _dateOnly(DateTime.now());
         final tooEarly = isToday && s.isBefore(minNow);
         final busy = _isBusySlot(s, dur);
-        if (!tooEarly && !busy) return;
+        if (!tooEarly && !busy) {
+          return;
+        }
       }
     }
 
@@ -259,7 +263,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     final today = _dateOnly(DateTime.now());
     final diff = _dateOnly(d).difference(today).inDays;
     if (diff == 0) return 'Сегодня';
-    if (diff == 1) return _fmtDate(d); // завтра = дата
+    if (diff == 1) {
+      return _fmtDateShort(d); // завтра = короткая дата
+    }
     return _fmtDateShort(d);
   }
 
@@ -272,38 +278,43 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
   ButtonStyle _slotStyleOutlined() {
     return OutlinedButton.styleFrom(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-      minimumSize: const Size(0, 30),
-      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      minimumSize: const Size(0, 34),
       visualDensity: const VisualDensity(horizontal: -2, vertical: -2),
     );
   }
 
   ButtonStyle _slotStyleFilled() {
     return FilledButton.styleFrom(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-      minimumSize: const Size(0, 30),
-      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      minimumSize: const Size(0, 34),
       visualDensity: const VisualDensity(horizontal: -2, vertical: -2),
     );
   }
 
   Widget _slotLabel(String time, {String? badge}) {
-    if (badge == null) {
-      return Text(
-        time,
-        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-      );
-    }
+    final timeW = Text(
+      time,
+      style: const TextStyle(
+        fontSize: 12,
+        fontWeight: FontWeight.w700,
+        height: 1.0,
+      ),
+    );
+
+    if (badge == null) return timeW;
+
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Text(
-          time,
-          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-        ),
+        timeW,
         const SizedBox(height: 1),
-        Text(badge, style: const TextStyle(fontSize: 9)),
+        Text(
+          badge,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 9, height: 1.0),
+        ),
       ],
     );
   }
@@ -325,7 +336,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
       final services = results[1] as List<Service>;
       final bookings = results[2] as List<Booking>;
 
-      String? selectedCarId = cars.isNotEmpty ? cars.first.id : null;
+      final String? selectedCarId = cars.isNotEmpty ? cars.first.id : null;
 
       String? selectedServiceId =
           widget.preselectedServiceId ??
@@ -488,6 +499,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     final tomorrow = today.add(const Duration(days: 1));
     final scrollDates = _quickDatesScrollable();
 
+    const chipLabelPadding = EdgeInsets.symmetric(horizontal: 10);
+    const chipVD = VisualDensity(horizontal: -2, vertical: -2);
+
     return Scaffold(
       appBar: AppBar(title: const Text('Создать запись')),
       body: Padding(
@@ -518,7 +532,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                 },
               ),
               const SizedBox(height: 12),
-
               DropdownButtonFormField<String>(
                 initialValue: safeServiceId,
                 decoration: const InputDecoration(
@@ -546,35 +559,29 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                   return null;
                 },
               ),
-
               const SizedBox(height: 10),
 
-              // --- Date chips row only (без "Дата" и без даты справа) ---
               Row(
                 children: [
                   ChoiceChip(
                     label: Text(_chipLabelForDate(today)),
+                    labelPadding: chipLabelPadding,
                     selected: _selectedDate == today,
                     onSelected: (_) => _selectDate(today),
-                    visualDensity: const VisualDensity(
-                      horizontal: -1,
-                      vertical: -2,
-                    ),
+                    visualDensity: chipVD,
                   ),
                   const SizedBox(width: 8),
                   ChoiceChip(
                     label: Text(_chipLabelForDate(tomorrow)),
+                    labelPadding: chipLabelPadding,
                     selected: _selectedDate == tomorrow,
                     onSelected: (_) => _selectDate(tomorrow),
-                    visualDensity: const VisualDensity(
-                      horizontal: -1,
-                      vertical: -2,
-                    ),
+                    visualDensity: chipVD,
                   ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: SizedBox(
-                      height: 40,
+                      height: 38,
                       child: ListView(
                         scrollDirection: Axis.horizontal,
                         physics: const ClampingScrollPhysics(),
@@ -589,12 +596,10 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                               key: key,
                               child: ChoiceChip(
                                 label: Text(_chipLabelForDate(dd)),
+                                labelPadding: chipLabelPadding,
                                 selected: selected,
                                 onSelected: (_) => _selectDate(dd),
-                                visualDensity: const VisualDensity(
-                                  horizontal: -1,
-                                  vertical: -2,
-                                ),
+                                visualDensity: chipVD,
                               ),
                             ),
                           );
@@ -607,9 +612,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
               const SizedBox(height: 10),
 
-              Row(
-                children: const [
-                  Text('Время', style: TextStyle(fontWeight: FontWeight.w700)),
+              const Row(
+                children: [
+                  Text('Время', style: TextStyle(fontWeight: FontWeight.w800)),
                   Spacer(),
                 ],
               ),
@@ -623,7 +628,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                           crossAxisCount: cols,
                           mainAxisSpacing: 8,
                           crossAxisSpacing: 8,
-                          childAspectRatio: 3.5,
+                          childAspectRatio: 3.2,
                         ),
                         itemCount: slots.length,
                         itemBuilder: (context, i) {
@@ -645,8 +650,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                               style: _slotStyleFilled(),
                               onPressed: disabled
                                   ? null
-                                  : () =>
-                                        setState(() => _selectedSlotStart = s),
+                                  : () {
+                                      setState(() => _selectedSlotStart = s);
+                                    },
                               child: _slotLabel(time, badge: badge),
                             );
                           }
@@ -655,7 +661,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                             style: _slotStyleOutlined(),
                             onPressed: disabled
                                 ? null
-                                : () => setState(() => _selectedSlotStart = s),
+                                : () {
+                                    setState(() => _selectedSlotStart = s);
+                                  },
                             child: _slotLabel(time, badge: badge),
                           );
                         },
@@ -666,11 +674,12 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
               SizedBox(
                 width: double.infinity,
-                child: FilledButton(
+                child: FilledButton.icon(
                   onPressed: (_cars.isEmpty || _services.isEmpty || _saving)
                       ? null
                       : _save,
-                  child: Text(_saving ? 'Сохраняю...' : 'Продолжить к оплате'),
+                  icon: const Icon(Icons.credit_card),
+                  label: Text(_saving ? 'Сохраняю...' : 'Продолжить к оплате'),
                 ),
               ),
             ],

@@ -41,7 +41,6 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
     final car = booking == null
         ? null
         : cars.where((c) => c.id == booking.carId).firstOrNull;
-
     final service = booking == null
         ? null
         : services.where((s) => s.id == booking.serviceId).firstOrNull;
@@ -55,40 +54,115 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
     return '${two(x.day)}.${two(x.month)}.${x.year} ${two(x.hour)}:${two(x.minute)}';
   }
 
-  Widget _statusChip(BookingStatus status) {
-    switch (status) {
-      case BookingStatus.pendingPayment:
-        return const Chip(label: Text('ОЖИДАЕТ ОПЛАТЫ'), side: BorderSide.none);
-      case BookingStatus.canceled:
-        return const Chip(label: Text('ОТМЕНЕНА'), side: BorderSide.none);
-      case BookingStatus.completed:
-        return const Chip(label: Text('ЗАВЕРШЕНА'), side: BorderSide.none);
-      case BookingStatus.active:
-        return const Chip(label: Text('АКТИВНА'), side: BorderSide.none);
-    }
+  Widget _badge({required String text, required Color color}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          color: color,
+          fontWeight: FontWeight.w900,
+          fontSize: 12,
+        ),
+      ),
+    );
   }
 
-  Widget _paidChip() {
-    return const Chip(label: Text('ОПЛАЧЕНО'), side: BorderSide.none);
-  }
-
-  String? _paymentHint(Booking b) {
-    if (b.status != BookingStatus.pendingPayment) return null;
-    if (b.paymentDueAt == null) return 'Ожидается оплата';
-    return 'Оплатить до: ${_dtText(b.paymentDueAt!)}';
-  }
-
-  String _paymentStatusLine(Booking b) {
+  /// ✅ Логика статуса для деталей:
+  /// - paidAt != null -> ОПЛАЧЕНО
+  /// - pendingPayment -> ОЖИДАЕТ ОПЛАТЫ
+  /// - completed -> ЗАВЕРШЕНА (серый)
+  /// - canceled -> ОТМЕНЕНА (красный)
+  /// - active (без paidAt) -> ничего не показываем
+  Widget _detailsBadge(Booking b) {
     if (b.paidAt != null) {
-      return 'Оплата: оплачено • ${_dtText(b.paidAt!)}';
+      return _badge(text: 'ОПЛАЧЕНО', color: Colors.green);
     }
     if (b.status == BookingStatus.pendingPayment) {
-      return 'Оплата: ожидается';
+      return _badge(text: 'ОЖИДАЕТ ОПЛАТЫ', color: Colors.orange);
     }
-    if (b.status == BookingStatus.active) {
-      return 'Оплата: не подтверждена';
+    if (b.status == BookingStatus.completed) {
+      return _badge(text: 'ЗАВЕРШЕНА', color: Colors.grey);
     }
-    return 'Оплата: —';
+    if (b.status == BookingStatus.canceled) {
+      return _badge(text: 'ОТМЕНЕНА', color: Colors.red);
+    }
+    return const SizedBox.shrink();
+  }
+
+  ImageProvider _serviceAssetProvider(Service s) {
+    final n = s.name.toLowerCase();
+
+    if (n.contains('воск')) {
+      return const AssetImage('assets/images/services/vosk_1080.jpg');
+    }
+    if (n.contains('комплекс')) {
+      return const AssetImage('assets/images/services/kompleks_1080.jpg');
+    }
+    if (n.contains('кузов')) {
+      return const AssetImage('assets/images/services/kuzov_1080.jpg');
+    }
+
+    // безопасный fallback (любой существующий файл)
+    return const AssetImage('assets/images/services/kuzov_1080.jpg');
+  }
+
+  Widget _serviceThumb(Service? service) {
+    // service отсутствует
+    if (service == null) {
+      return Container(
+        width: 56,
+        height: 56,
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.04),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: const Icon(Icons.local_car_wash),
+      );
+    }
+
+    // приоритет: network
+    final url = service.imageUrl;
+    if (url != null && url.isNotEmpty) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Image.network(
+          url,
+          width: 56,
+          height: 56,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => Container(
+            width: 56,
+            height: 56,
+            color: Colors.black.withValues(alpha: 0.04),
+            child: const Icon(Icons.local_car_wash),
+          ),
+        ),
+      );
+    }
+
+    // fallback: assets
+    final provider = _serviceAssetProvider(service);
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: Image(
+        image: provider,
+        width: 56,
+        height: 56,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => Container(
+          width: 56,
+          height: 56,
+          color: Colors.black.withValues(alpha: 0.04),
+          child: const Icon(Icons.local_car_wash),
+        ),
+      ),
+    );
   }
 
   Future<void> _confirmAndCancel(String bookingId) async {
@@ -116,7 +190,6 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
     if (ok != true) return;
 
     setState(() => _canceling = true);
-
     final messenger = ScaffoldMessenger.of(context);
 
     try {
@@ -130,13 +203,31 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
         _future = _load(forceRefresh: true);
       });
 
-      // ignore: use_build_context_synchronously
       Navigator.of(context).pop(true);
     } catch (e) {
       if (!mounted) return;
       setState(() => _canceling = false);
       messenger.showSnackBar(SnackBar(content: Text('Ошибка: $e')));
     }
+  }
+
+  Widget _card({required Widget child}) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+        boxShadow: [
+          BoxShadow(
+            blurRadius: 10,
+            offset: const Offset(0, 6),
+            color: Colors.black.withValues(alpha: 0.04),
+          ),
+        ],
+      ),
+      child: child,
+    );
   }
 
   @override
@@ -172,7 +263,6 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
 
           final data = snapshot.data;
           final booking = data?.booking;
-
           if (booking == null) {
             return const Center(child: Text('Запись не найдена'));
           }
@@ -182,84 +272,138 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
 
           final isCanceled = booking.status == BookingStatus.canceled;
           final isCompleted = booking.status == BookingStatus.completed;
-
           final canCancel = !(isCanceled || isCompleted);
-          final paymentHint = _paymentHint(booking);
 
-          return Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  service?.name ?? 'Услуга удалена',
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(_dtText(booking.dateTime)),
-                const SizedBox(height: 8),
+          final badge = _detailsBadge(booking);
 
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+            children: [
+              _card(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _statusChip(booking.status),
-                    if (booking.paidAt != null) _paidChip(),
+                    _serviceThumb(service),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  service?.name ?? 'Услуга удалена',
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              badge,
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            _dtText(booking.dateTime),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.black.withValues(alpha: 0.65),
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          if (booking.paidAt != null) ...[
+                            const SizedBox(height: 10),
+                            Text(
+                              'Оплата: ${_dtText(booking.paidAt!)}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.black.withValues(alpha: 0.65),
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
+                          if (booking.status == BookingStatus.pendingPayment &&
+                              booking.paymentDueAt != null) ...[
+                            const SizedBox(height: 10),
+                            Text(
+                              'Оплатить до: ${_dtText(booking.paymentDueAt!)}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.black.withValues(alpha: 0.75),
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
                   ],
                 ),
-
-                const SizedBox(height: 8),
-                Text(_paymentStatusLine(booking)),
-
-                if (paymentHint != null) ...[
-                  const SizedBox(height: 8),
-                  Text(paymentHint),
-                ],
-
-                const SizedBox(height: 16),
-                const Text(
-                  'Авто',
-                  style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 12),
+              _card(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Авто',
+                      style: TextStyle(fontWeight: FontWeight.w900),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      car == null
+                          ? 'Авто удалено'
+                          : '${car.make} ${car.model} (${car.plateDisplay})',
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    if (car != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        car.subtitle,
+                        style: TextStyle(
+                          color: Colors.black.withValues(alpha: 0.65),
+                          fontWeight: FontWeight.w600,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 14),
+                    const Text(
+                      'Стоимость',
+                      style: TextStyle(fontWeight: FontWeight.w900),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      service == null ? '—' : '${service.priceRub} ₽',
+                      style: const TextStyle(fontWeight: FontWeight.w900),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 6),
-                Text(car == null ? 'Авто удалено' : '${car.make} ${car.model}'),
-                if (car != null) Text(car.subtitle),
-
-                const SizedBox(height: 16),
-                const Text(
-                  'Стоимость',
-                  style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 14),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: (canCancel && !_canceling)
+                      ? () => _confirmAndCancel(booking.id)
+                      : null,
+                  icon: const Icon(Icons.cancel_outlined),
+                  label: Text(_canceling ? 'Отменяю...' : 'Отменить запись'),
                 ),
-                const SizedBox(height: 6),
-                Text(service == null ? '—' : '${service.priceRub} ₽'),
-
-                const Spacer(),
-
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton.icon(
-                    onPressed: (canCancel && !_canceling)
-                        ? () => _confirmAndCancel(booking.id)
-                        : null,
-                    icon: const Icon(Icons.cancel_outlined),
-                    label: Text(_canceling ? 'Отменяю...' : 'Отменить запись'),
-                  ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.arrow_back),
+                  label: const Text('Назад'),
                 ),
-                const SizedBox(height: 10),
-
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton.icon(
-                    onPressed: () => Navigator.of(context).pop(),
-                    icon: const Icon(Icons.arrow_back),
-                    label: const Text('Назад'),
-                  ),
-                ),
-              ],
-            ),
+              ),
+            ],
           );
         },
       ),

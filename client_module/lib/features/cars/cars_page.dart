@@ -28,6 +28,23 @@ class _CarsPageState extends State<CarsPage> {
     });
   }
 
+  ImageProvider _carAvatar(Car c) {
+    final make = c.make.toLowerCase().trim();
+
+    if (make.contains('bmw')) {
+      return const AssetImage('assets/images/cars/bmw_128.png');
+    }
+    if (make.contains('mercedes') || make.contains('benz') || make == 'mb') {
+      return const AssetImage('assets/images/cars/mercedes_128.png');
+    }
+    if (make.contains('audi')) {
+      return const AssetImage('assets/images/cars/audi_128.png');
+    }
+
+    // если марка не из 3-х — просто иконка (без ассета)
+    return const AssetImage('assets/images/cars/bmw_128.png');
+  }
+
   Future<void> _addCar() async {
     final created = await showModalBottomSheet<bool>(
       context: context,
@@ -138,7 +155,15 @@ class _CarsPageState extends State<CarsPage> {
                 final c = cars[i];
                 return Card(
                   child: ListTile(
-                    leading: const Icon(Icons.directions_car),
+                    leading: ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Image(
+                        image: _carAvatar(c),
+                        width: 44,
+                        height: 44,
+                        fit: BoxFit.cover,
+                      ),
+                    ),
                     title: Text(c.title),
                     subtitle: Text(c.subtitle),
                     trailing: IconButton(
