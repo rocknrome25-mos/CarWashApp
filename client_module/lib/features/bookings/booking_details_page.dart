@@ -3,6 +3,7 @@ import '../../core/data/app_repository.dart';
 import '../../core/models/booking.dart';
 import '../../core/models/car.dart';
 import '../../core/models/service.dart';
+import 'payment_page.dart';
 
 class BookingDetailsPage extends StatefulWidget {
   final AppRepository repo;
@@ -20,7 +21,9 @@ class BookingDetailsPage extends StatefulWidget {
 
 class _BookingDetailsPageState extends State<BookingDetailsPage> {
   late Future<_Details> _future;
+
   bool _canceling = false;
+  bool _paying = false;
 
   @override
   void initState() {
@@ -94,26 +97,71 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
     return const SizedBox.shrink();
   }
 
-  ImageProvider _serviceAssetProvider(Service s) {
-    final n = s.name.toLowerCase();
+  bool _canPay(Booking b) {
+    if (b.paidAt != null) return false;
+    if (b.status != BookingStatus.pendingPayment) return false;
 
-    if (n.contains('воск')) {
-      return const AssetImage('assets/images/services/vosk_1080.jpg');
-    }
-    if (n.contains('комплекс')) {
-      return const AssetImage('assets/images/services/kompleks_1080.jpg');
-    }
-    if (n.contains('кузов')) {
-      return const AssetImage('assets/images/services/kuzov_1080.jpg');
+    // Если есть дедлайн — платить можно только пока не истёк
+    final due = b.paymentDueAt;
+    if (due == null) return true;
+    return due.isAfter(DateTime.now());
+  }
+
+  Future<void> _payNow({
+    required Booking booking,
+    required Service? service,
+  }) async {
+    if (_paying) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+
+    if (!_canPay(booking)) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Оплата недоступна для этой записи.')),
+      );
+      return;
     }
 
-    // безопасный fallback (любой существующий файл)
-    return const AssetImage('assets/images/services/kuzov_1080.jpg');
+    setState(() => _paying = true);
+
+    try {
+      final paid = await Navigator.of(context).push<bool>(
+        MaterialPageRoute(
+          builder: (_) => PaymentPage(
+            repo: widget.repo,
+            booking: booking,
+            service: service,
+          ),
+        ),
+      );
+
+      if (!mounted) return;
+
+      if (paid == true) {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('Оплата прошла успешно.')),
+        );
+        setState(() {
+          _future = _load(forceRefresh: true);
+        });
+      } else {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('Оплата не завершена.')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      messenger.showSnackBar(SnackBar(content: Text('Ошибка: $e')));
+    } finally {
+      if (mounted) setState(() => _paying = false);
+    }
   }
 
   Widget _serviceThumb(Service? service) {
-    // service отсутствует
-    if (service == null) {
+    // Если у тебя в проекте есть asset-логика — можно расширить,
+    // но сейчас оставим текущий вариант: url -> сеть, иначе placeholder.
+    final url = service?.imageUrl;
+    if (url == null || url.isEmpty) {
       return Container(
         width: 56,
         height: 56,
@@ -125,33 +173,10 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
       );
     }
 
-    // приоритет: network
-    final url = service.imageUrl;
-    if (url != null && url.isNotEmpty) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(16),
-        child: Image.network(
-          url,
-          width: 56,
-          height: 56,
-          fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => Container(
-            width: 56,
-            height: 56,
-            color: Colors.black.withValues(alpha: 0.04),
-            child: const Icon(Icons.local_car_wash),
-          ),
-        ),
-      );
-    }
-
-    // fallback: assets
-    final provider = _serviceAssetProvider(service);
-
     return ClipRRect(
       borderRadius: BorderRadius.circular(16),
-      child: Image(
-        image: provider,
+      child: Image.network(
+        url,
         width: 56,
         height: 56,
         fit: BoxFit.cover,
@@ -274,6 +299,8 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
           final isCompleted = booking.status == BookingStatus.completed;
           final canCancel = !(isCanceled || isCompleted);
 
+          final showPayButton = _canPay(booking);
+
           final badge = _detailsBadge(booking);
 
           return ListView(
@@ -343,7 +370,9 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                   ],
                 ),
               ),
+
               const SizedBox(height: 12),
+
               _card(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -383,7 +412,24 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                   ],
                 ),
               ),
+
+              // ✅ НОВОЕ: кнопка оплаты, если запись ожидает оплату
+              if (showPayButton) ...[
+                const SizedBox(height: 14),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: _paying
+                        ? null
+                        : () => _payNow(booking: booking, service: service),
+                    icon: const Icon(Icons.credit_card),
+                    label: Text(_paying ? 'Оплачиваю...' : 'Оплатить'),
+                  ),
+                ),
+              ],
+
               const SizedBox(height: 14),
+
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
