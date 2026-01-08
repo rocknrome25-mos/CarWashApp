@@ -12,6 +12,7 @@ import 'core/data/app_repository.dart';
 import 'features/bookings/bookings_page.dart';
 import 'features/cars/cars_page.dart';
 import 'screens/services_screen.dart';
+import 'screens/contacts_page.dart';
 
 class ClientModuleApp extends StatefulWidget {
   const ClientModuleApp({super.key});
@@ -69,6 +70,16 @@ class _ClientModuleAppState extends State<ClientModuleApp> {
         onBookingCreated: _onBookingCreated,
       ),
       BookingsPage(repo: repo, refreshToken: refreshToken),
+
+      // ✅ Контакты (прототипные данные пока)
+      const ContactsPage(
+        title: 'Контакты',
+        address: 'Москва, бульвар Андрея Тарковского, 10',
+        phone: '+7-927-310-9336',
+        telegram: '@carwash_demo', // любой пока
+        navigatorLink:
+            'https://www.google.com/maps/search/?api=1&query=Москва%2C%20бульвар%20Андрея%20Тарковского%2010',
+      ),
     ];
 
     return MaterialApp(
@@ -111,6 +122,10 @@ class _ClientModuleAppState extends State<ClientModuleApp> {
               label: 'Услуги',
             ),
             NavigationDestination(icon: Icon(Icons.event), label: 'Записи'),
+            NavigationDestination(
+              icon: Icon(Icons.contact_phone),
+              label: 'Контакты',
+            ),
           ],
         ),
       ),

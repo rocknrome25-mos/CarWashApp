@@ -97,6 +97,7 @@ class DemoRepository implements AppRepository {
           updatedAt: now,
           dateTime: b.dateTime,
           status: BookingStatus.canceled,
+          bayId: b.bayId,
           canceledAt: now,
           cancelReason: 'PAYMENT_EXPIRED',
           paymentDueAt: b.paymentDueAt,
@@ -119,6 +120,7 @@ class DemoRepository implements AppRepository {
     required String carId,
     required String serviceId,
     required DateTime dateTime,
+    int? bayId,
   }) async {
     final id = DateTime.now().microsecondsSinceEpoch.toString();
     final now = DateTime.now();
@@ -136,6 +138,7 @@ class DemoRepository implements AppRepository {
       serviceId: serviceId,
       dateTime: dateTime,
       status: BookingStatus.pendingPayment,
+      bayId: bayId ?? 1,
     );
 
     _bookings.add(b);
@@ -152,7 +155,6 @@ class DemoRepository implements AppRepository {
     final now = DateTime.now();
 
     if (idx == -1) {
-      // в демо можно и throw, но оставим мягко
       return Booking(
         id: bookingId,
         createdAt: now,
@@ -177,6 +179,7 @@ class DemoRepository implements AppRepository {
         updatedAt: now,
         dateTime: old.dateTime,
         status: BookingStatus.canceled,
+        bayId: old.bayId,
         canceledAt: now,
         cancelReason: 'PAYMENT_EXPIRED',
         paymentDueAt: old.paymentDueAt,
@@ -194,6 +197,7 @@ class DemoRepository implements AppRepository {
       updatedAt: now,
       dateTime: old.dateTime,
       status: BookingStatus.active,
+      bayId: old.bayId,
       canceledAt: null,
       cancelReason: null,
       paymentDueAt: old.paymentDueAt,
@@ -212,7 +216,6 @@ class DemoRepository implements AppRepository {
     final now = DateTime.now();
 
     if (idx == -1) {
-      // в демо просто игнор, можно и throw
       return Booking(
         id: id,
         createdAt: now,
@@ -241,6 +244,7 @@ class DemoRepository implements AppRepository {
       serviceId: old.serviceId,
       dateTime: old.dateTime,
       status: BookingStatus.canceled,
+      bayId: old.bayId,
     );
 
     _bookings[idx] = updated;

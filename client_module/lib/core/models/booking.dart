@@ -50,6 +50,9 @@ class Booking {
   final String carId;
   final String serviceId;
 
+  /// ✅ номер поста (бокса)
+  final int? bayId;
+
   Booking({
     required this.id,
     required this.createdAt,
@@ -62,9 +65,15 @@ class Booking {
     this.cancelReason,
     this.paymentDueAt,
     this.paidAt,
+    this.bayId,
   });
 
   factory Booking.fromJson(Map<String, dynamic> json) {
+    final cancelReasonRaw = (json['cancelReason'] as String?)?.trim();
+    final cancelReason = (cancelReasonRaw?.isEmpty ?? true)
+        ? null
+        : cancelReasonRaw;
+
     return Booking(
       id: json['id'] as String,
       createdAt: DateTime.parse(json['createdAt'] as String),
@@ -74,9 +83,7 @@ class Booking {
       canceledAt: json['canceledAt'] == null
           ? null
           : DateTime.parse(json['canceledAt'] as String),
-      cancelReason: (json['cancelReason'] as String?)?.trim().isEmpty == true
-          ? null
-          : json['cancelReason'] as String?,
+      cancelReason: cancelReason,
       paymentDueAt: json['paymentDueAt'] == null
           ? null
           : DateTime.parse(json['paymentDueAt'] as String),
@@ -85,6 +92,9 @@ class Booking {
           : DateTime.parse(json['paidAt'] as String),
       carId: json['carId'] as String,
       serviceId: json['serviceId'] as String,
+      bayId: json['bayId'] is int
+          ? json['bayId'] as int
+          : int.tryParse('${json['bayId']}'),
     );
   }
 
@@ -100,5 +110,6 @@ class Booking {
     'paidAt': paidAt?.toIso8601String(),
     'carId': carId,
     'serviceId': serviceId,
+    'bayId': bayId,
   };
 }

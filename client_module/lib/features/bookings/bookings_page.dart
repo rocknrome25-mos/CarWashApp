@@ -99,7 +99,7 @@ class _BookingsPageState extends State<BookingsPage> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
+        color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
@@ -128,7 +128,7 @@ class _BookingsPageState extends State<BookingsPage> {
     // Остальные вкладки
     switch (b.status) {
       case BookingStatus.completed:
-        return _badge(text: 'ЗАВЕРШЕНА', color: Colors.grey); // <-- серым
+        return _badge(text: 'ЗАВЕРШЕНА', color: Colors.grey);
       case BookingStatus.canceled:
         return _badge(text: 'ОТМЕНЕНА', color: Colors.red);
       case BookingStatus.pendingPayment:
@@ -172,12 +172,12 @@ class _BookingsPageState extends State<BookingsPage> {
         decoration: BoxDecoration(
           color: Theme.of(context).cardColor,
           borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: Colors.black.withOpacity(0.06)),
+          border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
           boxShadow: [
             BoxShadow(
               blurRadius: 10,
               offset: const Offset(0, 6),
-              color: Colors.black.withOpacity(0.04),
+              color: Colors.black.withValues(alpha: 0.04),
             ),
           ],
         ),
@@ -188,7 +188,7 @@ class _BookingsPageState extends State<BookingsPage> {
               width: 56,
               height: 56,
               decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.04),
+                color: Colors.black.withValues(alpha: 0.04),
                 borderRadius: BorderRadius.circular(16),
               ),
               child: const Icon(Icons.local_car_wash),
@@ -223,7 +223,7 @@ class _BookingsPageState extends State<BookingsPage> {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: 12,
-                      color: Colors.black.withOpacity(0.65),
+                      color: Colors.black.withValues(alpha: 0.65),
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -232,7 +232,7 @@ class _BookingsPageState extends State<BookingsPage> {
                     when,
                     style: TextStyle(
                       fontSize: 12,
-                      color: Colors.black.withOpacity(0.65),
+                      color: Colors.black.withValues(alpha: 0.65),
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -242,7 +242,7 @@ class _BookingsPageState extends State<BookingsPage> {
                       paymentLine,
                       style: TextStyle(
                         fontSize: 12,
-                        color: Colors.black.withOpacity(0.75),
+                        color: Colors.black.withValues(alpha: 0.75),
                         fontWeight: FontWeight.w800,
                       ),
                     ),
@@ -253,7 +253,7 @@ class _BookingsPageState extends State<BookingsPage> {
                       'Сумма: $total',
                       style: TextStyle(
                         fontSize: 12,
-                        color: Colors.black.withOpacity(0.65),
+                        color: Colors.black.withValues(alpha: 0.65),
                         fontWeight: FontWeight.w800,
                       ),
                     ),

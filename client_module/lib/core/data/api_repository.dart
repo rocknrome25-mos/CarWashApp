@@ -68,7 +68,6 @@ class ApiRepository implements AppRepository {
             as Map<String, dynamic>;
 
     cache.invalidate('cars');
-    // авто влияет на бронирования
     cache.invalidate('bookings_all');
     cache.invalidate('bookings_active');
     return Car.fromJson(j);
@@ -115,12 +114,14 @@ class ApiRepository implements AppRepository {
     required String carId,
     required String serviceId,
     required DateTime dateTime,
+    int? bayId,
   }) async {
     final j =
         await api.postJson('/bookings', {
               'carId': carId,
               'serviceId': serviceId,
               'dateTime': dateTime.toUtc().toIso8601String(),
+              if (bayId != null) 'bayId': bayId, // ✅ int в JSON
             })
             as Map<String, dynamic>;
 

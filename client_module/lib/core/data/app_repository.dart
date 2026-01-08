@@ -29,6 +29,7 @@ abstract class AppRepository {
     required String carId,
     required String serviceId,
     required DateTime dateTime,
+    int? bayId, // ✅ числом: 1/2
   });
 
   Future<Booking> cancelBooking(String id);

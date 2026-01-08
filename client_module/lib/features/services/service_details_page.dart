@@ -17,9 +17,15 @@ class ServiceDetailsPage extends StatelessWidget {
     }
 
     final n = s.name.toLowerCase();
-    if (n.contains('воск')) return const AssetImage('assets/images/services/vosk_hero.jpg');
-    if (n.contains('комплекс')) return const AssetImage('assets/images/services/kompleks_hero.jpg');
-    if (n.contains('кузов')) return const AssetImage('assets/images/services/kuzov_hero.jpg');
+    if (n.contains('воск')) {
+      return const AssetImage('assets/images/services/vosk_hero.jpg');
+    }
+    if (n.contains('комплекс')) {
+      return const AssetImage('assets/images/services/kompleks_hero.jpg');
+    }
+    if (n.contains('кузов')) {
+      return const AssetImage('assets/images/services/kuzov_hero.jpg');
+    }
 
     return const AssetImage('assets/images/services/default_hero.jpg');
   }
@@ -48,29 +54,25 @@ class ServiceDetailsPage extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 14),
-
             Text(
               service.name,
               style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
             ),
             const SizedBox(height: 10),
-
             Text(
               desc,
               style: TextStyle(
                 fontSize: 13,
-                color: Colors.black.withOpacity(0.75),
+                color: Colors.black.withValues(alpha: 0.75),
                 height: 1.35,
                 fontWeight: FontWeight.w600,
               ),
             ),
             const SizedBox(height: 14),
-
             _infoRow(title: 'Продолжительность', value: '$dur мин'),
             const SizedBox(height: 8),
             _infoRow(title: 'Стоимость', value: '${service.priceRub} ₽'),
             const SizedBox(height: 18),
-
             SizedBox(
               width: double.infinity,
               height: 48,
@@ -91,7 +93,7 @@ class ServiceDetailsPage extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(16),
-        color: Colors.black.withOpacity(0.04),
+        color: Colors.black.withValues(alpha: 0.04),
       ),
       child: Row(
         children: [
@@ -100,7 +102,7 @@ class ServiceDetailsPage extends StatelessWidget {
               title,
               style: TextStyle(
                 fontWeight: FontWeight.w800,
-                color: Colors.black.withOpacity(0.70),
+                color: Colors.black.withValues(alpha: 0.70),
               ),
             ),
           ),

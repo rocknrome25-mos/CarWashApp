@@ -39,6 +39,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
   String? carId;
   String? serviceId;
 
+  // ✅ пост/бокс (числом)
+  int _bayId = 1;
+
   DateTime _selectedDate = _dateOnly(DateTime.now());
   DateTime? _selectedSlotStart;
 
@@ -137,11 +140,15 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     return _ceilToStep(lead, _slotStepMin);
   }
 
+  // ✅ занятость учитываем только в выбранном посту
   bool _isBusySlot(DateTime slotStart, int selectedServiceMin) {
     final slotEnd = slotStart.add(Duration(minutes: selectedServiceMin));
     final now = DateTime.now();
 
     final busy = _bookings.where((b) {
+      final bBay = b.bayId ?? 1; // если вдруг нет в данных — считаем 1
+      if (bBay != _bayId) return false;
+
       if (b.status == BookingStatus.active) return true;
 
       if (b.status == BookingStatus.pendingPayment) {
@@ -263,9 +270,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     final today = _dateOnly(DateTime.now());
     final diff = _dateOnly(d).difference(today).inDays;
     if (diff == 0) return 'Сегодня';
-    if (diff == 1) {
-      return _fmtDateShort(d); // завтра = короткая дата
-    }
+    if (diff == 1) return _fmtDateShort(d);
     return _fmtDateShort(d);
   }
 
@@ -417,6 +422,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
         carId: carId!,
         serviceId: serviceId!,
         dateTime: slot,
+        bayId: _bayId, // ✅ int
       );
 
       if (!mounted) return;
@@ -448,6 +454,46 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  Widget _bayPicker() {
+    const vd = VisualDensity(horizontal: -2, vertical: -2);
+    const pad = EdgeInsets.symmetric(horizontal: 10);
+
+    return Row(
+      children: [
+        const Text('Пост', style: TextStyle(fontWeight: FontWeight.w900)),
+        const SizedBox(width: 10),
+        ChoiceChip(
+          label: const Text('1'),
+          labelPadding: pad,
+          selected: _bayId == 1,
+          visualDensity: vd,
+          onSelected: (_) {
+            setState(() {
+              _bayId = 1;
+              _selectedSlotStart = null;
+              _autoPickSlot(force: true);
+            });
+          },
+        ),
+        const SizedBox(width: 8),
+        ChoiceChip(
+          label: const Text('2'),
+          labelPadding: pad,
+          selected: _bayId == 2,
+          visualDensity: vd,
+          onSelected: (_) {
+            setState(() {
+              _bayId = 2;
+              _selectedSlotStart = null;
+              _autoPickSlot(force: true);
+            });
+          },
+        ),
+        const Spacer(),
+      ],
+    );
   }
 
   @override
@@ -484,9 +530,8 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     final carIds = _cars.map((c) => c.id).toSet();
     final serviceIds = _services.map((s) => s.id).toSet();
     final safeCarId = (carId != null && carIds.contains(carId)) ? carId : null;
-    final safeServiceId = (serviceId != null && serviceIds.contains(serviceId))
-        ? serviceId
-        : null;
+    final safeServiceId =
+        (serviceId != null && serviceIds.contains(serviceId)) ? serviceId : null;
 
     final selectedServiceMin = _serviceDurationOrDefault(safeServiceId);
     final slots = _buildSlotsForDay(_selectedDate, selectedServiceMin);
@@ -559,6 +604,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                   return null;
                 },
               ),
+              const SizedBox(height: 10),
+
+              _bayPicker(),
               const SizedBox(height: 10),
 
               Row(
@@ -641,18 +689,15 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
                           final selected = _selectedSlotStart == s;
                           final time = _fmtTime(s);
-                          final badge = busy
-                              ? 'занято'
-                              : (tooEarly ? 'рано' : null);
+                          final badge =
+                              busy ? 'занято' : (tooEarly ? 'рано' : null);
 
                           if (selected) {
                             return FilledButton(
                               style: _slotStyleFilled(),
                               onPressed: disabled
                                   ? null
-                                  : () {
-                                      setState(() => _selectedSlotStart = s);
-                                    },
+                                  : () => setState(() => _selectedSlotStart = s),
                               child: _slotLabel(time, badge: badge),
                             );
                           }
@@ -661,9 +706,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                             style: _slotStyleOutlined(),
                             onPressed: disabled
                                 ? null
-                                : () {
-                                    setState(() => _selectedSlotStart = s);
-                                  },
+                                : () => setState(() => _selectedSlotStart = s),
                             child: _slotLabel(time, badge: badge),
                           );
                         },
