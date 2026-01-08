@@ -45,9 +45,9 @@ class ContactsPage extends StatelessWidget {
     // оставляем + и цифры
     final sb = StringBuffer();
     for (final ch in p.trim().split('')) {
-      if (ch == '+' || (ch.codeUnitAt(0) >= 48 && ch.codeUnitAt(0) <= 57)) {
-        sb.write(ch);
-      }
+      final code = ch.codeUnitAt(0);
+      final isDigit = code >= 48 && code <= 57;
+      if (ch == '+' || isDigit) sb.write(ch);
     }
     return sb.toString();
   }
@@ -79,7 +79,6 @@ class ContactsPage extends StatelessWidget {
                 subtitle: 'Открыть чат в Telegram',
                 onTap: () {
                   if (tgUser.isEmpty) return;
-                  // На Android/ iOS tg:// чаще откроет приложение, на web/desktop — fallback на https
                   _openUrl(context, Uri.parse('tg://resolve?domain=$tgUser'));
                 },
                 trailing: IconButton(
@@ -96,9 +95,7 @@ class ContactsPage extends StatelessWidget {
               ),
             ],
           ),
-
           const SizedBox(height: 14),
-
           _CardSection(
             title: 'Адрес',
             children: [
@@ -116,13 +113,11 @@ class ContactsPage extends StatelessWidget {
               ),
             ],
           ),
-
           const SizedBox(height: 18),
-
           Text(
             'Подсказка: долгое нажатие копирует телефон/адрес.',
             style: TextStyle(
-              color: Colors.black.withOpacity(0.55),
+              color: Colors.black.withValues(alpha: 0.55),
               fontWeight: FontWeight.w600,
               fontSize: 12,
             ),
@@ -145,8 +140,8 @@ class _CardSection extends StatelessWidget {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(18),
-        color: Colors.black.withOpacity(0.04),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        color: Colors.black.withValues(alpha: 0.04),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -191,7 +186,7 @@ class _ActionTile extends StatelessWidget {
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(14),
           color: Theme.of(context).cardColor,
-          border: Border.all(color: Colors.black.withOpacity(0.06)),
+          border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -201,7 +196,7 @@ class _ActionTile extends StatelessWidget {
               height: 42,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(12),
-                color: Colors.black.withOpacity(0.04),
+                color: Colors.black.withValues(alpha: 0.04),
               ),
               child: Icon(icon),
             ),
@@ -222,7 +217,7 @@ class _ActionTile extends StatelessWidget {
                     Text(
                       subtitle!,
                       style: TextStyle(
-                        color: Colors.black.withOpacity(0.60),
+                        color: Colors.black.withValues(alpha: 0.60),
                         fontWeight: FontWeight.w600,
                         fontSize: 12,
                       ),
