@@ -28,23 +28,6 @@ class _CarsPageState extends State<CarsPage> {
     });
   }
 
-  ImageProvider _carAvatar(Car c) {
-    final make = c.make.toLowerCase().trim();
-
-    if (make.contains('bmw')) {
-      return const AssetImage('assets/images/cars/bmw_128.png');
-    }
-    if (make.contains('mercedes') || make.contains('benz') || make == 'mb') {
-      return const AssetImage('assets/images/cars/mercedes_128.png');
-    }
-    if (make.contains('audi')) {
-      return const AssetImage('assets/images/cars/audi_128.png');
-    }
-
-    // если марка не из 3-х — просто иконка (без ассета)
-    return const AssetImage('assets/images/cars/bmw_128.png');
-  }
-
   Future<void> _addCar() async {
     final created = await showModalBottomSheet<bool>(
       context: context,
@@ -62,9 +45,8 @@ class _CarsPageState extends State<CarsPage> {
 
     if (created == true) {
       _refresh(force: true);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Авто добавлено')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Авто добавлено')));
     }
   }
 
@@ -73,9 +55,7 @@ class _CarsPageState extends State<CarsPage> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Удалить авто?'),
-        content: const Text(
-          'Также будут удалены все записи, связанные с этим авто.',
-        ),
+        content: const Text('Также будут удалены все записи, связанные с этим авто.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
@@ -140,8 +120,7 @@ class _CarsPageState extends State<CarsPage> {
             return const EmptyState(
               icon: Icons.directions_car,
               title: 'Нет авто',
-              subtitle:
-                  'Добавь машину, чтобы можно было записываться на услуги.',
+              subtitle: 'Добавь машину, чтобы можно было записываться на услуги.',
             );
           }
 
@@ -157,8 +136,8 @@ class _CarsPageState extends State<CarsPage> {
                   child: ListTile(
                     leading: ClipRRect(
                       borderRadius: BorderRadius.circular(12),
-                      child: Image(
-                        image: _carAvatar(c),
+                      child: Image.asset(
+                        c.avatarAsset,
                         width: 44,
                         height: 44,
                         fit: BoxFit.cover,
