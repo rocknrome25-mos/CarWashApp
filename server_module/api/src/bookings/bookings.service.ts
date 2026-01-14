@@ -5,7 +5,7 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { BookingStatus } from '@prisma/client';
+import { BookingStatus, PaymentKind } from '@prisma/client';
 
 @Injectable()
 export class BookingsService {
@@ -101,7 +101,11 @@ export class BookingsService {
     return this.prisma.booking.findMany({
       where,
       orderBy: { dateTime: 'asc' },
-      include: { car: true, service: true },
+      include: {
+        car: true,
+        service: true,
+        payments: { orderBy: { paidAt: 'asc' } },
+      },
     });
   }
 
@@ -236,7 +240,11 @@ export class BookingsService {
         status: BookingStatus.PENDING_PAYMENT,
         paymentDueAt: dueAt,
       },
-      include: { car: true, service: true },
+      include: {
+        car: true,
+        service: true,
+        payments: true,
+      },
     });
   }
 
@@ -250,6 +258,8 @@ export class BookingsService {
         status: true,
         dateTime: true,
         paymentDueAt: true,
+        depositRub: true,
+        payments: { select: { id: true, kind: true } },
       },
     });
 
@@ -263,11 +273,16 @@ export class BookingsService {
     if (booking.status === BookingStatus.COMPLETED) {
       throw new ConflictException('Booking is completed');
     }
+
+    // ✅ если уже ACTIVE — идемпотентность: депозит уже оплачен
     if (booking.status === BookingStatus.ACTIVE) {
-      // идемпотентность: уже оплачено
       return this.prisma.booking.findUnique({
         where: { id },
-        include: { car: true, service: true },
+        include: {
+          car: true,
+          service: true,
+          payments: { orderBy: { paidAt: 'asc' } },
+        },
       });
     }
 
@@ -289,16 +304,35 @@ export class BookingsService {
       throw new ConflictException('Booking already started');
     }
 
-    // ✅ тестовая оплата: просто активируем
-    void body?.method;
+    // ✅ защита от дублей: если DEPOSIT уже есть — просто активируем/возвращаем
+    const hasDeposit = booking.payments?.some((p) => p.kind === PaymentKind.DEPOSIT);
+    if (!hasDeposit) {
+      await this.prisma.payment.create({
+        data: {
+          bookingId: booking.id,
+          kind: PaymentKind.DEPOSIT,
+          amountRub: booking.depositRub ?? 0,
+          method: body?.method ?? 'CARD_TEST',
+          paidAt: now,
+        },
+      });
+    }
 
-    return this.prisma.booking.update({
+    await this.prisma.booking.update({
       where: { id },
       data: {
         status: BookingStatus.ACTIVE,
-        paidAt: now,
+        paidAt: now, // ✅ время оплаты депозита (НЕ полной суммы)
       },
-      include: { car: true, service: true },
+    });
+
+    return this.prisma.booking.findUnique({
+      where: { id },
+      include: {
+        car: true,
+        service: true,
+        payments: { orderBy: { paidAt: 'asc' } },
+      },
     });
   }
 
@@ -321,7 +355,11 @@ export class BookingsService {
     if (existing.status === BookingStatus.CANCELED) {
       return this.prisma.booking.findUnique({
         where: { id },
-        include: { car: true, service: true },
+        include: {
+          car: true,
+          service: true,
+          payments: { orderBy: { paidAt: 'asc' } },
+        },
       });
     }
 
@@ -331,17 +369,14 @@ export class BookingsService {
     const end = this._end(existing.dateTime, total);
     const now = new Date();
 
-    // уже закончилось -> completed
     if (end.getTime() <= now.getTime() || existing.status === BookingStatus.COMPLETED) {
       throw new ConflictException('Cannot cancel a completed booking');
     }
 
-    // уже началось (но ещё не закончилось) -> нельзя
     if (existing.dateTime.getTime() <= now.getTime()) {
       throw new BadRequestException('Cannot cancel a started booking');
     }
 
-    // ✅ PENDING_PAYMENT и ACTIVE до старта можно отменять
     return this.prisma.booking.update({
       where: { id },
       data: {
@@ -352,7 +387,11 @@ export class BookingsService {
             ? 'USER_CANCELED_PENDING'
             : 'USER_CANCELED',
       },
-      include: { car: true, service: true },
+      include: {
+        car: true,
+        service: true,
+        payments: { orderBy: { paidAt: 'asc' } },
+      },
     });
   }
 }

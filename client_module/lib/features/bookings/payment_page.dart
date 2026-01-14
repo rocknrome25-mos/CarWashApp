@@ -47,7 +47,10 @@ class _PaymentPageState extends State<PaymentPage> {
     _recalc();
 
     _tickTimer = Timer.periodic(const Duration(seconds: 1), (_) => _recalc());
-    _syncTimer = Timer.periodic(const Duration(seconds: 3), (_) => _syncBooking());
+    _syncTimer = Timer.periodic(
+      const Duration(seconds: 3),
+      (_) => _syncBooking(),
+    );
 
     _syncBooking();
   }
@@ -69,7 +72,9 @@ class _PaymentPageState extends State<PaymentPage> {
     if (!mounted) return;
 
     if (toast != null) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(toast)));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(toast)));
     }
 
     Future.microtask(() {
@@ -119,7 +124,7 @@ class _PaymentPageState extends State<PaymentPage> {
       _recalc();
 
       if (fresh.status == BookingStatus.active) {
-        _close(true, toast: 'Бронь оплачена. Запись подтверждена.');
+        _close(true, toast: 'Бронирование оплачено. Запись подтверждена.');
         return;
       }
       if (fresh.status == BookingStatus.canceled) {
@@ -150,7 +155,9 @@ class _PaymentPageState extends State<PaymentPage> {
     if (_left == Duration.zero && _dueAt != null) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Время на оплату истекло. Обновляю статус...')),
+        const SnackBar(
+          content: Text('Время на оплату истекло. Обновляю статус...'),
+        ),
       );
       await _syncBooking();
       return;
@@ -161,20 +168,17 @@ class _PaymentPageState extends State<PaymentPage> {
     try {
       final current = _booking ?? widget.booking;
 
-      await widget.repo.payBooking(
-        bookingId: current.id,
-        method: 'CARD_TEST',
-      );
+      await widget.repo.payBooking(bookingId: current.id, method: 'CARD_TEST');
 
       if (!mounted || _closing) return;
 
-      _close(true, toast: 'Оплата брони прошла. Запись подтверждена.');
+      _close(true, toast: 'Бронирование оплачено. Запись подтверждена.');
     } catch (e) {
       if (!mounted || _closing) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Ошибка оплаты: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Ошибка оплаты: $e')));
 
       await _syncBooking();
     } finally {
@@ -190,15 +194,20 @@ class _PaymentPageState extends State<PaymentPage> {
     final title = service?.name ?? 'Услуга';
 
     final total = service?.priceRub;
-    final remaining =
-        (total == null) ? null : ((total - widget.depositRub) > 0 ? (total - widget.depositRub) : 0);
+    final remaining = (total == null)
+        ? null
+        : ((total - widget.depositRub) > 0 ? (total - widget.depositRub) : 0);
 
     final isPending = b.status == BookingStatus.pendingPayment;
     final hasDue = _dueAt != null;
-    final canPay = isPending && (!hasDue || _left != Duration.zero) && !_paying && !_closing;
+    final canPay =
+        isPending &&
+        (!hasDue || _left != Duration.zero) &&
+        !_paying &&
+        !_closing;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Оплата брони')),
+      appBar: AppBar(title: Text('Бронирование ${widget.depositRub} ₽')),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -210,7 +219,10 @@ class _PaymentPageState extends State<PaymentPage> {
             ),
             const SizedBox(height: 10),
 
-            Text('Оплата брони: ${widget.depositRub} ₽', style: const TextStyle(fontWeight: FontWeight.w800)),
+            Text(
+              'Бронирование: ${widget.depositRub} ₽',
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
             const SizedBox(height: 6),
 
             if (remaining != null)
@@ -249,7 +261,11 @@ class _PaymentPageState extends State<PaymentPage> {
               child: FilledButton.icon(
                 onPressed: canPay ? _pay : null,
                 icon: const Icon(Icons.credit_card),
-                label: Text(_paying ? 'Оплачиваю...' : 'Оплатить бронь (тест)'),
+                label: Text(
+                  _paying
+                      ? 'Бронирую...'
+                      : 'Забронировать ${widget.depositRub} ₽',
+                ),
               ),
             ),
             const SizedBox(height: 10),

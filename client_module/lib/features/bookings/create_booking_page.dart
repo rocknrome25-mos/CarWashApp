@@ -30,10 +30,10 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
   static const int _quickPinnedDays = 2;
 
   @override
-void initState() {
-  super.initState();
-  _bootstrap();
-}
+  void initState() {
+    super.initState();
+    _bootstrap();
+  }
 
   // ✅ новые правила
   static const int _bufferMin = 15; // буфер к длительности услуги
@@ -806,12 +806,27 @@ void initState() {
                     color: Colors.black.withValues(alpha: 0.06),
                   ),
                 ),
-                child: Text(
-                  'Оплата брони: $_depositRub ₽. Остаток к оплате на месте: $remaining ₽.',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 12,
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Оплата брони: $_depositRub ₽',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    if (remaining != null)
+                      Text(
+                        'Остаток к оплате на месте: $remaining ₽',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 12,
+                          color: Colors.black.withValues(alpha: 0.65),
+                        ),
+                      ),
+                  ],
                 ),
               ),
 

@@ -66,7 +66,7 @@ class _AddCarSheetState extends State<AddCarSheet> {
       children: [
         const Center(
           child: Text(
-            'Форма моего авто',
+            'Тип моего авто',
             textAlign: TextAlign.center,
             style: TextStyle(fontWeight: FontWeight.w400, fontSize: 14),
           ),

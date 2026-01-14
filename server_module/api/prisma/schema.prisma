@@ -46,6 +46,13 @@ enum BookingStatus {
   PENDING_PAYMENT
 }
 
+enum PaymentKind {
+  DEPOSIT
+  REMAINING
+  REFUND
+  OTHER
+}
+
 model Booking {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
@@ -69,9 +76,11 @@ model Booking {
   /// Статус записи
   status BookingStatus @default(PENDING_PAYMENT)
 
-  /// Оплата
+  /// Дедлайн оплаты брони (депозита)
   paymentDueAt DateTime?
-  paidAt       DateTime?
+
+  /// (legacy/удобство) время оплаты депозита (оставляем, чтобы не ломать старый UI/логику)
+  paidAt DateTime?
 
   /// Отмена
   canceledAt   DateTime?
@@ -83,10 +92,29 @@ model Booking {
   car     Car     @relation(fields: [carId], references: [id], onDelete: Cascade)
   service Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
 
+  /// ✅ Оплаты (много платежей)
+  payments Payment[]
+
   @@index([carId])
   @@index([serviceId])
   @@index([dateTime])
   @@index([status])
   @@index([paymentDueAt])
   @@index([bayId])
+}
+
+model Payment {
+  id        String      @id @default(cuid())
+  createdAt DateTime    @default(now())
+  paidAt    DateTime    @default(now())
+  amountRub Int
+  method    String?
+  kind      PaymentKind @default(OTHER)
+
+  bookingId String
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([bookingId])
+  @@index([paidAt])
+  @@index([kind])
 }

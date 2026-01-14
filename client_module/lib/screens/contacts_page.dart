@@ -32,7 +32,7 @@ class ContactsPage extends StatelessWidget {
     if (!context.mounted) return;
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(SnackBar(content: Text('$label скопировано')));
+    ).showSnackBar(SnackBar(content: Text('$label скопирован')));
   }
 
   String _normalizeTelegram(String t) {

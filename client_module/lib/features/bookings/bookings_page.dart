@@ -114,27 +114,31 @@ class _BookingsPageState extends State<BookingsPage> {
   }
 
   Widget _statusBadgeForTabs({required Booking b, required bool isActiveTab}) {
-    // Активные: статус "АКТИВНА" не показываем
     if (isActiveTab) {
       if (b.status == BookingStatus.pendingPayment) {
-        return _badge(text: 'ОЖИДАЕТ ОПЛАТЫ', color: Colors.orange);
+        return _badge(
+          text: 'ОЖИДАЕТ ОПЛАТЫ БРОНИРОВАНИЯ',
+          color: Colors.orange,
+        );
       }
-      if (b.paidAt != null) {
-        return _badge(text: 'ОПЛАЧЕНО', color: Colors.green);
+      if (b.status == BookingStatus.active) {
+        return _badge(text: 'ЗАБРОНИРОВАНО', color: Colors.green);
       }
       return const SizedBox.shrink();
     }
 
-    // Остальные вкладки
     switch (b.status) {
       case BookingStatus.completed:
-        return _badge(text: 'ЗАВЕРШЕНА', color: Colors.grey);
+        return _badge(text: 'ЗАВЕРШЕНО', color: Colors.grey);
       case BookingStatus.canceled:
-        return _badge(text: 'ОТМЕНЕНА', color: Colors.red);
+        return _badge(text: 'ОТМЕНЕНО', color: Colors.red);
       case BookingStatus.pendingPayment:
-        return _badge(text: 'ОЖИДАЕТ ОПЛАТЫ', color: Colors.orange);
+        return _badge(
+          text: 'ОЖИДАЕТ ОПЛАТЫ БРОНИРОВАНИЯ',
+          color: Colors.orange,
+        );
       case BookingStatus.active:
-        return _badge(text: 'АКТИВНА', color: Colors.blueGrey);
+        return _badge(text: 'ЗАБРОНИРОВАНО', color: Colors.green);
     }
   }
 
@@ -153,13 +157,15 @@ class _BookingsPageState extends State<BookingsPage> {
         ? 'Авто удалено'
         : '${car.make} ${car.model} (${car.plateDisplay})';
     final when = '${_dateText(b.dateTime)} • ${_timeText(b.dateTime)}';
-    final total = service == null ? null : '${service.priceRub} ₽';
+
+    final totalRub = service?.priceRub;
+    final paidRub = b.paidTotalRub;
 
     String? paymentLine;
     if (b.status == BookingStatus.pendingPayment && b.paymentDueAt != null) {
-      paymentLine = 'Оплатить до: ${_timeText(b.paymentDueAt!)}';
-    } else if (b.paidAt != null) {
-      paymentLine = 'Оплата: ${_dateTimeText(b.paidAt!)}';
+      paymentLine = 'Оплатить бронь до: ${_timeText(b.paymentDueAt!)}';
+    } else if (b.status == BookingStatus.active && b.depositPaidAt != null) {
+      paymentLine = 'Бронь подтверждена: ${_dateTimeText(b.depositPaidAt!)}';
     }
 
     final badge = _statusBadgeForTabs(b: b, isActiveTab: isActiveTab);
@@ -247,10 +253,10 @@ class _BookingsPageState extends State<BookingsPage> {
                       ),
                     ),
                   ],
-                  if (total != null) ...[
+                  if (totalRub != null) ...[
                     const SizedBox(height: 8),
                     Text(
-                      'Сумма: $total',
+                      'Оплачено: $paidRub ₽ из $totalRub ₽',
                       style: TextStyle(
                         fontSize: 12,
                         color: Colors.black.withValues(alpha: 0.65),

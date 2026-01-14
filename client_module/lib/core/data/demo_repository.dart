@@ -2,6 +2,7 @@ import '../data/app_repository.dart';
 import '../models/booking.dart';
 import '../models/car.dart';
 import '../models/service.dart';
+import '../models/payment.dart';
 import '../utils/normalize.dart';
 
 class DemoRepository implements AppRepository {
@@ -84,9 +85,9 @@ class DemoRepository implements AppRepository {
     bool includeCanceled = false,
     bool forceRefresh = false,
   }) async {
-    // демо-хаускипинг: просроченные pending -> canceled
     final now = DateTime.now();
 
+    // демо-хаускипинг: просроченные pending -> canceled
     for (var i = 0; i < _bookings.length; i++) {
       final b = _bookings[i];
       if (b.status == BookingStatus.pendingPayment &&
@@ -99,6 +100,8 @@ class DemoRepository implements AppRepository {
           dateTime: b.dateTime,
           status: BookingStatus.canceled,
           bayId: b.bayId,
+          bufferMin: b.bufferMin,
+          depositRub: b.depositRub,
           canceledAt: now,
           cancelReason: 'PAYMENT_EXPIRED',
           paymentDueAt: b.paymentDueAt,
@@ -106,6 +109,7 @@ class DemoRepository implements AppRepository {
           carId: b.carId,
           serviceId: b.serviceId,
           comment: b.comment,
+          payments: b.payments,
         );
       }
     }
@@ -117,7 +121,6 @@ class DemoRepository implements AppRepository {
     return List.unmodifiable(list);
   }
 
-  // ✅ ОБНОВЛЁННАЯ сигнатура — теперь совпадает с AppRepository
   @override
   Future<Booking> createBooking({
     required String carId,
@@ -145,7 +148,10 @@ class DemoRepository implements AppRepository {
       dateTime: dateTime,
       status: BookingStatus.pendingPayment,
       bayId: bayId ?? 1,
-      comment: comment?.trim().isEmpty ?? true ? null : comment,
+      depositRub: depositRub ?? 500,
+      bufferMin: bufferMin ?? 15,
+      comment: (comment?.trim().isEmpty ?? true) ? null : comment!.trim(),
+      payments: const [],
     );
 
     _bookings.add(b);
@@ -170,7 +176,6 @@ class DemoRepository implements AppRepository {
         status: BookingStatus.active,
         carId: '',
         serviceId: '',
-        paidAt: now,
       );
     }
 
@@ -186,6 +191,8 @@ class DemoRepository implements AppRepository {
         dateTime: old.dateTime,
         status: BookingStatus.canceled,
         bayId: old.bayId,
+        bufferMin: old.bufferMin,
+        depositRub: old.depositRub,
         canceledAt: now,
         cancelReason: 'PAYMENT_EXPIRED',
         paymentDueAt: old.paymentDueAt,
@@ -193,9 +200,28 @@ class DemoRepository implements AppRepository {
         carId: old.carId,
         serviceId: old.serviceId,
         comment: old.comment,
+        payments: old.payments,
       );
       _bookings[idx] = canceled;
       return canceled;
+    }
+
+    // добавляем платеж депозит (если ещё нет)
+    final hasDeposit = old.payments.any((p) => p.kind == PaymentKind.deposit);
+    final newPayments = [...old.payments];
+
+    if (!hasDeposit) {
+      newPayments.add(
+        Payment(
+          id: DateTime.now().microsecondsSinceEpoch.toString(),
+          createdAt: now,
+          paidAt: now,
+          amountRub: old.depositRub > 0 ? old.depositRub : 500,
+          kind: PaymentKind.deposit,
+          bookingId: old.id,
+          method: method ?? 'CARD_TEST',
+        ),
+      );
     }
 
     final updated = Booking(
@@ -205,6 +231,8 @@ class DemoRepository implements AppRepository {
       dateTime: old.dateTime,
       status: BookingStatus.active,
       bayId: old.bayId,
+      bufferMin: old.bufferMin,
+      depositRub: old.depositRub,
       canceledAt: null,
       cancelReason: null,
       paymentDueAt: old.paymentDueAt,
@@ -212,6 +240,7 @@ class DemoRepository implements AppRepository {
       carId: old.carId,
       serviceId: old.serviceId,
       comment: old.comment,
+      payments: newPayments,
     );
 
     _bookings[idx] = updated;
@@ -253,7 +282,10 @@ class DemoRepository implements AppRepository {
       dateTime: old.dateTime,
       status: BookingStatus.canceled,
       bayId: old.bayId,
+      bufferMin: old.bufferMin,
+      depositRub: old.depositRub,
       comment: old.comment,
+      payments: old.payments,
     );
 
     _bookings[idx] = updated;
