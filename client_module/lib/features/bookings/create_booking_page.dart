@@ -734,12 +734,14 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                 child: slots.isEmpty
                     ? const Center(child: Text('Нет слотов на выбранную дату'))
                     : GridView.builder(
-                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: cols,
-                          mainAxisSpacing: 8,
-                          crossAxisSpacing: 8,
-                          childAspectRatio: 3.2,
-                        ),
+                        gridDelegate:
+                            const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount:
+                                  3, // будет переопределено ниже через cols
+                              mainAxisSpacing: 8,
+                              crossAxisSpacing: 8,
+                              childAspectRatio: 3.2,
+                            ).copyWith(crossAxisCount: cols),
                         itemCount: slots.length,
                         itemBuilder: (context, i) {
                           final s = slots[i];
@@ -809,23 +811,22 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
+                    const Text(
                       'Оплата брони: $_depositRub ₽',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontWeight: FontWeight.w800,
                         fontSize: 12,
                       ),
                     ),
                     const SizedBox(height: 4),
-                    if (remaining != null)
-                      Text(
-                        'Остаток к оплате на месте: $remaining ₽',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 12,
-                          color: Colors.black.withValues(alpha: 0.65),
-                        ),
+                    Text(
+                      'Остаток к оплате на месте: $remaining ₽',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12,
+                        color: Colors.black.withValues(alpha: 0.65),
                       ),
+                    ),
                   ],
                 ),
               ),
@@ -846,6 +847,22 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
           ),
         ),
       ),
+    );
+  }
+}
+
+extension on SliverGridDelegateWithFixedCrossAxisCount {
+  SliverGridDelegateWithFixedCrossAxisCount copyWith({
+    int? crossAxisCount,
+    double? mainAxisSpacing,
+    double? crossAxisSpacing,
+    double? childAspectRatio,
+  }) {
+    return SliverGridDelegateWithFixedCrossAxisCount(
+      crossAxisCount: crossAxisCount ?? this.crossAxisCount,
+      mainAxisSpacing: mainAxisSpacing ?? this.mainAxisSpacing,
+      crossAxisSpacing: crossAxisSpacing ?? this.crossAxisSpacing,
+      childAspectRatio: childAspectRatio ?? this.childAspectRatio,
     );
   }
 }
