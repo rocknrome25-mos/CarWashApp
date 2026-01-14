@@ -21,13 +21,22 @@ export class BookingsController {
   }
 
   // POST /bookings
-  @Post()
-  create(
-    @Body()
-    body: { carId: string; serviceId: string; dateTime: string },
-  ) {
-    return this.bookingsService.create(body);
-  }
+@Post()
+create(
+  @Body()
+  body: {
+    carId: string;
+    serviceId: string;
+    dateTime: string;
+    bayId?: number;
+    depositRub?: number;
+    bufferMin?: number;
+    comment?: string;
+  },
+) {
+  return this.bookingsService.create(body);
+}
+
 
   // POST /bookings/:id/pay
   @Post(':id/pay')

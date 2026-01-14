@@ -11,7 +11,6 @@ BookingStatus bookingStatusFromJson(String v) {
     case 'COMPLETED':
       return BookingStatus.completed;
     default:
-      // безопасный дефолт
       return BookingStatus.active;
   }
 }
@@ -34,24 +33,23 @@ class Booking {
   final DateTime createdAt;
   final DateTime updatedAt;
 
-  /// Время начала услуги (локально/UTC неважно — парсим как пришло, отображаем .toLocal())
   final DateTime dateTime;
 
   final BookingStatus status;
 
-  /// Для отмены
   final DateTime? canceledAt;
   final String? cancelReason;
 
-  /// Для оплаты
   final DateTime? paymentDueAt;
   final DateTime? paidAt;
 
   final String carId;
   final String serviceId;
 
-  /// ✅ номер поста (бокса)
   final int? bayId;
+
+  // ✅ новое
+  final String? comment;
 
   Booking({
     required this.id,
@@ -66,13 +64,20 @@ class Booking {
     this.paymentDueAt,
     this.paidAt,
     this.bayId,
+    this.comment,
   });
 
   factory Booking.fromJson(Map<String, dynamic> json) {
     final cancelReasonRaw = (json['cancelReason'] as String?)?.trim();
-    final cancelReason = (cancelReasonRaw?.isEmpty ?? true)
-        ? null
-        : cancelReasonRaw;
+    final cancelReason = (cancelReasonRaw?.isEmpty ?? true) ? null : cancelReasonRaw;
+
+    // comment может приходить по-разному — парсим мягко
+    String? comment = (json['comment'] as String?) ??
+        (json['clientComment'] as String?) ??
+        (json['customerComment'] as String?) ??
+        (json['notes'] as String?);
+    comment = comment?.trim();
+    if (comment != null && comment.isEmpty) comment = null;
 
     return Booking(
       id: json['id'] as String,
@@ -80,36 +85,30 @@ class Booking {
       updatedAt: DateTime.parse(json['updatedAt'] as String),
       dateTime: DateTime.parse(json['dateTime'] as String),
       status: bookingStatusFromJson((json['status'] ?? 'ACTIVE') as String),
-      canceledAt: json['canceledAt'] == null
-          ? null
-          : DateTime.parse(json['canceledAt'] as String),
+      canceledAt: json['canceledAt'] == null ? null : DateTime.parse(json['canceledAt'] as String),
       cancelReason: cancelReason,
-      paymentDueAt: json['paymentDueAt'] == null
-          ? null
-          : DateTime.parse(json['paymentDueAt'] as String),
-      paidAt: json['paidAt'] == null
-          ? null
-          : DateTime.parse(json['paidAt'] as String),
+      paymentDueAt: json['paymentDueAt'] == null ? null : DateTime.parse(json['paymentDueAt'] as String),
+      paidAt: json['paidAt'] == null ? null : DateTime.parse(json['paidAt'] as String),
       carId: json['carId'] as String,
       serviceId: json['serviceId'] as String,
-      bayId: json['bayId'] is int
-          ? json['bayId'] as int
-          : int.tryParse('${json['bayId']}'),
+      bayId: json['bayId'] is int ? json['bayId'] as int : int.tryParse('${json['bayId']}'),
+      comment: comment,
     );
   }
 
   Map<String, dynamic> toJson() => {
-    'id': id,
-    'createdAt': createdAt.toIso8601String(),
-    'updatedAt': updatedAt.toIso8601String(),
-    'dateTime': dateTime.toIso8601String(),
-    'status': bookingStatusToJson(status),
-    'canceledAt': canceledAt?.toIso8601String(),
-    'cancelReason': cancelReason,
-    'paymentDueAt': paymentDueAt?.toIso8601String(),
-    'paidAt': paidAt?.toIso8601String(),
-    'carId': carId,
-    'serviceId': serviceId,
-    'bayId': bayId,
-  };
+        'id': id,
+        'createdAt': createdAt.toIso8601String(),
+        'updatedAt': updatedAt.toIso8601String(),
+        'dateTime': dateTime.toIso8601String(),
+        'status': bookingStatusToJson(status),
+        'canceledAt': canceledAt?.toIso8601String(),
+        'cancelReason': cancelReason,
+        'paymentDueAt': paymentDueAt?.toIso8601String(),
+        'paidAt': paidAt?.toIso8601String(),
+        'carId': carId,
+        'serviceId': serviceId,
+        'bayId': bayId,
+        'comment': comment,
+      };
 }

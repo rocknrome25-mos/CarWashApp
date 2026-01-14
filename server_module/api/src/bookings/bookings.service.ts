@@ -28,6 +28,13 @@ export class BookingsService {
     return typeof durationMin === 'number' && durationMin > 0 ? durationMin : 30;
   }
 
+  private _clampInt(n: unknown, def: number, min: number, max: number) {
+    const x = typeof n === 'number' ? n : Number(n);
+    if (!Number.isFinite(x)) return def;
+    const xi = Math.trunc(x);
+    return Math.max(min, Math.min(max, xi));
+  }
+
   // ✅ auto-cancel pending when payment deadline passed
   private async _expirePendingPayments(): Promise<void> {
     const now = new Date();
@@ -57,14 +64,16 @@ export class BookingsService {
       select: {
         id: true,
         dateTime: true,
+        bufferMin: true,
         service: { select: { durationMin: true } },
       },
     });
 
     const toCompleteIds = candidates
       .filter((b) => {
-        const dur = this._serviceDurationOrDefault(b.service?.durationMin);
-        const end = this._end(b.dateTime, dur);
+        const base = this._serviceDurationOrDefault(b.service?.durationMin);
+        const total = base + (b.bufferMin ?? 0);
+        const end = this._end(b.dateTime, total);
         return end.getTime() < now.getTime();
       })
       .map((b) => b.id);
@@ -85,8 +94,6 @@ export class BookingsService {
   async findAll(includeCanceled: boolean) {
     await this._housekeeping();
 
-    // includeCanceled=true => show all
-    // includeCanceled=false => hide only canceled
     const where = includeCanceled
       ? {}
       : { status: { not: BookingStatus.CANCELED } };
@@ -98,7 +105,15 @@ export class BookingsService {
     });
   }
 
-  async create(body: { carId: string; serviceId: string; dateTime: string }) {
+  async create(body: {
+    carId: string;
+    serviceId: string;
+    dateTime: string;
+    bayId?: number;
+    depositRub?: number;
+    bufferMin?: number;
+    comment?: string;
+  }) {
     await this._housekeeping();
 
     if (!body || !body.carId || !body.serviceId || !body.dateTime) {
@@ -117,6 +132,15 @@ export class BookingsService {
       throw new BadRequestException('Cannot create booking in the past');
     }
 
+    // sanity для новых полей
+    const bayId = this._clampInt(body.bayId, 1, 1, 20);
+    const bufferMin = this._clampInt(body.bufferMin, 15, 0, 120);
+    const depositRub = this._clampInt(body.depositRub, 500, 0, 1_000_000);
+    const comment =
+      typeof body.comment === 'string' && body.comment.trim().length > 0
+        ? body.comment.trim().slice(0, 500)
+        : null;
+
     const car = await this.prisma.car.findUnique({ where: { id: body.carId } });
     if (!car) throw new BadRequestException('Car not found');
 
@@ -126,9 +150,11 @@ export class BookingsService {
     });
     if (!service) throw new BadRequestException('Service not found');
 
-    const newDur = this._serviceDurationOrDefault(service.durationMin);
+    const baseDur = this._serviceDurationOrDefault(service.durationMin);
+    const newDurTotal = baseDur + bufferMin;
+
     const newStart = dt;
-    const newEnd = this._end(newStart, newDur);
+    const newEnd = this._end(newStart, newDurTotal);
 
     // ✅ окно шире вокруг новой записи (±1 день)
     const windowStart = new Date(newStart.getTime() - 24 * 60 * 60 * 1000);
@@ -140,6 +166,7 @@ export class BookingsService {
     const nearby = await this.prisma.booking.findMany({
       where: {
         status: { in: busyStatuses },
+        bayId,
         dateTime: { gte: windowStart, lte: windowEnd },
       },
       select: {
@@ -148,6 +175,7 @@ export class BookingsService {
         dateTime: true,
         status: true,
         paymentDueAt: true,
+        bufferMin: true,
         service: { select: { durationMin: true } },
       },
     });
@@ -163,9 +191,12 @@ export class BookingsService {
     });
 
     const anyOverlap = relevant.find((b) => {
-      const dur = this._serviceDurationOrDefault(b.service?.durationMin);
+      const bBase = this._serviceDurationOrDefault(b.service?.durationMin);
+      const bTotal = bBase + (b.bufferMin ?? 0);
+
       const bStart = b.dateTime;
-      const bEnd = this._end(bStart, dur);
+      const bEnd = this._end(bStart, bTotal);
+
       return this._overlaps(newStart, newEnd, bStart, bEnd);
     });
 
@@ -175,9 +206,13 @@ export class BookingsService {
 
     const carOverlap = relevant.find((b) => {
       if (b.carId !== body.carId) return false;
-      const dur = this._serviceDurationOrDefault(b.service?.durationMin);
+
+      const bBase = this._serviceDurationOrDefault(b.service?.durationMin);
+      const bTotal = bBase + (b.bufferMin ?? 0);
+
       const bStart = b.dateTime;
-      const bEnd = this._end(bStart, dur);
+      const bEnd = this._end(bStart, bTotal);
+
       return this._overlaps(newStart, newEnd, bStart, bEnd);
     });
 
@@ -192,6 +227,12 @@ export class BookingsService {
         carId: body.carId,
         serviceId: body.serviceId,
         dateTime: dt,
+
+        bayId,
+        bufferMin,
+        depositRub,
+        comment,
+
         status: BookingStatus.PENDING_PAYMENT,
         paymentDueAt: dueAt,
       },
@@ -249,8 +290,8 @@ export class BookingsService {
     }
 
     // ✅ тестовая оплата: просто активируем
-    // method пока не сохраняем (можно добавить поле paymentMethod позже)
-    void body?.method; // чтобы линтер не ругался на неиспользуемый параметр (если включен)
+    void body?.method;
+
     return this.prisma.booking.update({
       where: { id },
       data: {
@@ -271,6 +312,7 @@ export class BookingsService {
         status: true,
         dateTime: true,
         paymentDueAt: true,
+        bufferMin: true,
         service: { select: { durationMin: true } },
       },
     });
@@ -283,8 +325,10 @@ export class BookingsService {
       });
     }
 
-    const dur = this._serviceDurationOrDefault(existing.service?.durationMin);
-    const end = this._end(existing.dateTime, dur);
+    const base = this._serviceDurationOrDefault(existing.service?.durationMin);
+    const total = base + (existing.bufferMin ?? 0);
+
+    const end = this._end(existing.dateTime, total);
     const now = new Date();
 
     // уже закончилось -> completed

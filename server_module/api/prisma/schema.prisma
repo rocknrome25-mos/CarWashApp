@@ -51,16 +51,30 @@ model Booking {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  /// Время начала услуги
   dateTime DateTime
 
-  status BookingStatus @default(PENDING_PAYMENT)
-  canceledAt DateTime?
+  /// Номер поста (1, 2, …)
+  bayId Int @default(1)
 
-  // --- payment flow ---
+  /// Буфер в минутах (обычно 15)
+  bufferMin Int @default(0)
+
+  /// Сумма брони (500 ₽)
+  depositRub Int @default(0)
+
+  /// Комментарий клиента
+  comment String?
+
+  /// Статус записи
+  status BookingStatus @default(PENDING_PAYMENT)
+
+  /// Оплата
   paymentDueAt DateTime?
   paidAt       DateTime?
 
-  // --- debug/audit ---
+  /// Отмена
+  canceledAt   DateTime?
   cancelReason String?
 
   carId     String
@@ -74,4 +88,5 @@ model Booking {
   @@index([dateTime])
   @@index([status])
   @@index([paymentDueAt])
+  @@index([bayId])
 }

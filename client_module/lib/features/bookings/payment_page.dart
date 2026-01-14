@@ -10,11 +10,15 @@ class PaymentPage extends StatefulWidget {
   final Booking booking;
   final Service? service;
 
+  // ✅ депозит (оплата брони)
+  final int depositRub;
+
   const PaymentPage({
     super.key,
     required this.repo,
     required this.booking,
     required this.service,
+    required this.depositRub,
   });
 
   @override
@@ -31,7 +35,6 @@ class _PaymentPageState extends State<PaymentPage> {
   bool _paying = false;
   bool _syncing = false;
 
-  // ✅ prevents double pop / navigation races
   bool _closing = false;
 
   DateTime? get _dueAt => _booking?.paymentDueAt;
@@ -43,16 +46,9 @@ class _PaymentPageState extends State<PaymentPage> {
 
     _recalc();
 
-    // тик для отображения таймера
     _tickTimer = Timer.periodic(const Duration(seconds: 1), (_) => _recalc());
+    _syncTimer = Timer.periodic(const Duration(seconds: 3), (_) => _syncBooking());
 
-    // синхронизация статуса с бэком
-    _syncTimer = Timer.periodic(
-      const Duration(seconds: 3),
-      (_) => _syncBooking(),
-    );
-
-    // первый sync сразу
     _syncBooking();
   }
 
@@ -63,7 +59,6 @@ class _PaymentPageState extends State<PaymentPage> {
     super.dispose();
   }
 
-  // ✅ One safe exit point
   void _close(bool result, {String? toast}) {
     if (_closing) return;
     _closing = true;
@@ -74,12 +69,9 @@ class _PaymentPageState extends State<PaymentPage> {
     if (!mounted) return;
 
     if (toast != null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(toast)));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(toast)));
     }
 
-    // microtask to avoid "pop during build / pop during async tick" issues
     Future.microtask(() {
       if (!mounted) return;
       Navigator.of(context).pop(result);
@@ -126,9 +118,8 @@ class _PaymentPageState extends State<PaymentPage> {
       setState(() => _booking = fresh);
       _recalc();
 
-      // ✅ if status changed — close page once
       if (fresh.status == BookingStatus.active) {
-        _close(true, toast: 'Запись подтверждена.');
+        _close(true, toast: 'Бронь оплачена. Запись подтверждена.');
         return;
       }
       if (fresh.status == BookingStatus.canceled) {
@@ -140,7 +131,7 @@ class _PaymentPageState extends State<PaymentPage> {
         return;
       }
     } catch (_) {
-      // молча: не спамим каждые 3 сек
+      // молча
     } finally {
       _syncing = false;
     }
@@ -156,13 +147,10 @@ class _PaymentPageState extends State<PaymentPage> {
   Future<void> _pay() async {
     if (_paying || _closing) return;
 
-    // если дедлайн уже 0 — ждём авто-отмену/синк
-    if (_left == Duration.zero) {
+    if (_left == Duration.zero && _dueAt != null) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Время на оплату истекло. Обновляю статус...'),
-        ),
+        const SnackBar(content: Text('Время на оплату истекло. Обновляю статус...')),
       );
       await _syncBooking();
       return;
@@ -174,23 +162,20 @@ class _PaymentPageState extends State<PaymentPage> {
       final current = _booking ?? widget.booking;
 
       await widget.repo.payBooking(
-        bookingId: current.id, // ✅ pay current booking id
+        bookingId: current.id,
         method: 'CARD_TEST',
       );
 
       if (!mounted || _closing) return;
 
-      // Можно либо сразу закрыть, либо дать синку подтвердить.
-      // Я закрываю сразу, чтобы UI не зависел от таймера.
-      _close(true, toast: 'Оплата прошла. Запись подтверждена.');
+      _close(true, toast: 'Оплата брони прошла. Запись подтверждена.');
     } catch (e) {
       if (!mounted || _closing) return;
 
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Ошибка оплаты: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Ошибка оплаты: $e')),
+      );
 
-      // подтянем статус (вдруг уже отменили/подтвердили)
       await _syncBooking();
     } finally {
       if (mounted && !_closing) setState(() => _paying = false);
@@ -203,13 +188,17 @@ class _PaymentPageState extends State<PaymentPage> {
 
     final service = widget.service;
     final title = service?.name ?? 'Услуга';
-    final price = service == null ? '—' : '${service.priceRub} ₽';
+
+    final total = service?.priceRub;
+    final remaining =
+        (total == null) ? null : ((total - widget.depositRub) > 0 ? (total - widget.depositRub) : 0);
 
     final isPending = b.status == BookingStatus.pendingPayment;
-    final canPay = isPending && _left != Duration.zero && !_paying && !_closing;
+    final hasDue = _dueAt != null;
+    final canPay = isPending && (!hasDue || _left != Duration.zero) && !_paying && !_closing;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Оплата')),
+      appBar: AppBar(title: const Text('Оплата брони')),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -219,8 +208,20 @@ class _PaymentPageState extends State<PaymentPage> {
               title,
               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
             ),
-            const SizedBox(height: 8),
-            Text('Стоимость: $price'),
+            const SizedBox(height: 10),
+
+            Text('Оплата брони: ${widget.depositRub} ₽', style: const TextStyle(fontWeight: FontWeight.w800)),
+            const SizedBox(height: 6),
+
+            if (remaining != null)
+              Text(
+                'Остаток к оплате на месте: $remaining ₽',
+                style: TextStyle(
+                  color: Colors.black.withValues(alpha: 0.65),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+
             const SizedBox(height: 14),
 
             if (_dueAt != null) ...[
@@ -238,9 +239,7 @@ class _PaymentPageState extends State<PaymentPage> {
                     : 'Если не оплатить вовремя — запись отменится автоматически.',
               ),
             ] else ...[
-              const Text(
-                'Нет дедлайна оплаты (backend не вернул paymentDueAt).',
-              ),
+              const Text('Дедлайн оплаты не задан.'),
             ],
 
             const Spacer(),
@@ -250,7 +249,7 @@ class _PaymentPageState extends State<PaymentPage> {
               child: FilledButton.icon(
                 onPressed: canPay ? _pay : null,
                 icon: const Icon(Icons.credit_card),
-                label: Text(_paying ? 'Оплачиваю...' : 'Оплатить (тест)'),
+                label: Text(_paying ? 'Оплачиваю...' : 'Оплатить бронь (тест)'),
               ),
             ),
             const SizedBox(height: 10),

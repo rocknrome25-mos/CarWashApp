@@ -11,7 +11,6 @@ class ApiRepository implements AppRepository {
 
   ApiRepository({required this.api, required this.cache});
 
-  // ---- SERVICES ----
   @override
   Future<List<Service>> getServices({bool forceRefresh = false}) async {
     const key = 'services';
@@ -29,7 +28,6 @@ class ApiRepository implements AppRepository {
     return list;
   }
 
-  // ---- CARS ----
   @override
   Future<List<Car>> getCars({bool forceRefresh = false}) async {
     const key = 'cars';
@@ -64,8 +62,7 @@ class ApiRepository implements AppRepository {
               'year': year,
               'color': color,
               'bodyType': bodyType,
-            })
-            as Map<String, dynamic>;
+            }) as Map<String, dynamic>;
 
     cache.invalidate('cars');
     cache.invalidate('bookings_all');
@@ -81,7 +78,6 @@ class ApiRepository implements AppRepository {
     cache.invalidate('bookings_active');
   }
 
-  // ---- BOOKINGS ----
   @override
   Future<List<Booking>> getBookings({
     bool includeCanceled = false,
@@ -98,8 +94,7 @@ class ApiRepository implements AppRepository {
         await api.getJson(
               '/bookings',
               query: includeCanceled ? {'includeCanceled': 'true'} : null,
-            )
-            as List;
+            ) as List;
 
     final list = data
         .map((e) => Booking.fromJson(e as Map<String, dynamic>))
@@ -115,15 +110,21 @@ class ApiRepository implements AppRepository {
     required String serviceId,
     required DateTime dateTime,
     int? bayId,
+    int? depositRub,
+    int? bufferMin,
+    String? comment,
   }) async {
-    final j =
-        await api.postJson('/bookings', {
-              'carId': carId,
-              'serviceId': serviceId,
-              'dateTime': dateTime.toUtc().toIso8601String(),
-              if (bayId != null) 'bayId': bayId, // ✅ int в JSON
-            })
-            as Map<String, dynamic>;
+    final payload = <String, dynamic>{
+      'carId': carId,
+      'serviceId': serviceId,
+      'dateTime': dateTime.toUtc().toIso8601String(),
+      if (bayId != null) 'bayId': bayId,
+      if (depositRub != null) 'depositRub': depositRub,
+      if (bufferMin != null) 'bufferMin': bufferMin,
+      if (comment != null) 'comment': comment,
+    };
+
+    final j = await api.postJson('/bookings', payload) as Map<String, dynamic>;
 
     cache.invalidate('bookings_all');
     cache.invalidate('bookings_active');
@@ -138,8 +139,7 @@ class ApiRepository implements AppRepository {
     final j =
         await api.postJson('/bookings/$bookingId/pay', {
               if (method != null) 'method': method,
-            })
-            as Map<String, dynamic>;
+            }) as Map<String, dynamic>;
 
     cache.invalidate('bookings_all');
     cache.invalidate('bookings_active');

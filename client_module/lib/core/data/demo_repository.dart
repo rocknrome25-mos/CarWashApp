@@ -84,8 +84,9 @@ class DemoRepository implements AppRepository {
     bool includeCanceled = false,
     bool forceRefresh = false,
   }) async {
-    // демо “хаускипинг”: просроченные pending -> canceled
+    // демо-хаускипинг: просроченные pending -> canceled
     final now = DateTime.now();
+
     for (var i = 0; i < _bookings.length; i++) {
       final b = _bookings[i];
       if (b.status == BookingStatus.pendingPayment &&
@@ -104,6 +105,7 @@ class DemoRepository implements AppRepository {
           paidAt: b.paidAt,
           carId: b.carId,
           serviceId: b.serviceId,
+          comment: b.comment,
         );
       }
     }
@@ -115,12 +117,16 @@ class DemoRepository implements AppRepository {
     return List.unmodifiable(list);
   }
 
+  // ✅ ОБНОВЛЁННАЯ сигнатура — теперь совпадает с AppRepository
   @override
   Future<Booking> createBooking({
     required String carId,
     required String serviceId,
     required DateTime dateTime,
     int? bayId,
+    int? depositRub,
+    int? bufferMin,
+    String? comment,
   }) async {
     final id = DateTime.now().microsecondsSinceEpoch.toString();
     final now = DateTime.now();
@@ -139,6 +145,7 @@ class DemoRepository implements AppRepository {
       dateTime: dateTime,
       status: BookingStatus.pendingPayment,
       bayId: bayId ?? 1,
+      comment: comment?.trim().isEmpty ?? true ? null : comment,
     );
 
     _bookings.add(b);
@@ -169,7 +176,6 @@ class DemoRepository implements AppRepository {
 
     final old = _bookings[idx];
 
-    // если просрочено — считаем отмененным
     if (old.status == BookingStatus.pendingPayment &&
         old.paymentDueAt != null &&
         old.paymentDueAt!.isBefore(now)) {
@@ -186,6 +192,7 @@ class DemoRepository implements AppRepository {
         paidAt: old.paidAt,
         carId: old.carId,
         serviceId: old.serviceId,
+        comment: old.comment,
       );
       _bookings[idx] = canceled;
       return canceled;
@@ -204,6 +211,7 @@ class DemoRepository implements AppRepository {
       paidAt: now,
       carId: old.carId,
       serviceId: old.serviceId,
+      comment: old.comment,
     );
 
     _bookings[idx] = updated;
@@ -245,6 +253,7 @@ class DemoRepository implements AppRepository {
       dateTime: old.dateTime,
       status: BookingStatus.canceled,
       bayId: old.bayId,
+      comment: old.comment,
     );
 
     _bookings[idx] = updated;

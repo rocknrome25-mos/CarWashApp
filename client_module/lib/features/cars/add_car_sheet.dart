@@ -18,13 +18,12 @@ class _AddCarSheetState extends State<AddCarSheet> {
   final _makeController = TextEditingController();
   final _plateController = TextEditingController();
 
-  // оставляем в коде, но UI скрываем (на будущее)
+  // UI скрыт, но оставляем в коде на будущее
   // final _modelController = TextEditingController();
   // final _colorController = TextEditingController();
   // int? _year;
 
   String? _bodyType; // 'sedan' / 'suv'
-
   bool _saving = false;
 
   @override
@@ -37,22 +36,18 @@ class _AddCarSheetState extends State<AddCarSheet> {
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     if (_saving) return;
+
     setState(() => _saving = true);
-
     final messenger = ScaffoldMessenger.of(context);
-
-    final make = _makeController.text.trim();
-    final plate = _plateController.text.trim();
 
     try {
       await widget.repo.addCar(
-        makeDisplay: make,
+        makeDisplay: _makeController.text.trim(),
 
-        // ✅ modelDisplay обязателен в backend — даём заглушку,
-        // а Car-модель потом её очистит (см car.dart)
+        // backend требует modelDisplay — даём безопасную заглушку
         modelDisplay: '—',
 
-        plateDisplay: plate,
+        plateDisplay: _plateController.text.trim(),
         bodyType: _bodyType,
       );
 
@@ -66,9 +61,6 @@ class _AddCarSheetState extends State<AddCarSheet> {
   }
 
   Widget _bodyTypePicker() {
-    final selectedSedan = _bodyType == 'sedan';
-    final selectedSuv = _bodyType == 'suv';
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -79,22 +71,22 @@ class _AddCarSheetState extends State<AddCarSheet> {
             style: TextStyle(fontWeight: FontWeight.w400, fontSize: 14),
           ),
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 12),
         Row(
           children: [
             Expanded(
               child: _BodyChip(
-                selected: selectedSedan,
-                icon: Icons.directions_car_outlined,
+                selected: _bodyType == 'sedan',
+                asset: 'assets/images/body/sedan.png',
                 title: 'Седан',
                 onTap: () => setState(() => _bodyType = 'sedan'),
               ),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 12),
             Expanded(
               child: _BodyChip(
-                selected: selectedSuv,
-                icon: Icons.directions_car_filled_rounded,
+                selected: _bodyType == 'suv',
+                asset: 'assets/images/body/suv.png',
                 title: 'Внедорожник',
                 onTap: () => setState(() => _bodyType = 'suv'),
               ),
@@ -125,9 +117,7 @@ class _AddCarSheetState extends State<AddCarSheet> {
                   Autocomplete<String>(
                     optionsBuilder: (value) {
                       final q = value.text.trim().toLowerCase();
-                      if (q.isEmpty) {
-                        return kCarMakes;
-                      }
+                      if (q.isEmpty) return kCarMakes;
                       return kCarMakes.where(
                         (m) => m.toLowerCase().contains(q),
                       );
@@ -155,9 +145,7 @@ class _AddCarSheetState extends State<AddCarSheet> {
                         ),
                         validator: (v) {
                           final s = (v ?? '').trim();
-                          if (s.isEmpty) {
-                            return 'Укажи марку';
-                          }
+                          if (s.isEmpty) return 'Укажи марку';
                           if (!kCarMakes.contains(s)) {
                             return 'Выбери марку из списка';
                           }
@@ -166,11 +154,10 @@ class _AddCarSheetState extends State<AddCarSheet> {
                       );
                     },
                   ),
-                  const SizedBox(height: 14),
 
+                  const SizedBox(height: 16),
                   _bodyTypePicker(),
-
-                  const SizedBox(height: 14),
+                  const SizedBox(height: 16),
 
                   TextFormField(
                     controller: _plateController,
@@ -181,9 +168,7 @@ class _AddCarSheetState extends State<AddCarSheet> {
                     ),
                     validator: (v) {
                       final s = (v ?? '').trim();
-                      if (s.isEmpty) {
-                        return 'Укажи гос номер';
-                      }
+                      if (s.isEmpty) return 'Укажи гос номер';
                       if (normalizePlate(s).isEmpty) {
                         return 'Некорректный номер';
                       }
@@ -191,7 +176,7 @@ class _AddCarSheetState extends State<AddCarSheet> {
                     },
                   ),
 
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 14),
 
                   SizedBox(
                     width: double.infinity,
@@ -212,13 +197,13 @@ class _AddCarSheetState extends State<AddCarSheet> {
 
 class _BodyChip extends StatelessWidget {
   final bool selected;
-  final IconData icon;
+  final String asset;
   final String title;
   final VoidCallback onTap;
 
   const _BodyChip({
     required this.selected,
-    required this.icon,
+    required this.asset,
     required this.title,
     required this.onTap,
   });
@@ -231,8 +216,8 @@ class _BodyChip extends StatelessWidget {
       borderRadius: BorderRadius.circular(16),
       onTap: onTap,
       child: Container(
-        height: 64,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        height: 72,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
@@ -243,14 +228,12 @@ class _BodyChip extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Icon(icon, size: 24),
+            Image.asset(asset, width: 36, height: 36, fit: BoxFit.contain),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
                 title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.w700),
+                style: const TextStyle(fontWeight: FontWeight.w600),
               ),
             ),
           ],

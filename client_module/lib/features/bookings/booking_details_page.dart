@@ -20,6 +20,8 @@ class BookingDetailsPage extends StatefulWidget {
 }
 
 class _BookingDetailsPageState extends State<BookingDetailsPage> {
+  static const int _depositRub = 500;
+
   late Future<_Details> _future;
 
   bool _canceling = false;
@@ -57,6 +59,15 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
     return '${two(x.day)}.${two(x.month)}.${x.year} ${two(x.hour)}:${two(x.minute)}';
   }
 
+  String _carTitleForUi(Car c) {
+    final make = c.make.trim();
+    final model = c.model.trim();
+    if (model.isEmpty || model == '—') {
+      return '$make (${c.plateDisplay})';
+    }
+    return '$make $model (${c.plateDisplay})';
+  }
+
   Widget _badge({required String text, required Color color}) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
@@ -75,12 +86,6 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
     );
   }
 
-  /// ✅ Логика статуса для деталей:
-  /// - paidAt != null -> ОПЛАЧЕНО
-  /// - pendingPayment -> ОЖИДАЕТ ОПЛАТЫ
-  /// - completed -> ЗАВЕРШЕНА (серый)
-  /// - canceled -> ОТМЕНЕНА (красный)
-  /// - active (без paidAt) -> ничего не показываем
   Widget _detailsBadge(Booking b) {
     if (b.paidAt != null) {
       return _badge(text: 'ОПЛАЧЕНО', color: Colors.green);
@@ -101,7 +106,6 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
     if (b.paidAt != null) return false;
     if (b.status != BookingStatus.pendingPayment) return false;
 
-    // Если есть дедлайн — платить можно только пока не истёк
     final due = b.paymentDueAt;
     if (due == null) return true;
     return due.isAfter(DateTime.now());
@@ -131,6 +135,7 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
             repo: widget.repo,
             booking: booking,
             service: service,
+            depositRub: _depositRub,
           ),
         ),
       );
@@ -158,8 +163,6 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
   }
 
   Widget _serviceThumb(Service? service) {
-    // Если у тебя в проекте есть asset-логика — можно расширить,
-    // но сейчас оставим текущий вариант: url -> сеть, иначе placeholder.
     final url = service?.imageUrl;
     if (url == null || url.isEmpty) {
       return Container(
@@ -276,8 +279,7 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                     Text('Error: ${snapshot.error}'),
                     const SizedBox(height: 12),
                     FilledButton(
-                      onPressed: () =>
-                          setState(() => _future = _load(forceRefresh: true)),
+                      onPressed: () => setState(() => _future = _load(forceRefresh: true)),
                       child: const Text('Повторить'),
                     ),
                   ],
@@ -300,8 +302,10 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
           final canCancel = !(isCanceled || isCompleted);
 
           final showPayButton = _canPay(booking);
-
           final badge = _detailsBadge(booking);
+
+          final total = service?.priceRub;
+          final remaining = (total == null) ? null : ((total - _depositRub) > 0 ? (total - _depositRub) : 0);
 
           return ListView(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
@@ -341,6 +345,26 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                               fontWeight: FontWeight.w700,
                             ),
                           ),
+                          const SizedBox(height: 10),
+                          Text(
+                            'Бронь: $_depositRub ₽',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.black.withValues(alpha: 0.80),
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          if (remaining != null) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              'Остаток на месте: $remaining ₽',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.black.withValues(alpha: 0.65),
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
                           if (booking.paidAt != null) ...[
                             const SizedBox(height: 10),
                             Text(
@@ -371,21 +395,34 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                 ),
               ),
 
+              // ✅ Комментарий клиента
+              if ((booking.comment ?? '').trim().isNotEmpty) ...[
+                const SizedBox(height: 12),
+                _card(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Комментарий', style: TextStyle(fontWeight: FontWeight.w900)),
+                      const SizedBox(height: 8),
+                      Text(
+                        booking.comment!.trim(),
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+
               const SizedBox(height: 12),
 
               _card(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      'Авто',
-                      style: TextStyle(fontWeight: FontWeight.w900),
-                    ),
+                    const Text('Авто', style: TextStyle(fontWeight: FontWeight.w900)),
                     const SizedBox(height: 8),
                     Text(
-                      car == null
-                          ? 'Авто удалено'
-                          : '${car.make} ${car.model} (${car.plateDisplay})',
+                      car == null ? 'Авто удалено' : _carTitleForUi(car),
                       style: const TextStyle(fontWeight: FontWeight.w800),
                     ),
                     if (car != null) ...[
@@ -400,10 +437,7 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                       ),
                     ],
                     const SizedBox(height: 14),
-                    const Text(
-                      'Стоимость',
-                      style: TextStyle(fontWeight: FontWeight.w900),
-                    ),
+                    const Text('Стоимость', style: TextStyle(fontWeight: FontWeight.w900)),
                     const SizedBox(height: 8),
                     Text(
                       service == null ? '—' : '${service.priceRub} ₽',
@@ -413,17 +447,14 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                 ),
               ),
 
-              // ✅ НОВОЕ: кнопка оплаты, если запись ожидает оплату
               if (showPayButton) ...[
                 const SizedBox(height: 14),
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton.icon(
-                    onPressed: _paying
-                        ? null
-                        : () => _payNow(booking: booking, service: service),
+                    onPressed: _paying ? null : () => _payNow(booking: booking, service: service),
                     icon: const Icon(Icons.credit_card),
-                    label: Text(_paying ? 'Оплачиваю...' : 'Оплатить'),
+                    label: Text(_paying ? 'Оплачиваю...' : 'Оплатить бронь'),
                   ),
                 ),
               ],
@@ -433,9 +464,7 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
-                  onPressed: (canCancel && !_canceling)
-                      ? () => _confirmAndCancel(booking.id)
-                      : null,
+                  onPressed: (canCancel && !_canceling) ? () => _confirmAndCancel(booking.id) : null,
                   icon: const Icon(Icons.cancel_outlined),
                   label: Text(_canceling ? 'Отменяю...' : 'Отменить запись'),
                 ),
