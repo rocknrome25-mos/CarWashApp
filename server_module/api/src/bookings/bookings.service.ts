@@ -3,6 +3,7 @@ import {
   BadRequestException,
   NotFoundException,
   ConflictException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { BookingStatus, PaymentKind } from '@prisma/client';
@@ -26,7 +27,6 @@ export class BookingsService {
   }
 
   private _overlaps(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date) {
-    // [aStart, aEnd) intersects [bStart, bEnd)
     return aStart < bEnd && bStart < aEnd;
   }
 
@@ -41,7 +41,6 @@ export class BookingsService {
     return Math.max(min, Math.min(max, xi));
   }
 
-  // ✅ auto-cancel pending when payment deadline passed
   private async _expirePendingPayments(): Promise<void> {
     const now = new Date();
 
@@ -58,7 +57,6 @@ export class BookingsService {
     });
   }
 
-  // ✅ auto-complete: COMPLETED only if service really ended (end < now)
   private async _autoCompletePastActive(): Promise<void> {
     const now = new Date();
 
@@ -97,12 +95,15 @@ export class BookingsService {
     await this._autoCompletePastActive();
   }
 
-  async findAll(includeCanceled: boolean) {
+  async findAll(includeCanceled: boolean, clientId?: string) {
     await this._housekeeping();
 
-    const where = includeCanceled
+    const where: any = includeCanceled
       ? {}
       : { status: { not: BookingStatus.CANCELED } };
+
+    // ✅ фильтр по клиенту
+    if (clientId) where.clientId = clientId;
 
     return this.prisma.booking.findMany({
       where,
@@ -123,6 +124,7 @@ export class BookingsService {
     depositRub?: number;
     bufferMin?: number;
     comment?: string;
+    clientId?: string;
   }) {
     await this._housekeeping();
 
@@ -130,19 +132,20 @@ export class BookingsService {
       throw new BadRequestException('carId, serviceId and dateTime are required');
     }
 
+    const clientId = (body.clientId ?? '').trim();
+    if (!clientId) throw new BadRequestException('clientId is required');
+
     const dt = new Date(body.dateTime);
     if (isNaN(dt.getTime())) {
       throw new BadRequestException('dateTime must be ISO string');
     }
 
-    // запретим создавать в прошлом (с небольшой форой)
     const nowMs = Date.now();
     const graceMs = 30 * 1000;
     if (dt.getTime() < nowMs - graceMs) {
       throw new BadRequestException('Cannot create booking in the past');
     }
 
-    // sanity для новых полей
     const bayId = this._clampInt(body.bayId, 1, 1, 20);
     const bufferMin = this._clampInt(body.bufferMin, 15, 0, 120);
     const depositRub = this._clampInt(body.depositRub, 500, 0, 1_000_000);
@@ -151,8 +154,16 @@ export class BookingsService {
         ? body.comment.trim().slice(0, 500)
         : null;
 
-    const car = await this.prisma.car.findUnique({ where: { id: body.carId } });
+    // ✅ car должен принадлежать этому clientId
+    const car = await this.prisma.car.findUnique({
+      where: { id: body.carId },
+      select: { id: true, clientId: true },
+    });
     if (!car) throw new BadRequestException('Car not found');
+
+    if (car.clientId && car.clientId !== clientId) {
+      throw new ForbiddenException('Not your car');
+    }
 
     const service = await this.prisma.service.findUnique({
       where: { id: body.serviceId },
@@ -166,11 +177,9 @@ export class BookingsService {
     const newStart = dt;
     const newEnd = this._end(newStart, newDurTotal);
 
-    // ✅ окно шире вокруг новой записи (±1 день)
     const windowStart = new Date(newStart.getTime() - 24 * 60 * 60 * 1000);
     const windowEnd = new Date(newEnd.getTime() + 24 * 60 * 60 * 1000);
 
-    // ✅ слот занят и для ACTIVE, и для PENDING_PAYMENT
     const busyStatuses = [BookingStatus.ACTIVE, BookingStatus.PENDING_PAYMENT];
 
     const nearby = await this.prisma.booking.findMany({
@@ -190,23 +199,20 @@ export class BookingsService {
       },
     });
 
-    // игнорируем просроченные pending (на всякий случай)
     const now = new Date();
     const relevant = nearby.filter((b) => {
       if (b.status === BookingStatus.PENDING_PAYMENT) {
         if (!b.paymentDueAt) return false;
         return b.paymentDueAt.getTime() > now.getTime();
       }
-      return true; // ACTIVE
+      return true;
     });
 
     const anyOverlap = relevant.find((b) => {
       const bBase = this._serviceDurationOrDefault(b.service?.durationMin);
       const bTotal = bBase + (b.bufferMin ?? 0);
-
       const bStart = b.dateTime;
       const bEnd = this._end(bStart, bTotal);
-
       return this._overlaps(newStart, newEnd, bStart, bEnd);
     });
 
@@ -219,10 +225,8 @@ export class BookingsService {
 
       const bBase = this._serviceDurationOrDefault(b.service?.durationMin);
       const bTotal = bBase + (b.bufferMin ?? 0);
-
       const bStart = b.dateTime;
       const bEnd = this._end(bStart, bTotal);
-
       return this._overlaps(newStart, newEnd, bStart, bEnd);
     });
 
@@ -230,13 +234,14 @@ export class BookingsService {
       throw new ConflictException('This car already has a booking at this time');
     }
 
-    const dueAt = new Date(Date.now() + 15 * 60 * 1000); // 15 минут на оплату
+    const dueAt = new Date(Date.now() + 15 * 60 * 1000);
 
     return this.prisma.booking.create({
       data: {
         carId: body.carId,
         serviceId: body.serviceId,
         dateTime: dt,
+        clientId, // ✅ сохраняем владельца
 
         bayId,
         bufferMin,
@@ -292,13 +297,11 @@ export class BookingsService {
       throw new ConflictException('Booking is canceled');
     }
 
-    // --- правила для DEPOSIT ---
     if (kind === PaymentKind.DEPOSIT) {
       if (booking.status === BookingStatus.COMPLETED) {
         throw new ConflictException('Booking is completed');
       }
       if (booking.status === BookingStatus.ACTIVE) {
-        // депозит уже должен быть оплачен (или запись уже активна) — делаем идемпотентно
         return this.prisma.booking.findUnique({
           where: { id },
           include: {
@@ -309,7 +312,6 @@ export class BookingsService {
         });
       }
 
-      // PENDING_PAYMENT
       if (!booking.paymentDueAt || booking.paymentDueAt.getTime() <= now.getTime()) {
         await this.prisma.booking.update({
           where: { id },
@@ -328,8 +330,6 @@ export class BookingsService {
 
       const amountRub = this._clampInt(body?.amountRub, booking.depositRub ?? 0, 0, 1_000_000);
 
-      // создаём платеж (DEPOSIT) и активируем запись
-      // @@unique(bookingId, kind) делает это безопасно
       await this.prisma.payment.create({
         data: {
           bookingId: booking.id,
@@ -358,12 +358,8 @@ export class BookingsService {
       });
     }
 
-    // --- правила для REMAINING/EXTRA/REFUND ---
-    // Сейчас делаем базово: не отменено -> можно принять оплату (это пригодится для админки)
-    // В админке мы решим, когда именно можно принимать REMAINING (до/после завершения и т.д.)
     const amountRub = this._clampInt(body?.amountRub, 0, 0, 1_000_000);
 
-    // защита от дубля по kind (у нас @@unique)
     try {
       await this.prisma.payment.create({
         data: {
@@ -378,8 +374,6 @@ export class BookingsService {
       throw new ConflictException(`Payment kind ${kind} already exists for this booking`);
     }
 
-    // если это REMAINING — можно (опционально) завершать оплату логически,
-    // но статус "COMPLETED" всё равно выставляет housekeeping по времени окончания.
     return this.prisma.booking.findUnique({
       where: { id },
       include: {
@@ -390,7 +384,7 @@ export class BookingsService {
     });
   }
 
-  async cancel(id: string) {
+  async cancel(id: string, clientId?: string) {
     await this._housekeeping();
 
     const existing = await this.prisma.booking.findUnique({
@@ -401,11 +395,18 @@ export class BookingsService {
         dateTime: true,
         paymentDueAt: true,
         bufferMin: true,
+        clientId: true,
         service: { select: { durationMin: true } },
       },
     });
 
     if (!existing) throw new NotFoundException('Booking not found');
+
+    // ✅ запретим отменять чужую запись (если передали clientId)
+    if (clientId && existing.clientId && existing.clientId !== clientId) {
+      throw new ForbiddenException('Not your booking');
+    }
+
     if (existing.status === BookingStatus.CANCELED) {
       return this.prisma.booking.findUnique({
         where: { id },

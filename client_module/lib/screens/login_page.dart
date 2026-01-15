@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
+import '../core/data/app_repository.dart';
 
 class LoginPage extends StatefulWidget {
-  final VoidCallback onLoggedIn;
+  final AppRepository repo;
 
-  const LoginPage({super.key, required this.onLoggedIn});
+  const LoginPage({super.key, required this.repo});
 
   @override
   State<LoginPage> createState() => _LoginPageState();
@@ -21,19 +22,47 @@ class _LoginPageState extends State<LoginPage> {
     final pass = _passCtrl.text.trim();
 
     setState(() => _loading = true);
-    await Future<void>.delayed(const Duration(milliseconds: 350));
-
+    await Future<void>.delayed(const Duration(milliseconds: 200));
     if (!mounted) return;
 
-    setState(() => _loading = false);
+    try {
+      if (login == 'demo' && pass == '1234') {
+        await widget.repo.loginDemo();
+        if (!mounted) return;
+        Navigator.of(context).pop(true);
+        return;
+      }
 
-    if (login == 'demo' && pass == '1234') {
-      widget.onLoggedIn();
-      return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Неверный логин или пароль (demo / 1234)'),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
+  }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Неверный логин или пароль (demo / 1234)')),
+  Future<void> _forgot() async {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Восстановление доступа'),
+        content: const Text(
+          'Скоро добавим восстановление по телефону/SMS.\n\nПока вход: demo / 1234',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Ок'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -94,6 +123,14 @@ class _LoginPageState extends State<LoginPage> {
               decoration: const InputDecoration(
                 labelText: 'Пароль',
                 border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: _loading ? null : _forgot,
+                child: const Text('Забыл логин/пароль'),
               ),
             ),
             const Spacer(),

@@ -1,14 +1,19 @@
+import 'dart:io' show Platform;
+
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+
 import 'app.dart';
-import 'screens/login_page.dart';
+import 'core/api/api_client.dart';
+import 'core/cache/memory_cache.dart';
+import 'core/data/api_repository.dart';
+import 'core/data/app_repository.dart';
+import 'screens/start_page.dart';
 
 void main() {
   runApp(const _Root());
 }
 
-/// Простейший прототипный "Auth Gate":
-/// - пока не залогинился -> LoginPage
-/// - после логина -> твой существующий ClientModuleApp (из app.dart)
 class _Root extends StatefulWidget {
   const _Root();
 
@@ -18,16 +23,38 @@ class _Root extends StatefulWidget {
 
 class _RootState extends State<_Root> {
   bool _authed = false;
+  late final AppRepository repo;
+
+  String _resolveBaseUrl() {
+    if (kIsWeb) return 'http://localhost:3000';
+    if (!kIsWeb && Platform.isAndroid) return 'http://10.0.2.2:3000';
+    return 'http://localhost:3000';
+  }
+
+  @override
+  void initState() {
+    super.initState();
+
+    repo = ApiRepository(
+      api: ApiClient(baseUrl: _resolveBaseUrl()),
+      cache: MemoryCache(),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    if (_authed) {
-      return const ClientModuleApp();
-    }
-
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      home: LoginPage(onLoggedIn: () => setState(() => _authed = true)),
+      theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.red),
+      home: _authed
+          ? ClientModuleApp(
+              repo: repo,
+              onLogout: () => setState(() => _authed = false),
+            )
+          : StartPage(
+              repo: repo,
+              onAuthed: () => setState(() => _authed = true),
+            ),
     );
   }
 }

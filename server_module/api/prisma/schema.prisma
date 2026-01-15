@@ -7,6 +7,28 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum ClientGender {
+  MALE
+  FEMALE
+}
+
+model Client {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  phone     String   @unique
+  name      String?
+  gender    ClientGender
+  birthDate DateTime?
+
+  cars      Car[]
+  bookings  Booking[]
+
+  @@index([phone])
+  @@index([createdAt])
+}
+
 model Car {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
@@ -24,7 +46,13 @@ model Car {
   color    String?
   bodyType String?
 
+  // ✅ связь с Client (пока nullable для демо)
+  clientId String?
+  client   Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+
   bookings Booking[]
+
+  @@index([clientId])
 }
 
 model Service {
@@ -86,6 +114,10 @@ model Booking {
   carId     String
   serviceId String
 
+  // ✅ прямая ссылка на клиента (пока nullable для демо)
+  clientId String?
+  client   Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+
   car     Car     @relation(fields: [carId], references: [id], onDelete: Cascade)
   service Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
 
@@ -93,6 +125,7 @@ model Booking {
 
   @@index([carId])
   @@index([serviceId])
+  @@index([clientId])
   @@index([dateTime])
   @@index([status])
   @@index([paymentDueAt])

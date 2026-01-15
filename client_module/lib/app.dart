@@ -1,12 +1,6 @@
-import 'dart:io' show Platform;
-
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
-import 'core/api/api_client.dart';
-import 'core/cache/memory_cache.dart';
-import 'core/data/api_repository.dart';
 import 'core/data/app_repository.dart';
 
 import 'features/bookings/bookings_page.dart';
@@ -15,34 +9,25 @@ import 'screens/services_screen.dart';
 import 'screens/contacts_page.dart';
 
 class ClientModuleApp extends StatefulWidget {
-  const ClientModuleApp({super.key});
+  final AppRepository repo;
+  final VoidCallback onLogout;
+
+  const ClientModuleApp({
+    super.key,
+    required this.repo,
+    required this.onLogout,
+  });
 
   @override
   State<ClientModuleApp> createState() => _ClientModuleAppState();
 }
 
 class _ClientModuleAppState extends State<ClientModuleApp> {
-  late final AppRepository repo;
-
   int index = 0;
 
   /// Общий триггер обновлений для вкладок Services/Bookings.
   int refreshToken = 0;
 
-  String _resolveBaseUrl() {
-    // Web
-    if (kIsWeb) return 'http://localhost:3000';
-
-    // Android Emulator -> host machine
-    if (Platform.isAndroid) return 'http://10.0.2.2:3000';
-
-    // Windows/macOS/Linux desktop
-    return 'http://localhost:3000';
-  }
-
-  /// ✅ после создания брони:
-  /// 1) обновляем refreshToken
-  /// 2) переключаемся на вкладку "Записи" (index = 2)
   void _onBookingCreated() {
     setState(() {
       refreshToken++;
@@ -50,33 +35,73 @@ class _ClientModuleAppState extends State<ClientModuleApp> {
     });
   }
 
-  @override
-  void initState() {
-    super.initState();
+  Future<void> _openProfile() async {
+    final c = widget.repo.currentClient;
 
-    repo = ApiRepository(
-      api: ApiClient(baseUrl: _resolveBaseUrl()),
-      cache: MemoryCache(),
+    // показываем sheet и ждём результат: true = logout
+    final didLogout = await showModalBottomSheet<bool>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const CircleAvatar(child: Icon(Icons.person)),
+                  title: Text(c?.displayName ?? 'Профиль'),
+                  subtitle: Text(c?.phone ?? ''),
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  height: 48,
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      await widget.repo.logout();
+
+                      // закрываем только если sheet ещё в дереве
+                      if (sheetContext.mounted) {
+                        Navigator.of(sheetContext).pop(true);
+                      }
+                    },
+                    icon: const Icon(Icons.logout),
+                    label: const Text('Выйти'),
+                  ),
+                ),
+                const SizedBox(height: 6),
+              ],
+            ),
+          ),
+        );
+      },
     );
+
+    // ✅ правильная проверка после async gap
+    if (!context.mounted) return;
+
+    if (didLogout == true) {
+      widget.onLogout();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final pages = <Widget>[
-      CarsPage(repo: repo),
+      CarsPage(repo: widget.repo),
       ServicesScreen(
-        repo: repo,
+        repo: widget.repo,
         refreshToken: refreshToken,
         onBookingCreated: _onBookingCreated,
       ),
-      BookingsPage(repo: repo, refreshToken: refreshToken),
-
-      // ✅ Контакты (прототипные данные пока)
+      BookingsPage(repo: widget.repo, refreshToken: refreshToken),
       const ContactsPage(
         title: 'Контакты',
         address: 'Москва, бульвар Андрея Тарковского, 10',
         phone: '+7-927-310-9336',
-        telegram: '@carwash_demo', // любой пока
+        telegram: '@carwash_demo',
         navigatorLink:
             'https://www.google.com/maps/search/?api=1&query=Москва%2C%20бульвар%20Андрея%20Тарковского%2010',
       ),
@@ -107,6 +132,13 @@ class _ClientModuleAppState extends State<ClientModuleApp> {
               const Text('Автомойка'),
             ],
           ),
+          actions: [
+            IconButton(
+              tooltip: 'Профиль',
+              onPressed: _openProfile,
+              icon: const Icon(Icons.account_circle),
+            ),
+          ],
         ),
         body: pages[index],
         bottomNavigationBar: NavigationBar(

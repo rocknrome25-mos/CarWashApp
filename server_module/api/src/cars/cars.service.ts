@@ -3,6 +3,7 @@ import {
   BadRequestException,
   ConflictException,
   NotFoundException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { BookingStatus } from '@prisma/client';
@@ -23,8 +24,13 @@ function normalizeUpper(input: string): string {
 export class CarsService {
   constructor(private prisma: PrismaService) {}
 
-  async findAll() {
-    return this.prisma.car.findMany({ orderBy: { createdAt: 'desc' } });
+  async findAll(clientId?: string) {
+    // ✅ если clientId передали — отдаём только его авто
+    const where = clientId ? { clientId } : {};
+    return this.prisma.car.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+    });
   }
 
   async create(body: {
@@ -34,6 +40,7 @@ export class CarsService {
     year?: number | null;
     color?: string | null;
     bodyType?: string | null;
+    clientId?: string | null;
   }) {
     const makeDisplay = normalizeUpper(body.makeDisplay ?? '');
     const modelDisplay = normalizeUpper(body.modelDisplay ?? '');
@@ -42,6 +49,16 @@ export class CarsService {
     if (!makeDisplay) throw new BadRequestException('makeDisplay is required');
     if (!modelDisplay) throw new BadRequestException('modelDisplay is required');
     if (!plateDisplay) throw new BadRequestException('plateDisplay is required');
+
+    // ✅ clientId: в Variant A это обязательно (иначе снова "общая база")
+    const clientId = (body.clientId ?? '').trim();
+    if (!clientId) {
+      throw new BadRequestException('clientId is required');
+    }
+
+    // ✅ проверим что client существует
+    const client = await this.prisma.client.findUnique({ where: { id: clientId } });
+    if (!client) throw new BadRequestException('Client not found');
 
     const makeNormalized = makeDisplay;
     const modelNormalized = modelDisplay;
@@ -59,6 +76,7 @@ export class CarsService {
           year: body.year ?? null,
           color: body.color ? normalizeUpper(body.color) : null,
           bodyType: body.bodyType ? normalizeUpper(body.bodyType) : null,
+          clientId, // ✅ привязка к клиенту
         },
       });
     } catch (e: any) {
@@ -69,11 +87,16 @@ export class CarsService {
     }
   }
 
-  async remove(id: string) {
+  async remove(id: string, clientId?: string) {
     const existing = await this.prisma.car.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Car not found');
 
-    // ✅ Variant A: block deletion ONLY if there are FUTURE ACTIVE bookings
+    // ✅ запретим удалять чужую машину (Variant A: clientId приходит query-ом)
+    if (clientId && existing.clientId && existing.clientId !== clientId) {
+      throw new ForbiddenException('Not your car');
+    }
+
+    // ✅ block deletion ONLY if there are FUTURE ACTIVE bookings
     const now = new Date();
     const activeFutureBooking = await this.prisma.booking.findFirst({
       where: {

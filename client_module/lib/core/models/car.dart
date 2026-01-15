@@ -15,6 +15,9 @@ class Car {
   final String? color;
   final String? bodyType;
 
+  // ✅ ВАЖНО: чтобы фильтровать по владельцу
+  final String? clientId;
+
   Car({
     required this.id,
     required this.make,
@@ -24,6 +27,7 @@ class Car {
     this.year,
     String? color,
     String? bodyType,
+    this.clientId,
   }) : model = _sanitizeModel(model),
        color = (color == null || color.trim().isEmpty) ? null : color.trim(),
        bodyType = (bodyType == null || bodyType.trim().isEmpty)
@@ -106,10 +110,11 @@ class Car {
       year: j['year'] as int?,
       color: j['color'] as String?,
       bodyType: j['bodyType'] as String?,
+      clientId: j['clientId'] as String?,
     );
   }
 
-  Map<String, dynamic> toCreateJson() {
+  Map<String, dynamic> toCreateJson({String? clientId}) {
     return {
       'makeDisplay': make.trim(),
       'modelDisplay': model.trim().isEmpty ? '—' : model.trim(),
@@ -117,6 +122,7 @@ class Car {
       'year': year,
       'color': color,
       'bodyType': bodyType,
+      if (clientId != null) 'clientId': clientId,
     };
   }
 }
