@@ -13,38 +13,35 @@ import { BookingsService } from './bookings.service';
 export class BookingsController {
   constructor(private readonly bookingsService: BookingsService) {}
 
-  // GET /bookings?includeCanceled=true
   @Get()
   getAll(@Query('includeCanceled') includeCanceled?: string) {
     const flag = includeCanceled === '1' || includeCanceled === 'true';
     return this.bookingsService.findAll(flag);
   }
 
-  // POST /bookings
-@Post()
-create(
-  @Body()
-  body: {
-    carId: string;
-    serviceId: string;
-    dateTime: string;
-    bayId?: number;
-    depositRub?: number;
-    bufferMin?: number;
-    comment?: string;
-  },
-) {
-  return this.bookingsService.create(body);
-}
-
+  @Post()
+  create(
+    @Body()
+    body: {
+      carId: string;
+      serviceId: string;
+      dateTime: string;
+      bayId?: number;
+      depositRub?: number;
+      bufferMin?: number;
+      comment?: string;
+    },
+  ) {
+    return this.bookingsService.create(body);
+  }
 
   // POST /bookings/:id/pay
+  // body: { method?: string, kind?: 'DEPOSIT'|'REMAINING'|'EXTRA'|'REFUND', amountRub?: number }
   @Post(':id/pay')
-  pay(@Param('id') id: string, @Body() body?: { method?: string }) {
+  pay(@Param('id') id: string, @Body() body?: any) {
     return this.bookingsService.pay(id, body);
   }
 
-  // DELETE /bookings/:id -> soft cancel
   @Delete(':id')
   cancel(@Param('id') id: string) {
     return this.bookingsService.cancel(id);

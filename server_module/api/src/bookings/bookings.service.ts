@@ -7,6 +7,12 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { BookingStatus, PaymentKind } from '@prisma/client';
 
+type PayBody = {
+  method?: string;
+  kind?: 'DEPOSIT' | 'REMAINING' | 'EXTRA' | 'REFUND';
+  amountRub?: number;
+};
+
 @Injectable()
 export class BookingsService {
   constructor(private prisma: PrismaService) {}
@@ -243,23 +249,38 @@ export class BookingsService {
       include: {
         car: true,
         service: true,
-        payments: true,
+        payments: { orderBy: { paidAt: 'asc' } },
       },
     });
   }
 
-  async pay(id: string, body?: { method?: string }) {
+  private _parsePayKind(raw?: string): PaymentKind {
+    const v = (raw ?? 'DEPOSIT').toUpperCase().trim();
+    switch (v) {
+      case 'DEPOSIT':
+        return PaymentKind.DEPOSIT;
+      case 'REMAINING':
+        return PaymentKind.REMAINING;
+      case 'EXTRA':
+        return PaymentKind.EXTRA;
+      case 'REFUND':
+        return PaymentKind.REFUND;
+      default:
+        throw new BadRequestException('Invalid payment kind');
+    }
+  }
+
+  async pay(id: string, body?: PayBody) {
     await this._housekeeping();
+
+    const kind = this._parsePayKind(body?.kind);
+    const method = (body?.method ?? 'CARD_TEST').trim() || 'CARD_TEST';
 
     const booking = await this.prisma.booking.findUnique({
       where: { id },
-      select: {
-        id: true,
-        status: true,
-        dateTime: true,
-        paymentDueAt: true,
-        depositRub: true,
-        payments: { select: { id: true, kind: true } },
+      include: {
+        service: { select: { priceRub: true } },
+        payments: true,
       },
     });
 
@@ -270,12 +291,63 @@ export class BookingsService {
     if (booking.status === BookingStatus.CANCELED) {
       throw new ConflictException('Booking is canceled');
     }
-    if (booking.status === BookingStatus.COMPLETED) {
-      throw new ConflictException('Booking is completed');
-    }
 
-    // ✅ если уже ACTIVE — идемпотентность: депозит уже оплачен
-    if (booking.status === BookingStatus.ACTIVE) {
+    // --- правила для DEPOSIT ---
+    if (kind === PaymentKind.DEPOSIT) {
+      if (booking.status === BookingStatus.COMPLETED) {
+        throw new ConflictException('Booking is completed');
+      }
+      if (booking.status === BookingStatus.ACTIVE) {
+        // депозит уже должен быть оплачен (или запись уже активна) — делаем идемпотентно
+        return this.prisma.booking.findUnique({
+          where: { id },
+          include: {
+            car: true,
+            service: true,
+            payments: { orderBy: { paidAt: 'asc' } },
+          },
+        });
+      }
+
+      // PENDING_PAYMENT
+      if (!booking.paymentDueAt || booking.paymentDueAt.getTime() <= now.getTime()) {
+        await this.prisma.booking.update({
+          where: { id },
+          data: {
+            status: BookingStatus.CANCELED,
+            canceledAt: now,
+            cancelReason: 'PAYMENT_EXPIRED',
+          },
+        });
+        throw new ConflictException('Payment deadline expired');
+      }
+
+      if (booking.dateTime.getTime() <= now.getTime()) {
+        throw new ConflictException('Booking already started');
+      }
+
+      const amountRub = this._clampInt(body?.amountRub, booking.depositRub ?? 0, 0, 1_000_000);
+
+      // создаём платеж (DEPOSIT) и активируем запись
+      // @@unique(bookingId, kind) делает это безопасно
+      await this.prisma.payment.create({
+        data: {
+          bookingId: booking.id,
+          amountRub,
+          method,
+          kind: PaymentKind.DEPOSIT,
+          paidAt: now,
+        },
+      });
+
+      await this.prisma.booking.update({
+        where: { id },
+        data: {
+          status: BookingStatus.ACTIVE,
+          paymentDueAt: null,
+        },
+      });
+
       return this.prisma.booking.findUnique({
         where: { id },
         include: {
@@ -286,46 +358,28 @@ export class BookingsService {
       });
     }
 
-    // PENDING_PAYMENT
-    if (!booking.paymentDueAt || booking.paymentDueAt.getTime() <= now.getTime()) {
-      await this.prisma.booking.update({
-        where: { id },
-        data: {
-          status: BookingStatus.CANCELED,
-          canceledAt: now,
-          cancelReason: 'PAYMENT_EXPIRED',
-        },
-      });
-      throw new ConflictException('Payment deadline expired');
-    }
+    // --- правила для REMAINING/EXTRA/REFUND ---
+    // Сейчас делаем базово: не отменено -> можно принять оплату (это пригодится для админки)
+    // В админке мы решим, когда именно можно принимать REMAINING (до/после завершения и т.д.)
+    const amountRub = this._clampInt(body?.amountRub, 0, 0, 1_000_000);
 
-    // если уже началось — оплату не принимаем
-    if (booking.dateTime.getTime() <= now.getTime()) {
-      throw new ConflictException('Booking already started');
-    }
-
-    // ✅ защита от дублей: если DEPOSIT уже есть — просто активируем/возвращаем
-    const hasDeposit = booking.payments?.some((p) => p.kind === PaymentKind.DEPOSIT);
-    if (!hasDeposit) {
+    // защита от дубля по kind (у нас @@unique)
+    try {
       await this.prisma.payment.create({
         data: {
           bookingId: booking.id,
-          kind: PaymentKind.DEPOSIT,
-          amountRub: booking.depositRub ?? 0,
-          method: body?.method ?? 'CARD_TEST',
+          amountRub,
+          method,
+          kind,
           paidAt: now,
         },
       });
+    } catch (e) {
+      throw new ConflictException(`Payment kind ${kind} already exists for this booking`);
     }
 
-    await this.prisma.booking.update({
-      where: { id },
-      data: {
-        status: BookingStatus.ACTIVE,
-        paidAt: now, // ✅ время оплаты депозита (НЕ полной суммы)
-      },
-    });
-
+    // если это REMAINING — можно (опционально) завершать оплату логически,
+    // но статус "COMPLETED" всё равно выставляет housekeeping по времени окончания.
     return this.prisma.booking.findUnique({
       where: { id },
       include: {
@@ -355,11 +409,7 @@ export class BookingsService {
     if (existing.status === BookingStatus.CANCELED) {
       return this.prisma.booking.findUnique({
         where: { id },
-        include: {
-          car: true,
-          service: true,
-          payments: { orderBy: { paidAt: 'asc' } },
-        },
+        include: { car: true, service: true, payments: true },
       });
     }
 
@@ -387,11 +437,7 @@ export class BookingsService {
             ? 'USER_CANCELED_PENDING'
             : 'USER_CANCELED',
       },
-      include: {
-        car: true,
-        service: true,
-        payments: { orderBy: { paidAt: 'asc' } },
-      },
+      include: { car: true, service: true, payments: true },
     });
   }
 }

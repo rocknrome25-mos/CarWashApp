@@ -1,4 +1,4 @@
-enum PaymentKind { deposit, remaining, refund, other }
+enum PaymentKind { deposit, remaining, extra, refund }
 
 PaymentKind paymentKindFromJson(String v) {
   switch (v.toUpperCase()) {
@@ -6,11 +6,12 @@ PaymentKind paymentKindFromJson(String v) {
       return PaymentKind.deposit;
     case 'REMAINING':
       return PaymentKind.remaining;
+    case 'EXTRA':
+      return PaymentKind.extra;
     case 'REFUND':
       return PaymentKind.refund;
-    case 'OTHER':
     default:
-      return PaymentKind.other;
+      return PaymentKind.deposit;
   }
 }
 
@@ -20,59 +21,49 @@ String paymentKindToJson(PaymentKind k) {
       return 'DEPOSIT';
     case PaymentKind.remaining:
       return 'REMAINING';
+    case PaymentKind.extra:
+      return 'EXTRA';
     case PaymentKind.refund:
       return 'REFUND';
-    case PaymentKind.other:
-      return 'OTHER';
   }
 }
 
 class Payment {
   final String id;
-  final DateTime createdAt;
-  final DateTime paidAt;
-  final int amountRub;
-  final String? method;
-  final PaymentKind kind;
   final String bookingId;
+  final int amountRub;
+  final String method;
+  final PaymentKind kind;
+  final DateTime paidAt;
 
-  const Payment({
+  Payment({
     required this.id,
-    required this.createdAt,
-    required this.paidAt,
-    required this.amountRub,
-    required this.kind,
     required this.bookingId,
-    this.method,
+    required this.amountRub,
+    required this.method,
+    required this.kind,
+    required this.paidAt,
   });
 
   factory Payment.fromJson(Map<String, dynamic> json) {
-    int intOr(int def, dynamic v) {
-      if (v == null) return def;
-      if (v is int) return v;
-      return int.tryParse('$v') ?? def;
-    }
-
     return Payment(
       id: json['id'] as String,
-      createdAt: DateTime.parse(json['createdAt'] as String),
-      paidAt: DateTime.parse((json['paidAt'] ?? json['createdAt']) as String),
-      amountRub: intOr(0, json['amountRub']),
-      method: (json['method'] as String?)?.trim().isEmpty ?? true
-          ? null
-          : (json['method'] as String?)?.trim(),
-      kind: paymentKindFromJson((json['kind'] ?? 'OTHER') as String),
       bookingId: json['bookingId'] as String,
+      amountRub: json['amountRub'] is int
+          ? json['amountRub'] as int
+          : int.tryParse('${json['amountRub']}') ?? 0,
+      method: (json['method'] as String?) ?? '',
+      kind: paymentKindFromJson((json['kind'] ?? 'DEPOSIT') as String),
+      paidAt: DateTime.parse(json['paidAt'] as String),
     );
   }
 
   Map<String, dynamic> toJson() => {
     'id': id,
-    'createdAt': createdAt.toIso8601String(),
-    'paidAt': paidAt.toIso8601String(),
+    'bookingId': bookingId,
     'amountRub': amountRub,
     'method': method,
     'kind': paymentKindToJson(kind),
-    'bookingId': bookingId,
+    'paidAt': paidAt.toIso8601String(),
   };
 }

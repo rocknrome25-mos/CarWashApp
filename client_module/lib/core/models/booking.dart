@@ -36,7 +36,6 @@ class Booking {
   final DateTime updatedAt;
 
   final DateTime dateTime;
-
   final BookingStatus status;
 
   final DateTime? canceledAt;
@@ -44,20 +43,18 @@ class Booking {
 
   final DateTime? paymentDueAt;
 
-  /// legacy (оставили): время оплаты депозита (НЕ полной суммы)
-  final DateTime? paidAt;
-
   final String carId;
   final String serviceId;
 
   final int? bayId;
 
+  final String? comment;
+
+  // ✅ из API
   final int depositRub;
   final int bufferMin;
 
-  final String? comment;
-
-  /// ✅ новое: список оплат
+  // ✅ новое: список платежей
   final List<Payment> payments;
 
   Booking({
@@ -68,25 +65,37 @@ class Booking {
     required this.status,
     required this.carId,
     required this.serviceId,
+    required this.depositRub,
+    required this.bufferMin,
     this.canceledAt,
     this.cancelReason,
     this.paymentDueAt,
-    this.paidAt,
     this.bayId,
-    this.depositRub = 0,
-    this.bufferMin = 0,
     this.comment,
     this.payments = const [],
   });
 
-  int get paidTotalRub => payments.fold(0, (sum, p) => sum + p.amountRub);
-
-  DateTime? get depositPaidAt {
-    final dep = payments.where((p) => p.kind == PaymentKind.deposit).toList();
-    if (dep.isEmpty) return paidAt; // fallback
-    dep.sort((a, b) => a.paidAt.compareTo(b.paidAt));
-    return dep.first.paidAt;
+  int get paidTotalRub {
+    var sum = 0;
+    for (final p in payments) {
+      // refund уменьшаем сумму
+      if (p.kind == PaymentKind.refund) {
+        sum -= p.amountRub;
+      } else {
+        sum += p.amountRub;
+      }
+    }
+    return sum;
   }
+
+  DateTime? get lastPaidAt {
+    if (payments.isEmpty) return null;
+    final sorted = [...payments]..sort((a, b) => a.paidAt.compareTo(b.paidAt));
+    return sorted.last.paidAt;
+  }
+
+  bool get isDepositPaid =>
+      payments.any((p) => p.kind == PaymentKind.deposit && p.amountRub > 0);
 
   factory Booking.fromJson(Map<String, dynamic> json) {
     final cancelReasonRaw = (json['cancelReason'] as String?)?.trim();
@@ -102,18 +111,10 @@ class Booking {
     comment = comment?.trim();
     if (comment != null && comment.isEmpty) comment = null;
 
-    int intOr(int def, dynamic v) {
-      if (v == null) return def;
-      if (v is int) return v;
-      return int.tryParse('$v') ?? def;
-    }
-
-    final paymentsRaw = (json['payments'] is List)
-        ? (json['payments'] as List)
-        : const [];
-    final payments = paymentsRaw
-        .whereType<Map>()
-        .map((m) => Payment.fromJson(Map<String, dynamic>.from(m)))
+    final rawPayments = (json['payments'] as List?) ?? const [];
+    final payments = rawPayments
+        .whereType<Map<String, dynamic>>()
+        .map((e) => Payment.fromJson(e))
         .toList();
 
     return Booking(
@@ -129,17 +130,18 @@ class Booking {
       paymentDueAt: json['paymentDueAt'] == null
           ? null
           : DateTime.parse(json['paymentDueAt'] as String),
-      paidAt: json['paidAt'] == null
-          ? null
-          : DateTime.parse(json['paidAt'] as String),
       carId: json['carId'] as String,
       serviceId: json['serviceId'] as String,
       bayId: json['bayId'] is int
           ? json['bayId'] as int
           : int.tryParse('${json['bayId']}'),
-      depositRub: intOr(0, json['depositRub']),
-      bufferMin: intOr(0, json['bufferMin']),
       comment: comment,
+      depositRub: json['depositRub'] is int
+          ? json['depositRub'] as int
+          : int.tryParse('${json['depositRub']}') ?? 0,
+      bufferMin: json['bufferMin'] is int
+          ? json['bufferMin'] as int
+          : int.tryParse('${json['bufferMin']}') ?? 0,
       payments: payments,
     );
   }
@@ -153,13 +155,12 @@ class Booking {
     'canceledAt': canceledAt?.toIso8601String(),
     'cancelReason': cancelReason,
     'paymentDueAt': paymentDueAt?.toIso8601String(),
-    'paidAt': paidAt?.toIso8601String(),
     'carId': carId,
     'serviceId': serviceId,
     'bayId': bayId,
+    'comment': comment,
     'depositRub': depositRub,
     'bufferMin': bufferMin,
-    'comment': comment,
     'payments': payments.map((p) => p.toJson()).toList(),
   };
 }

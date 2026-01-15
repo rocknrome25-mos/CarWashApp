@@ -113,33 +113,48 @@ class _BookingsPageState extends State<BookingsPage> {
     );
   }
 
+  String _statusText(Booking b) {
+    switch (b.status) {
+      case BookingStatus.active:
+        return 'Забронировано';
+      case BookingStatus.pendingPayment:
+        return 'Ожидает оплаты бронирования';
+      case BookingStatus.completed:
+        return 'Завершено';
+      case BookingStatus.canceled:
+        return 'Отменено';
+    }
+  }
+
+  Color _statusColor(Booking b) {
+    switch (b.status) {
+      case BookingStatus.active:
+        return Colors.blueGrey;
+      case BookingStatus.pendingPayment:
+        return Colors.orange;
+      case BookingStatus.completed:
+        return Colors.grey;
+      case BookingStatus.canceled:
+        return Colors.red;
+    }
+  }
+
   Widget _statusBadgeForTabs({required Booking b, required bool isActiveTab}) {
+    // На активной вкладке показываем бейдж:
+    // - pendingPayment -> ожидает оплаты
+    // - active -> забронировано
     if (isActiveTab) {
       if (b.status == BookingStatus.pendingPayment) {
-        return _badge(
-          text: 'ОЖИДАЕТ ОПЛАТЫ БРОНИРОВАНИЯ',
-          color: Colors.orange,
-        );
+        return _badge(text: 'ОЖИДАЕТ ОПЛАТЫ', color: Colors.orange);
       }
       if (b.status == BookingStatus.active) {
-        return _badge(text: 'ЗАБРОНИРОВАНО', color: Colors.green);
+        return _badge(text: 'ЗАБРОНИРОВАНО', color: Colors.blueGrey);
       }
       return const SizedBox.shrink();
     }
 
-    switch (b.status) {
-      case BookingStatus.completed:
-        return _badge(text: 'ЗАВЕРШЕНО', color: Colors.grey);
-      case BookingStatus.canceled:
-        return _badge(text: 'ОТМЕНЕНО', color: Colors.red);
-      case BookingStatus.pendingPayment:
-        return _badge(
-          text: 'ОЖИДАЕТ ОПЛАТЫ БРОНИРОВАНИЯ',
-          color: Colors.orange,
-        );
-      case BookingStatus.active:
-        return _badge(text: 'ЗАБРОНИРОВАНО', color: Colors.green);
-    }
+    // На остальных вкладках
+    return _badge(text: _statusText(b).toUpperCase(), color: _statusColor(b));
   }
 
   int _compareBookings(Booking a, Booking b) =>
@@ -158,14 +173,15 @@ class _BookingsPageState extends State<BookingsPage> {
         : '${car.make} ${car.model} (${car.plateDisplay})';
     final when = '${_dateText(b.dateTime)} • ${_timeText(b.dateTime)}';
 
-    final totalRub = service?.priceRub;
-    final paidRub = b.paidTotalRub;
+    final total = service?.priceRub;
+    final paid = b.paidTotalRub;
+    final paidLine = (total == null) ? null : 'Оплачено: $paid ₽ из $total ₽';
 
     String? paymentLine;
     if (b.status == BookingStatus.pendingPayment && b.paymentDueAt != null) {
-      paymentLine = 'Оплатить бронь до: ${_timeText(b.paymentDueAt!)}';
-    } else if (b.status == BookingStatus.active && b.depositPaidAt != null) {
-      paymentLine = 'Бронь подтверждена: ${_dateTimeText(b.depositPaidAt!)}';
+      paymentLine = 'Оплатить до: ${_timeText(b.paymentDueAt!)}';
+    } else if (b.lastPaidAt != null) {
+      paymentLine = 'Платёж: ${_dateTimeText(b.lastPaidAt!)}';
     }
 
     final badge = _statusBadgeForTabs(b: b, isActiveTab: isActiveTab);
@@ -253,10 +269,10 @@ class _BookingsPageState extends State<BookingsPage> {
                       ),
                     ),
                   ],
-                  if (totalRub != null) ...[
+                  if (paidLine != null) ...[
                     const SizedBox(height: 8),
                     Text(
-                      'Оплачено: $paidRub ₽ из $totalRub ₽',
+                      paidLine,
                       style: TextStyle(
                         fontSize: 12,
                         color: Colors.black.withValues(alpha: 0.65),
@@ -391,9 +407,11 @@ class _BookingsPageState extends State<BookingsPage> {
                   b.status == BookingStatus.pendingPayment,
             )
             .toList();
+
         final completed = all
             .where((b) => b.status == BookingStatus.completed)
             .toList();
+
         final canceled = all
             .where((b) => b.status == BookingStatus.canceled)
             .toList();

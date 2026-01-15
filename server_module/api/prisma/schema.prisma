@@ -49,8 +49,8 @@ enum BookingStatus {
 enum PaymentKind {
   DEPOSIT
   REMAINING
+  EXTRA
   REFUND
-  OTHER
 }
 
 model Booking {
@@ -67,7 +67,7 @@ model Booking {
   /// Буфер в минутах (обычно 15)
   bufferMin Int @default(0)
 
-  /// Сумма брони (500 ₽)
+  /// Сумма брони (например 500 ₽)
   depositRub Int @default(0)
 
   /// Комментарий клиента
@@ -76,11 +76,8 @@ model Booking {
   /// Статус записи
   status BookingStatus @default(PENDING_PAYMENT)
 
-  /// Дедлайн оплаты брони (депозита)
+  /// Дедлайн оплаты депозита (удобно только для PENDING_PAYMENT)
   paymentDueAt DateTime?
-
-  /// (legacy/удобство) время оплаты депозита (оставляем, чтобы не ломать старый UI/логику)
-  paidAt DateTime?
 
   /// Отмена
   canceledAt   DateTime?
@@ -92,7 +89,6 @@ model Booking {
   car     Car     @relation(fields: [carId], references: [id], onDelete: Cascade)
   service Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
 
-  /// ✅ Оплаты (много платежей)
   payments Payment[]
 
   @@index([carId])
@@ -104,17 +100,21 @@ model Booking {
 }
 
 model Payment {
-  id        String      @id @default(cuid())
-  createdAt DateTime    @default(now())
-  paidAt    DateTime    @default(now())
-  amountRub Int
-  method    String?
-  kind      PaymentKind @default(OTHER)
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  paidAt    DateTime @default(now())
 
   bookingId String
-  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  booking   Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  amountRub Int
+  method    String
+  kind      PaymentKind
 
   @@index([bookingId])
   @@index([paidAt])
   @@index([kind])
+
+  // 1 депозит + 1 доплата (если захочешь больше — уберём это ограничение)
+  @@unique([bookingId, kind])
 }

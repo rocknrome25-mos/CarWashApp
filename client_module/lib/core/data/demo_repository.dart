@@ -26,7 +26,10 @@ class DemoRepository implements AppRepository {
 
   final List<Booking> _bookings = [];
 
+  // демо-правила
   Duration _paymentHold() => const Duration(minutes: 15);
+  static const int _defaultDepositRub = 500;
+  static const int _defaultBufferMin = 15;
 
   // ---- SERVICES ----
   @override
@@ -90,6 +93,7 @@ class DemoRepository implements AppRepository {
     // демо-хаускипинг: просроченные pending -> canceled
     for (var i = 0; i < _bookings.length; i++) {
       final b = _bookings[i];
+
       if (b.status == BookingStatus.pendingPayment &&
           b.paymentDueAt != null &&
           b.paymentDueAt!.isBefore(now)) {
@@ -105,7 +109,6 @@ class DemoRepository implements AppRepository {
           canceledAt: now,
           cancelReason: 'PAYMENT_EXPIRED',
           paymentDueAt: b.paymentDueAt,
-          paidAt: b.paidAt,
           carId: b.carId,
           serviceId: b.serviceId,
           comment: b.comment,
@@ -135,6 +138,9 @@ class DemoRepository implements AppRepository {
     final now = DateTime.now();
     final due = now.add(_paymentHold());
 
+    final dep = depositRub ?? _defaultDepositRub;
+    final buf = bufferMin ?? _defaultBufferMin;
+
     final b = Booking(
       id: id,
       createdAt: now,
@@ -142,14 +148,13 @@ class DemoRepository implements AppRepository {
       canceledAt: null,
       cancelReason: null,
       paymentDueAt: due,
-      paidAt: null,
       carId: carId,
       serviceId: serviceId,
       dateTime: dateTime,
       status: BookingStatus.pendingPayment,
       bayId: bayId ?? 1,
-      depositRub: depositRub ?? 500,
-      bufferMin: bufferMin ?? 15,
+      depositRub: dep,
+      bufferMin: buf,
       comment: (comment?.trim().isEmpty ?? true) ? null : comment!.trim(),
       payments: const [],
     );
@@ -168,6 +173,7 @@ class DemoRepository implements AppRepository {
     final now = DateTime.now();
 
     if (idx == -1) {
+      // fallback демо
       return Booking(
         id: bookingId,
         createdAt: now,
@@ -176,11 +182,15 @@ class DemoRepository implements AppRepository {
         status: BookingStatus.active,
         carId: '',
         serviceId: '',
+        depositRub: _defaultDepositRub,
+        bufferMin: _defaultBufferMin,
+        payments: const [],
       );
     }
 
     final old = _bookings[idx];
 
+    // если истёк дедлайн — отменяем
     if (old.status == BookingStatus.pendingPayment &&
         old.paymentDueAt != null &&
         old.paymentDueAt!.isBefore(now)) {
@@ -196,7 +206,6 @@ class DemoRepository implements AppRepository {
         canceledAt: now,
         cancelReason: 'PAYMENT_EXPIRED',
         paymentDueAt: old.paymentDueAt,
-        paidAt: old.paidAt,
         carId: old.carId,
         serviceId: old.serviceId,
         comment: old.comment,
@@ -214,12 +223,13 @@ class DemoRepository implements AppRepository {
       newPayments.add(
         Payment(
           id: DateTime.now().microsecondsSinceEpoch.toString(),
-          createdAt: now,
-          paidAt: now,
-          amountRub: old.depositRub > 0 ? old.depositRub : 500,
-          kind: PaymentKind.deposit,
           bookingId: old.id,
-          method: method ?? 'CARD_TEST',
+          amountRub: (old.depositRub > 0) ? old.depositRub : _defaultDepositRub,
+          method: (method?.trim().isNotEmpty ?? false)
+              ? method!.trim()
+              : 'CARD_TEST',
+          kind: PaymentKind.deposit,
+          paidAt: now,
         ),
       );
     }
@@ -235,8 +245,7 @@ class DemoRepository implements AppRepository {
       depositRub: old.depositRub,
       canceledAt: null,
       cancelReason: null,
-      paymentDueAt: old.paymentDueAt,
-      paidAt: now,
+      paymentDueAt: null, // ✅ после оплаты дедлайн убираем
       carId: old.carId,
       serviceId: old.serviceId,
       comment: old.comment,
@@ -263,6 +272,9 @@ class DemoRepository implements AppRepository {
         cancelReason: 'NOT_FOUND_DEMO',
         carId: '',
         serviceId: '',
+        depositRub: _defaultDepositRub,
+        bufferMin: _defaultBufferMin,
+        payments: const [],
       );
     }
 
@@ -276,7 +288,6 @@ class DemoRepository implements AppRepository {
           ? 'USER_CANCELED_PENDING'
           : 'USER_CANCELED',
       paymentDueAt: old.paymentDueAt,
-      paidAt: old.paidAt,
       carId: old.carId,
       serviceId: old.serviceId,
       dateTime: old.dateTime,

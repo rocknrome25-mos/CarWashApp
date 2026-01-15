@@ -3,7 +3,6 @@ import '../../core/data/app_repository.dart';
 import '../../core/models/booking.dart';
 import '../../core/models/car.dart';
 import '../../core/models/service.dart';
-import '../../core/models/payment.dart';
 import 'payment_page.dart';
 
 class BookingDetailsPage extends StatefulWidget {
@@ -21,6 +20,8 @@ class BookingDetailsPage extends StatefulWidget {
 }
 
 class _BookingDetailsPageState extends State<BookingDetailsPage> {
+  static const int _depositRubFallback = 500;
+
   late Future<_Details> _future;
 
   bool _canceling = false;
@@ -86,14 +87,12 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
   }
 
   Widget _detailsBadge(Booking b) {
+    // по статусам как ты задал
     switch (b.status) {
       case BookingStatus.active:
-        return _badge(text: 'ЗАБРОНИРОВАНО', color: Colors.green);
+        return _badge(text: 'ЗАБРОНИРОВАНО', color: Colors.blueGrey);
       case BookingStatus.pendingPayment:
-        return _badge(
-          text: 'ОЖИДАЕТ ОПЛАТЫ БРОНИРОВАНИЯ',
-          color: Colors.orange,
-        );
+        return _badge(text: 'ОЖИДАЕТ ОПЛАТЫ', color: Colors.orange);
       case BookingStatus.completed:
         return _badge(text: 'ЗАВЕРШЕНО', color: Colors.grey);
       case BookingStatus.canceled:
@@ -101,8 +100,9 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
     }
   }
 
-  bool _canPay(Booking b) {
+  bool _canPayDeposit(Booking b) {
     if (b.status != BookingStatus.pendingPayment) return false;
+
     final due = b.paymentDueAt;
     if (due == null) return true;
     return due.isAfter(DateTime.now());
@@ -116,7 +116,7 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
 
     final messenger = ScaffoldMessenger.of(context);
 
-    if (!_canPay(booking)) {
+    if (!_canPayDeposit(booking)) {
       messenger.showSnackBar(
         const SnackBar(content: Text('Оплата недоступна для этой записи.')),
       );
@@ -126,15 +126,15 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
     setState(() => _paying = true);
 
     try {
-      final deposit = booking.depositRub > 0 ? booking.depositRub : 500;
-
       final paid = await Navigator.of(context).push<bool>(
         MaterialPageRoute(
           builder: (_) => PaymentPage(
             repo: widget.repo,
             booking: booking,
             service: service,
-            depositRub: deposit,
+            depositRub: booking.depositRub > 0
+                ? booking.depositRub
+                : _depositRubFallback,
           ),
         ),
       );
@@ -259,19 +259,6 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
     );
   }
 
-  String _paymentKindLabel(PaymentKind k) {
-    switch (k) {
-      case PaymentKind.deposit:
-        return 'Депозит';
-      case PaymentKind.remaining:
-        return 'Доплата';
-      case PaymentKind.refund:
-        return 'Возврат';
-      case PaymentKind.other:
-        return 'Платёж';
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -316,18 +303,21 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
           final isCompleted = booking.status == BookingStatus.completed;
           final canCancel = !(isCanceled || isCompleted);
 
-          final showPayButton = _canPay(booking);
+          final showPayButton = _canPayDeposit(booking);
           final badge = _detailsBadge(booking);
 
-          final totalRub = service?.priceRub ?? 0;
-          final depositRub = booking.depositRub > 0 ? booking.depositRub : 500;
-          final paidRub = booking.paidTotalRub;
-          final remainingRub = (totalRub - paidRub) > 0
-              ? (totalRub - paidRub)
-              : 0;
+          final total = service?.priceRub;
+          final depositRub = booking.depositRub > 0
+              ? booking.depositRub
+              : _depositRubFallback;
+          final remaining = (total == null)
+              ? null
+              : ((total - depositRub) > 0 ? (total - depositRub) : 0);
 
-          final payments = [...booking.payments]
-            ..sort((a, b) => a.paidAt.compareTo(b.paidAt));
+          final paidTotal = booking.paidTotalRub;
+          final paidLine = (total == null)
+              ? null
+              : 'Оплачено: $paidTotal ₽ из $total ₽';
 
           return ListView(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
@@ -367,47 +357,63 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                               fontWeight: FontWeight.w700,
                             ),
                           ),
+
                           const SizedBox(height: 10),
 
+                          // ✅ 2 строки, как ты просил
                           Text(
-                            'Оплачено: $paidRub ₽ из $totalRub ₽',
+                            'Оплата брони: $depositRub ₽',
                             style: TextStyle(
                               fontSize: 12,
                               color: Colors.black.withValues(alpha: 0.80),
                               fontWeight: FontWeight.w900,
                             ),
                           ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Депозит: $depositRub ₽ • Остаток: $remainingRub ₽',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.black.withValues(alpha: 0.65),
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-
-                          if (booking.status == BookingStatus.pendingPayment &&
-                              booking.paymentDueAt != null) ...[
-                            const SizedBox(height: 10),
+                          if (remaining != null) ...[
+                            const SizedBox(height: 4),
                             Text(
-                              'Оплатить бронь до: ${_dtText(booking.paymentDueAt!)}',
+                              'Остаток к оплате на месте: $remaining ₽',
                               style: TextStyle(
                                 fontSize: 12,
-                                color: Colors.black.withValues(alpha: 0.75),
+                                color: Colors.black.withValues(alpha: 0.65),
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
+
+                          if (paidLine != null) ...[
+                            const SizedBox(height: 10),
+                            Text(
+                              paidLine,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.black.withValues(alpha: 0.65),
                                 fontWeight: FontWeight.w900,
                               ),
                             ),
                           ],
 
-                          if (booking.depositPaidAt != null) ...[
-                            const SizedBox(height: 10),
+                          if (booking.lastPaidAt != null) ...[
+                            const SizedBox(height: 6),
                             Text(
-                              'Бронь подтверждена: ${_dtText(booking.depositPaidAt!)}',
+                              'Последний платёж: ${_dtText(booking.lastPaidAt!)}',
                               style: TextStyle(
                                 fontSize: 12,
                                 color: Colors.black.withValues(alpha: 0.65),
                                 fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
+
+                          if (booking.status == BookingStatus.pendingPayment &&
+                              booking.paymentDueAt != null) ...[
+                            const SizedBox(height: 10),
+                            Text(
+                              'Оплатить до: ${_dtText(booking.paymentDueAt!)}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.black.withValues(alpha: 0.75),
+                                fontWeight: FontWeight.w900,
                               ),
                             ),
                           ],
@@ -478,49 +484,6 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                 ),
               ),
 
-              if (payments.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                _card(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Платежи',
-                        style: TextStyle(fontWeight: FontWeight.w900),
-                      ),
-                      const SizedBox(height: 10),
-                      ...payments.map(
-                        (p) => Padding(
-                          padding: const EdgeInsets.only(bottom: 8),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  '${_paymentKindLabel(p.kind)} • ${p.amountRub} ₽',
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Text(
-                                _dtText(p.paidAt),
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.black.withValues(alpha: 0.65),
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-
               if (showPayButton) ...[
                 const SizedBox(height: 14),
                 SizedBox(
@@ -531,7 +494,7 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                         : () => _payNow(booking: booking, service: service),
                     icon: const Icon(Icons.credit_card),
                     label: Text(
-                      _paying ? 'Бронирую...' : 'Забронировать $depositRub ₽',
+                      _paying ? 'Оплачиваю...' : 'Забронировать $depositRub ₽',
                     ),
                   ),
                 ),
