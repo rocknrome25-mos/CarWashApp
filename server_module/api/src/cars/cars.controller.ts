@@ -1,4 +1,13 @@
-import { Body, Controller, Delete, Get, Param, Post, Query } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { CarsService } from './cars.service';
 
 @Controller('cars')
@@ -8,7 +17,11 @@ export class CarsController {
   // GET /cars?clientId=...
   @Get()
   getAll(@Query('clientId') clientId?: string) {
-    return this.carsService.findAll(clientId);
+    const cid = (clientId ?? '').trim();
+    if (!cid) {
+      throw new BadRequestException('clientId is required');
+    }
+    return this.carsService.findAll(cid);
   }
 
   @Post()
@@ -21,8 +34,6 @@ export class CarsController {
       year?: number | null;
       color?: string | null;
       bodyType?: string | null;
-
-      // ✅ добавили
       clientId?: string | null;
     },
   ) {
@@ -30,10 +41,11 @@ export class CarsController {
   }
 
   @Delete(':id')
-  remove(
-    @Param('id') id: string,
-    @Query('clientId') clientId?: string,
-  ) {
-    return this.carsService.remove(id, clientId);
+  remove(@Param('id') id: string, @Query('clientId') clientId?: string) {
+    const cid = (clientId ?? '').trim();
+    if (!cid) {
+      throw new BadRequestException('clientId is required');
+    }
+    return this.carsService.remove(id, cid);
   }
 }

@@ -11,38 +11,69 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> {
-  final _loginCtrl = TextEditingController(text: 'demo');
+  final _phoneCtrl = TextEditingController(text: '+7 999 123-45-67');
   final _passCtrl = TextEditingController(text: '1234');
   bool _loading = false;
+
+  String _normalizePhone(String raw) {
+    final s = raw.trim();
+    final digits = s.replaceAll(RegExp(r'\D'), '');
+
+    // нормализуем к +7XXXXXXXXXX
+    if (digits.length == 10) return '+7$digits';
+    if (digits.length == 11 && digits.startsWith('8')) {
+      return '+7${digits.substring(1)}';
+    }
+    if (digits.length == 11 && digits.startsWith('7')) return '+$digits';
+    if (s.startsWith('+') && digits.length >= 11) return '+$digits';
+    return s;
+  }
+
+  bool _looksLikeRuPhone(String p) {
+    final digits = p.replaceAll(RegExp(r'\D'), '');
+    if (digits.length < 10) return false;
+    if (digits.length == 10) return true;
+    if (digits.length == 11 &&
+        (digits.startsWith('7') || digits.startsWith('8'))) {
+      return true;
+    }
+    return false;
+  }
 
   Future<void> _submit() async {
     if (_loading) return;
 
-    final login = _loginCtrl.text.trim();
+    final phoneRaw = _phoneCtrl.text;
     final pass = _passCtrl.text.trim();
 
+    final phone = _normalizePhone(phoneRaw);
+
+    if (!_looksLikeRuPhone(phone)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Проверь телефон. Нужно минимум 10 цифр.')),
+      );
+      return;
+    }
+
     setState(() => _loading = true);
-    await Future<void>.delayed(const Duration(milliseconds: 200));
-    if (!mounted) return;
 
     try {
-      if (login == 'demo' && pass == '1234') {
-        await widget.repo.loginDemo();
+      // прототип: пароль только 1234
+      if (pass == '1234') {
+        await widget.repo.loginDemo(phone: phone);
         if (!mounted) return;
         Navigator.of(context).pop(true);
         return;
       }
 
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Неверный логин или пароль (demo / 1234)'),
-        ),
+        const SnackBar(content: Text('Неверный пароль (для демо: 1234)')),
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Ошибка: $e')));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -54,7 +85,7 @@ class _LoginPageState extends State<LoginPage> {
       builder: (ctx) => AlertDialog(
         title: const Text('Восстановление доступа'),
         content: const Text(
-          'Скоро добавим восстановление по телефону/SMS.\n\nПока вход: demo / 1234',
+          'Скоро добавим восстановление по телефону/SMS.\n\nПока демо: телефон + пароль 1234',
         ),
         actions: [
           TextButton(
@@ -68,7 +99,7 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   void dispose() {
-    _loginCtrl.dispose();
+    _phoneCtrl.dispose();
     _passCtrl.dispose();
     super.dispose();
   }
@@ -96,7 +127,7 @@ class _LoginPageState extends State<LoginPage> {
                   SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      'Прототипный вход\nИспользуй demo / 1234',
+                      'Прототипный вход\nТелефон + пароль 1234',
                       style: TextStyle(
                         fontWeight: FontWeight.w800,
                         height: 1.2,
@@ -108,10 +139,12 @@ class _LoginPageState extends State<LoginPage> {
             ),
             const SizedBox(height: 14),
             TextField(
-              controller: _loginCtrl,
+              controller: _phoneCtrl,
+              keyboardType: TextInputType.phone,
               textInputAction: TextInputAction.next,
               decoration: const InputDecoration(
-                labelText: 'Логин',
+                labelText: 'Телефон',
+                hintText: '+7 999 123-45-67',
                 border: OutlineInputBorder(),
               ),
             ),

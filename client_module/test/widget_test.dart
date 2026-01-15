@@ -24,13 +24,14 @@ class _FakeRepo implements AppRepository {
   }
 
   @override
-  Future<Client> loginDemo({String phone = ''}) async {
-    final p = phone.trim().isEmpty ? '+70000000000' : phone.trim();
+  Future<Client> loginDemo({required String phone}) async {
+    final p = phone.trim();
+    if (p.isEmpty) throw Exception('phone is required');
 
     final c = Client(
       id: 'demo-client',
       phone: p,
-      name: null,
+      name: 'Demo',
       gender: 'MALE',
       birthDate: null,
     );
@@ -57,9 +58,9 @@ class _FakeRepo implements AppRepository {
   }
 
   // --- остальное для этого теста не нужно ---
-
   @override
-  Future<List<Service>> getServices({bool forceRefresh = false}) async => const [];
+  Future<List<Service>> getServices({bool forceRefresh = false}) async =>
+      const [];
 
   @override
   Future<List<Car>> getCars({bool forceRefresh = false}) async => const [];
@@ -113,12 +114,7 @@ void main() {
   testWidgets('App builds', (WidgetTester tester) async {
     final repo = _FakeRepo();
 
-    await tester.pumpWidget(
-      ClientModuleApp(
-        repo: repo,
-        onLogout: () {},
-      ),
-    );
+    await tester.pumpWidget(ClientModuleApp(repo: repo, onLogout: () {}));
 
     await tester.pump();
 

@@ -403,7 +403,7 @@ export class BookingsService {
     if (!existing) throw new NotFoundException('Booking not found');
 
     // ✅ запретим отменять чужую запись (если передали clientId)
-    if (clientId && existing.clientId && existing.clientId !== clientId) {
+    if (existing.clientId && existing.clientId !== clientId) {
       throw new ForbiddenException('Not your booking');
     }
 

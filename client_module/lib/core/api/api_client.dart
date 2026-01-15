@@ -2,22 +2,15 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 /// A clean API exception designed for UI.
-/// - message: already humanized (Russian-friendly) when possible
-/// - details/raw: kept for debugging if you want
 class ApiException implements Exception {
   final int statusCode;
   final String message;
-
-  /// Optional parsed JSON details from backend error response.
   final Object? details;
-
-  /// Raw body text (useful when backend returns non-JSON).
   final String? raw;
 
   ApiException(this.statusCode, this.message, {this.details, this.raw});
 
   @override
-  // IMPORTANT: do not include statusCode here, so `$e` won't print "409" in UI
   String toString() => message;
 }
 
@@ -45,8 +38,9 @@ class ApiClient {
     return _handle(res);
   }
 
-  Future<dynamic> deleteJson(String path) async {
-    final res = await _http.delete(_u(path));
+  /// ✅ FIX: query реально передаём в URI
+  Future<dynamic> deleteJson(String path, {Map<String, String>? query}) async {
+    final res = await _http.delete(_u(path, query));
     return _handle(res);
   }
 
@@ -57,9 +51,7 @@ class ApiClient {
 
     // OK
     if (res.statusCode >= 200 && res.statusCode < 300) {
-      if (!isJson) {
-        return text;
-      }
+      if (!isJson) return text;
       return text.isEmpty ? null : jsonDecode(text);
     }
 
@@ -67,10 +59,8 @@ class ApiClient {
     Object? details;
     final String? raw = text.isEmpty ? null : text;
 
-    // Start with default message by status
     String msg = _defaultMessageForStatus(res.statusCode);
 
-    // Try to parse JSON error shape (NestJS typical: {statusCode, message, error})
     if (isJson && text.isNotEmpty) {
       try {
         final j = jsonDecode(text);
@@ -91,17 +81,13 @@ class ApiClient {
           msg = j.toString();
         }
       } catch (_) {
-        // bad JSON -> fallback to raw/default
         msg = raw ?? msg;
       }
     } else if (text.isNotEmpty) {
       msg = text;
     }
 
-    // Humanize backend tech text -> RU UI
     msg = _humanizeMessage(res.statusCode, msg);
-
-    // Last safety net: ensure we never leak "ApiException(409)" or plain status codes
     msg = _sanitizeForUi(msg);
 
     throw ApiException(res.statusCode, msg, details: details, raw: raw);
@@ -133,9 +119,6 @@ class ApiClient {
   String _humanizeMessage(int code, String msg) {
     final m = msg.toLowerCase();
 
-    // --- business / domain mapping ---
-
-    // Car delete forbidden due to active bookings
     if (code == 409 &&
         (m.contains('cannot delete car') ||
             (m.contains('delete') && m.contains('car'))) &&
@@ -143,28 +126,24 @@ class ApiClient {
       return 'Нельзя удалить авто: есть активные записи. Сначала отмените записи.';
     }
 
-    // Booking cancel: past booking
     if ((code == 400 || code == 422) &&
         (m.contains('cannot cancel a past booking') ||
             (m.contains('cannot cancel') && m.contains('past')))) {
       return 'Нельзя отменить прошедшую запись.';
     }
 
-    // Booking cancel: started booking
     if ((code == 400 || code == 422) &&
         (m.contains('cannot cancel a started booking') ||
             (m.contains('cannot cancel') && m.contains('started')))) {
       return 'Нельзя отменить запись, которая уже началась.';
     }
 
-    // Booking cancel: completed booking
     if (code == 409 &&
         (m.contains('completed booking') ||
             (m.contains('cannot cancel') && m.contains('completed')))) {
       return 'Нельзя отменить завершённую запись.';
     }
 
-    // Slot occupied / conflict
     if (code == 409) {
       if (m.contains('slot') ||
           m.contains('busy') ||
@@ -179,26 +158,19 @@ class ApiClient {
       return 'Конфликт: данные изменились. Обнови список и попробуй снова.';
     }
 
-    // Not found mapping
     if (code == 404) {
-      if (m.contains('booking')) {
-        return 'Запись не найдена.';
-      }
-      if (m.contains('car')) {
-        return 'Авто не найдено (возможно, удалено).';
-      }
+      if (m.contains('booking')) return 'Запись не найдена.';
+      if (m.contains('car')) return 'Авто не найдено (возможно, удалено).';
       if (m.contains('service')) {
         return 'Услуга не найдена (возможно, удалена).';
       }
       return 'Ресурс не найден.';
     }
 
-    // Validation / bad request mapping
     if (code == 400 || code == 422) {
       if (m.contains('date') || m.contains('time') || m.contains('datetime')) {
         return 'Некорректная дата/время. Проверь и попробуй снова.';
       }
-      // Keep backend message if it's already decent
       return msg;
     }
 
@@ -207,15 +179,8 @@ class ApiClient {
 
   String _sanitizeForUi(String msg) {
     var out = msg.trim();
-
-    // If somehow someone passed Exception.toString() string into message
-    // remove a typical prefix "ApiException(409): "
     out = out.replaceAll(RegExp(r'ApiException\(\d+\):\s*'), '');
-
-    // If message is empty after sanitizing -> fallback
-    if (out.isEmpty) {
-      out = 'Ошибка запроса';
-    }
+    if (out.isEmpty) out = 'Ошибка запроса';
     return out;
   }
 }

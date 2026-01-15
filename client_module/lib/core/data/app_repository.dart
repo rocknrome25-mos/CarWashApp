@@ -6,7 +6,10 @@ import '../models/client.dart';
 abstract class AppRepository {
   // --- SESSION ---
   Client? get currentClient;
+
+  /// Устанавливаем текущего клиента (после login/register/verify)
   Future<void> setCurrentClient(Client c);
+
   Future<void> logout();
 
   // --- AUTH/REGISTER ---
@@ -17,8 +20,9 @@ abstract class AppRepository {
     DateTime? birthDate,
   });
 
-  /// Для демо (пока): "demo / 1234" создаёт/ставит тестового клиента
-  Future<Client> loginDemo({String phone});
+  /// Временный вход для прототипа (пока нет OTP):
+  /// обязательно указывать phone.
+  Future<Client> loginDemo({required String phone});
 
   // --- SERVICES ---
   Future<List<Service>> getServices({bool forceRefresh = false});

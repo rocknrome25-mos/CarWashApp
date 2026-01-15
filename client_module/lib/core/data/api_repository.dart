@@ -14,13 +14,14 @@ class ApiRepository implements AppRepository {
 
   ApiRepository({required this.api, required this.cache});
 
+  // ---------------- SESSION ----------------
+
   @override
   Client? get currentClient => cache.get<Client>(_kClient);
 
   @override
   Future<void> setCurrentClient(Client c) async {
     cache.set(_kClient, c, ttl: const Duration(days: 365));
-    // чистим кэш данных, чтобы подтянуть "свои"
     cache.invalidate('cars');
     cache.invalidate('bookings_all');
     cache.invalidate('bookings_active');
@@ -32,6 +33,14 @@ class ApiRepository implements AppRepository {
     cache.invalidate('cars');
     cache.invalidate('bookings_all');
     cache.invalidate('bookings_active');
+  }
+
+  String _requireClientId() {
+    final cid = currentClient?.id;
+    if (cid == null || cid.trim().isEmpty) {
+      throw Exception('Нет активного клиента. Перезапусти и войди заново.');
+    }
+    return cid.trim();
   }
 
   // ---------------- AUTH / REGISTER ----------------
@@ -53,18 +62,24 @@ class ApiRepository implements AppRepository {
     final j =
         await api.postJson('/clients/register', payload)
             as Map<String, dynamic>;
+
     final c = Client.fromJson(j);
     await setCurrentClient(c);
     return c;
   }
 
+  /// Demo-login сейчас делаем "по телефону" (пока без SMS).
+  /// На бэке register идемпотентный (upsert по phone).
   @override
-  Future<Client> loginDemo({String phone = '+79991234567'}) async {
-    // Вариант для демо: можно дернуть реальный эндпоинт, если сделаем на бэке.
-    // Пока сделаем "мягко": попробуем /clients/register (идемпотентно через upsert на бэке).
+  Future<Client> loginDemo({String phone = ''}) async {
+    final p = phone.trim();
+    if (p.isEmpty) {
+      throw Exception('Телефон обязателен для входа');
+    }
+
     final j =
         await api.postJson('/clients/register', {
-              'phone': phone,
+              'phone': p,
               'name': 'Demo',
               'gender': 'MALE',
             })
@@ -80,6 +95,7 @@ class ApiRepository implements AppRepository {
   @override
   Future<List<Service>> getServices({bool forceRefresh = false}) async {
     const key = 'services';
+
     if (!forceRefresh) {
       final cached = cache.get<List<Service>>(key);
       if (cached != null) return cached;
@@ -99,24 +115,22 @@ class ApiRepository implements AppRepository {
   @override
   Future<List<Car>> getCars({bool forceRefresh = false}) async {
     const key = 'cars';
+
     if (!forceRefresh) {
       final cached = cache.get<List<Car>>(key);
       if (cached != null) return cached;
     }
 
-    final data = await api.getJson('/cars') as List;
+    final cid = _requireClientId();
+
+    final data = await api.getJson('/cars', query: {'clientId': cid}) as List;
+
     final list = data
         .map((e) => Car.fromJson(e as Map<String, dynamic>))
         .toList();
 
-    // ✅ Временная защита (даже если бэк пока отдаёт все авто)
-    final cid = currentClient?.id;
-    final filtered = (cid == null)
-        ? list
-        : list.where((c) => c.clientId == cid).toList();
-
-    cache.set(key, filtered, ttl: const Duration(seconds: 30));
-    return filtered;
+    cache.set(key, list, ttl: const Duration(seconds: 30));
+    return list;
   }
 
   @override
@@ -128,10 +142,7 @@ class ApiRepository implements AppRepository {
     String? color,
     String? bodyType,
   }) async {
-    final cid = currentClient?.id;
-    if (cid == null) {
-      throw Exception('Нет активного клиента. Перезапусти и войди заново.');
-    }
+    final cid = _requireClientId();
 
     final payload = <String, dynamic>{
       'makeDisplay': makeDisplay.trim(),
@@ -140,7 +151,7 @@ class ApiRepository implements AppRepository {
       'year': year,
       'color': color,
       'bodyType': bodyType,
-      'clientId': cid, // ✅ привязка авто к клиенту
+      'clientId': cid,
     };
 
     final j = await api.postJson('/cars', payload) as Map<String, dynamic>;
@@ -148,12 +159,16 @@ class ApiRepository implements AppRepository {
     cache.invalidate('cars');
     cache.invalidate('bookings_all');
     cache.invalidate('bookings_active');
+
     return Car.fromJson(j);
   }
 
   @override
   Future<void> deleteCar(String id) async {
-    await api.deleteJson('/cars/$id');
+    final cid = _requireClientId();
+
+    await api.deleteJson('/cars/$id', query: {'clientId': cid});
+
     cache.invalidate('cars');
     cache.invalidate('bookings_all');
     cache.invalidate('bookings_active');
@@ -173,30 +188,18 @@ class ApiRepository implements AppRepository {
       if (cached != null) return cached;
     }
 
-    final data =
-        await api.getJson(
-              '/bookings',
-              query: includeCanceled ? {'includeCanceled': 'true'} : null,
-            )
-            as List;
+    final cid = _requireClientId();
 
+    final query = <String, String>{'clientId': cid};
+    if (includeCanceled) query['includeCanceled'] = 'true';
+
+    final data = await api.getJson('/bookings', query: query) as List;
     final list = data
         .map((e) => Booking.fromJson(e as Map<String, dynamic>))
         .toList();
 
-    // ✅ Временная защита: пока бэк не фильтрует, фильтруем по clientId (когда появится)
-    final cid = currentClient?.id;
-    final filtered = (cid == null)
-        ? list
-        : list.where((b) {
-            final j = b.toJson();
-            final bidCid =
-                j['clientId']; // может быть null, если бэк пока не отдаёт
-            return bidCid == null ? true : (bidCid == cid);
-          }).toList();
-
-    cache.set(key, filtered, ttl: const Duration(seconds: 15));
-    return filtered;
+    cache.set(key, list, ttl: const Duration(seconds: 15));
+    return list;
   }
 
   @override
@@ -209,16 +212,13 @@ class ApiRepository implements AppRepository {
     int? bufferMin,
     String? comment,
   }) async {
-    final cid = currentClient?.id;
-    if (cid == null) {
-      throw Exception('Нет активного клиента. Перезапусти и войди заново.');
-    }
+    final cid = _requireClientId();
 
     final payload = <String, dynamic>{
       'carId': carId,
       'serviceId': serviceId,
       'dateTime': dateTime.toUtc().toIso8601String(),
-      'clientId': cid, // ✅ привязка брони к клиенту
+      'clientId': cid,
       if (bayId != null) 'bayId': bayId,
       if (depositRub != null) 'depositRub': depositRub,
       if (bufferMin != null) 'bufferMin': bufferMin,
@@ -229,6 +229,7 @@ class ApiRepository implements AppRepository {
 
     cache.invalidate('bookings_all');
     cache.invalidate('bookings_active');
+
     return Booking.fromJson(j);
   }
 
@@ -245,14 +246,21 @@ class ApiRepository implements AppRepository {
 
     cache.invalidate('bookings_all');
     cache.invalidate('bookings_active');
+
     return Booking.fromJson(j);
   }
 
   @override
   Future<Booking> cancelBooking(String id) async {
-    final j = await api.deleteJson('/bookings/$id') as Map<String, dynamic>;
+    final cid = _requireClientId();
+
+    final j =
+        await api.deleteJson('/bookings/$id', query: {'clientId': cid})
+            as Map<String, dynamic>;
+
     cache.invalidate('bookings_all');
     cache.invalidate('bookings_active');
+
     return Booking.fromJson(j);
   }
 }

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -19,8 +20,11 @@ export class BookingsController {
     @Query('includeCanceled') includeCanceled?: string,
     @Query('clientId') clientId?: string,
   ) {
+    const cid = (clientId ?? '').trim();
+    if (!cid) throw new BadRequestException('clientId is required');
+
     const flag = includeCanceled === '1' || includeCanceled === 'true';
-    return this.bookingsService.findAll(flag, clientId);
+    return this.bookingsService.findAll(flag, cid);
   }
 
   @Post()
@@ -34,8 +38,6 @@ export class BookingsController {
       depositRub?: number;
       bufferMin?: number;
       comment?: string;
-
-      // ✅ добавили
       clientId?: string;
     },
   ) {
@@ -49,6 +51,9 @@ export class BookingsController {
 
   @Delete(':id')
   cancel(@Param('id') id: string, @Query('clientId') clientId?: string) {
-    return this.bookingsService.cancel(id, clientId);
+    const cid = (clientId ?? '').trim();
+    if (!cid) throw new BadRequestException('clientId is required');
+
+    return this.bookingsService.cancel(id, cid);
   }
 }
