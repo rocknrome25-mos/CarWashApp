@@ -8,6 +8,7 @@ import 'core/api/api_client.dart';
 import 'core/cache/memory_cache.dart';
 import 'core/data/api_repository.dart';
 import 'core/data/app_repository.dart';
+import 'core/realtime/realtime_client.dart';
 import 'screens/start_page.dart';
 
 void main() {
@@ -31,14 +32,37 @@ class _RootState extends State<_Root> {
     return 'http://localhost:3000';
   }
 
+  Uri _resolveWsUrl(String baseUrl) {
+    // http://host:3000 -> ws://host:3000/ws
+    final u = Uri.parse(baseUrl);
+    final scheme = u.scheme == 'https' ? 'wss' : 'ws';
+    return Uri(
+      scheme: scheme,
+      host: u.host,
+      port: u.port,
+      path: '/ws',
+    );
+  }
+
   @override
   void initState() {
     super.initState();
 
+    final baseUrl = _resolveBaseUrl();
+    final rt = RealtimeClient(wsUri: _resolveWsUrl(baseUrl));
+    rt.connect();
+
     repo = ApiRepository(
-      api: ApiClient(baseUrl: _resolveBaseUrl()),
+      api: ApiClient(baseUrl: baseUrl),
       cache: MemoryCache(),
+      realtime: rt,
     );
+  }
+
+  @override
+  void dispose() {
+    repo.dispose();
+    super.dispose();
   }
 
   @override

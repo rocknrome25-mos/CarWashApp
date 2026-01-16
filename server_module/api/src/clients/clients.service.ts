@@ -22,7 +22,8 @@ export class ClientsService {
     // 11 digits starting 8 -> +7XXXXXXXXXX
     // 11 digits starting 7 -> +7XXXXXXXXXX
     if (digits.length === 10) return `+7${digits}`;
-    if (digits.length === 11 && digits.startsWith('8')) return `+7${digits.substring(1)}`;
+    if (digits.length === 11 && digits.startsWith('8'))
+      return `+7${digits.substring(1)}`;
     if (digits.length === 11 && digits.startsWith('7')) return `+7${digits}`;
     // fallback: если уже что-то типа +7..., но там могли остаться не только цифры
     if (s.startsWith('+') && digits.length >= 11) return `+${digits}`;
@@ -37,7 +38,8 @@ export class ClientsService {
   }
 
   async register(body: RegisterBody) {
-    if (!body || !body.phone) throw new BadRequestException('phone is required');
+    if (!body || !body.phone)
+      throw new BadRequestException('phone is required');
     if (!body.gender) throw new BadRequestException('gender is required');
 
     const phone = this._normalizeRuPhone(body.phone);
@@ -51,7 +53,8 @@ export class ClientsService {
     let birthDate: Date | null = null;
     if (body.birthDate) {
       const d = new Date(body.birthDate);
-      if (isNaN(d.getTime())) throw new BadRequestException('birthDate must be ISO');
+      if (isNaN(d.getTime()))
+        throw new BadRequestException('birthDate must be ISO');
       birthDate = d;
     }
 

@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:client_module/app.dart';
 
@@ -6,9 +9,15 @@ import 'package:client_module/core/models/booking.dart';
 import 'package:client_module/core/models/car.dart';
 import 'package:client_module/core/models/service.dart';
 import 'package:client_module/core/models/client.dart';
+import 'package:client_module/core/realtime/realtime_client.dart';
 
 class _FakeRepo implements AppRepository {
   Client? _current;
+
+  final _ctrl = StreamController<BookingRealtimeEvent>.broadcast();
+
+  @override
+  Stream<BookingRealtimeEvent> get bookingEvents => _ctrl.stream;
 
   @override
   Client? get currentClient => _current;
@@ -21,6 +30,11 @@ class _FakeRepo implements AppRepository {
   @override
   Future<void> logout() async {
     _current = null;
+  }
+
+  @override
+  Future<void> dispose() async {
+    await _ctrl.close();
   }
 
   @override
@@ -57,7 +71,6 @@ class _FakeRepo implements AppRepository {
     return c;
   }
 
-  // --- остальное для этого теста не нужно ---
   @override
   Future<List<Service>> getServices({bool forceRefresh = false}) async =>
       const [];
@@ -83,6 +96,14 @@ class _FakeRepo implements AppRepository {
   @override
   Future<List<Booking>> getBookings({
     bool includeCanceled = false,
+    bool forceRefresh = false,
+  }) async => const [];
+
+  @override
+  Future<List<DateTimeRange>> getBusySlots({
+    required int bayId,
+    required DateTime from,
+    required DateTime to,
     bool forceRefresh = false,
   }) async => const [];
 
@@ -115,7 +136,6 @@ void main() {
     final repo = _FakeRepo();
 
     await tester.pumpWidget(ClientModuleApp(repo: repo, onLogout: () {}));
-
     await tester.pump();
 
     expect(find.text('Автомойка'), findsOneWidget);

@@ -14,6 +14,38 @@ import { BookingsService } from './bookings.service';
 export class BookingsController {
   constructor(private readonly bookingsService: BookingsService) {}
 
+  // ✅ PUBLIC "busy slots" (no clientId, no carId)
+  // GET /bookings/busy?bayId=1&from=...&to=...
+  @Get('busy')
+  getBusy(
+    @Query('bayId') bayIdRaw?: string,
+    @Query('from') fromRaw?: string,
+    @Query('to') toRaw?: string,
+  ) {
+    const bayIdNum = Number(bayIdRaw);
+    const bayId = Number.isFinite(bayIdNum) ? Math.trunc(bayIdNum) : 1;
+    if (bayId < 1 || bayId > 20) {
+      throw new BadRequestException('bayId must be between 1 and 20');
+    }
+
+    const fromS = (fromRaw ?? '').trim();
+    const toS = (toRaw ?? '').trim();
+    if (!fromS || !toS) {
+      throw new BadRequestException('from and to are required');
+    }
+
+    const from = new Date(fromS);
+    const to = new Date(toS);
+    if (isNaN(from.getTime()) || isNaN(to.getTime())) {
+      throw new BadRequestException('from/to must be ISO string');
+    }
+    if (to.getTime() <= from.getTime()) {
+      throw new BadRequestException('to must be greater than from');
+    }
+
+    return this.bookingsService.getBusySlots({ bayId, from, to });
+  }
+
   // GET /bookings?includeCanceled=true&clientId=...
   @Get()
   getAll(

@@ -1,3 +1,5 @@
+import 'package:flutter/material.dart';
+
 import '../api/api_client.dart';
 import '../cache/memory_cache.dart';
 import '../data/app_repository.dart';
@@ -5,14 +7,25 @@ import '../models/booking.dart';
 import '../models/car.dart';
 import '../models/service.dart';
 import '../models/client.dart';
+import '../realtime/realtime_client.dart';
 
 class ApiRepository implements AppRepository {
   final ApiClient api;
   final MemoryCache cache;
+  final RealtimeClient realtime;
 
   static const _kClient = 'current_client';
 
-  ApiRepository({required this.api, required this.cache});
+  ApiRepository({
+    required this.api,
+    required this.cache,
+    required this.realtime,
+  });
+
+  // ---------------- REALTIME ----------------
+
+  @override
+  Stream<BookingRealtimeEvent> get bookingEvents => realtime.events;
 
   // ---------------- SESSION ----------------
 
@@ -25,6 +38,7 @@ class ApiRepository implements AppRepository {
     cache.invalidate('cars');
     cache.invalidate('bookings_all');
     cache.invalidate('bookings_active');
+    cache.invalidate('busy_slots');
   }
 
   @override
@@ -33,6 +47,12 @@ class ApiRepository implements AppRepository {
     cache.invalidate('cars');
     cache.invalidate('bookings_all');
     cache.invalidate('bookings_active');
+    cache.invalidate('busy_slots');
+  }
+
+  @override
+  Future<void> dispose() async {
+    await realtime.close();
   }
 
   String _requireClientId() {
@@ -68,10 +88,8 @@ class ApiRepository implements AppRepository {
     return c;
   }
 
-  /// Demo-login сейчас делаем "по телефону" (пока без SMS).
-  /// На бэке register идемпотентный (upsert по phone).
   @override
-  Future<Client> loginDemo({String phone = ''}) async {
+  Future<Client> loginDemo({required String phone}) async {
     final p = phone.trim();
     if (p.isEmpty) {
       throw Exception('Телефон обязателен для входа');
@@ -122,7 +140,6 @@ class ApiRepository implements AppRepository {
     }
 
     final cid = _requireClientId();
-
     final data = await api.getJson('/cars', query: {'clientId': cid}) as List;
 
     final list = data
@@ -159,6 +176,7 @@ class ApiRepository implements AppRepository {
     cache.invalidate('cars');
     cache.invalidate('bookings_all');
     cache.invalidate('bookings_active');
+    cache.invalidate('busy_slots');
 
     return Car.fromJson(j);
   }
@@ -172,6 +190,7 @@ class ApiRepository implements AppRepository {
     cache.invalidate('cars');
     cache.invalidate('bookings_all');
     cache.invalidate('bookings_active');
+    cache.invalidate('busy_slots');
   }
 
   // ---------------- BOOKINGS ----------------
@@ -203,6 +222,40 @@ class ApiRepository implements AppRepository {
   }
 
   @override
+  Future<List<DateTimeRange>> getBusySlots({
+    required int bayId,
+    required DateTime from,
+    required DateTime to,
+    bool forceRefresh = false,
+  }) async {
+    final key =
+        'busy_slots_${bayId}_${from.toUtc().toIso8601String()}_${to.toUtc().toIso8601String()}';
+
+    if (!forceRefresh) {
+      final cached = cache.get<List<DateTimeRange>>(key);
+      if (cached != null) return cached;
+    }
+
+    final query = <String, String>{
+      'bayId': bayId.toString(),
+      'from': from.toUtc().toIso8601String(),
+      'to': to.toUtc().toIso8601String(),
+    };
+
+    final data = await api.getJson('/bookings/busy', query: query) as List;
+
+    final ranges = data.map((e) {
+      final m = e as Map<String, dynamic>;
+      final startUtc = DateTime.parse(m['start'] as String);
+      final endUtc = DateTime.parse(m['end'] as String);
+      return DateTimeRange(start: startUtc.toLocal(), end: endUtc.toLocal());
+    }).toList();
+
+    cache.set(key, ranges, ttl: const Duration(seconds: 20));
+    return ranges;
+  }
+
+  @override
   Future<Booking> createBooking({
     required String carId,
     required String serviceId,
@@ -229,6 +282,7 @@ class ApiRepository implements AppRepository {
 
     cache.invalidate('bookings_all');
     cache.invalidate('bookings_active');
+    cache.invalidate('busy_slots');
 
     return Booking.fromJson(j);
   }
@@ -246,6 +300,7 @@ class ApiRepository implements AppRepository {
 
     cache.invalidate('bookings_all');
     cache.invalidate('bookings_active');
+    cache.invalidate('busy_slots');
 
     return Booking.fromJson(j);
   }
@@ -260,6 +315,7 @@ class ApiRepository implements AppRepository {
 
     cache.invalidate('bookings_all');
     cache.invalidate('bookings_active');
+    cache.invalidate('busy_slots');
 
     return Booking.fromJson(j);
   }

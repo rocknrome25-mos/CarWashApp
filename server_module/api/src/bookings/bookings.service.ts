@@ -6,7 +6,8 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { BookingStatus, PaymentKind } from '@prisma/client';
+import { BookingStatus, PaymentKind, Prisma } from '@prisma/client';
+import { BookingsGateway } from './bookings.gateway';
 
 type PayBody = {
   method?: string;
@@ -16,10 +17,21 @@ type PayBody = {
 
 @Injectable()
 export class BookingsService {
-  constructor(private prisma: PrismaService) {}
+  // ✅ одинаковая сетка слотов на бэке и фронте
+  private static readonly SLOT_STEP_MIN = 30;
+
+  constructor(
+    private prisma: PrismaService,
+    private ws: BookingsGateway,
+  ) {}
 
   private _minutesToMs(m: number) {
     return m * 60 * 1000;
+  }
+
+  private _roundUpToStepMin(totalMin: number, stepMin: number) {
+    if (totalMin <= 0) return 0;
+    return Math.ceil(totalMin / stepMin) * stepMin;
   }
 
   private _end(start: Date, durationMin: number) {
@@ -27,6 +39,7 @@ export class BookingsService {
   }
 
   private _overlaps(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date) {
+    // [aStart, aEnd) intersects [bStart, bEnd)
     return aStart < bEnd && bStart < aEnd;
   }
 
@@ -44,6 +57,9 @@ export class BookingsService {
   private async _expirePendingPayments(): Promise<void> {
     const now = new Date();
 
+    // ⚠️ здесь updateMany — без деталей bayId.
+    // realtime для expire можно добавить позже (через выборку перед updateMany),
+    // но для MVP важнее create/pay/cancel.
     await this.prisma.booking.updateMany({
       where: {
         status: BookingStatus.PENDING_PAYMENT,
@@ -76,7 +92,11 @@ export class BookingsService {
     const toCompleteIds = candidates
       .filter((b) => {
         const base = this._serviceDurationOrDefault(b.service?.durationMin);
-        const total = base + (b.bufferMin ?? 0);
+        const raw = base + (b.bufferMin ?? 0);
+        const total = this._roundUpToStepMin(
+          raw,
+          BookingsService.SLOT_STEP_MIN,
+        );
         const end = this._end(b.dateTime, total);
         return end.getTime() < now.getTime();
       })
@@ -95,6 +115,76 @@ export class BookingsService {
     await this._autoCompletePastActive();
   }
 
+  // ✅ Busy slots (public): return only intervals, no clientId/carId
+  async getBusySlots(args: { bayId: number; from: Date; to: Date }) {
+    await this._housekeeping();
+
+    const bayId = args.bayId;
+    const from = args.from;
+    const to = args.to;
+
+    // We include a wider window because bookings can overlap into [from, to]
+    const windowStart = new Date(from.getTime() - 24 * 60 * 60 * 1000);
+    const windowEnd = new Date(to.getTime() + 24 * 60 * 60 * 1000);
+
+    const busyStatuses: BookingStatus[] = [
+      BookingStatus.ACTIVE,
+      BookingStatus.PENDING_PAYMENT,
+    ];
+
+    const rows = await this.prisma.booking.findMany({
+      where: {
+        bayId,
+        status: { in: busyStatuses },
+        dateTime: { gte: windowStart, lte: windowEnd },
+      },
+      select: {
+        dateTime: true,
+        bufferMin: true,
+        status: true,
+        paymentDueAt: true,
+        service: { select: { durationMin: true } },
+      },
+      orderBy: { dateTime: 'asc' },
+    });
+
+    const now = new Date();
+
+    const intervals = rows
+      .filter((b) => {
+        if (b.status === BookingStatus.ACTIVE) return true;
+
+        // PENDING_PAYMENT only if not expired
+        if (b.status === BookingStatus.PENDING_PAYMENT) {
+          if (!b.paymentDueAt) return false;
+          return b.paymentDueAt.getTime() > now.getTime();
+        }
+        return false;
+      })
+      .map((b) => {
+        const base = this._serviceDurationOrDefault(b.service?.durationMin);
+        const raw = base + (b.bufferMin ?? 0);
+
+        // ✅ округляем занятость вверх к сетке слотов
+        const total = this._roundUpToStepMin(
+          raw,
+          BookingsService.SLOT_STEP_MIN,
+        );
+
+        const start = b.dateTime;
+        const end = this._end(start, total);
+        return { start, end };
+      })
+      // keep only those that can affect [from,to)
+      .filter((x) => this._overlaps(x.start, x.end, from, to));
+
+    // Return ISO strings (UTC)
+    return intervals.map((x) => ({
+      start: x.start.toISOString(),
+      end: x.end.toISOString(),
+    }));
+  }
+
   async findAll(includeCanceled: boolean, clientId?: string) {
     await this._housekeeping();
 
@@ -102,7 +192,6 @@ export class BookingsService {
       ? {}
       : { status: { not: BookingStatus.CANCELED } };
 
-    // ✅ фильтр по клиенту
     if (clientId) where.clientId = clientId;
 
     return this.prisma.booking.findMany({
@@ -140,12 +229,14 @@ export class BookingsService {
       throw new BadRequestException('dateTime must be ISO string');
     }
 
+    // запретим создавать в прошлом (с небольшой форой)
     const nowMs = Date.now();
     const graceMs = 30 * 1000;
     if (dt.getTime() < nowMs - graceMs) {
       throw new BadRequestException('Cannot create booking in the past');
     }
 
+    // sanity
     const bayId = this._clampInt(body.bayId, 1, 1, 20);
     const bufferMin = this._clampInt(body.bufferMin, 15, 0, 120);
     const depositRub = this._clampInt(body.depositRub, 500, 0, 1_000_000);
@@ -154,7 +245,7 @@ export class BookingsService {
         ? body.comment.trim().slice(0, 500)
         : null;
 
-    // ✅ car должен принадлежать этому clientId
+    // car должен принадлежать этому clientId
     const car = await this.prisma.car.findUnique({
       where: { id: body.carId },
       select: { id: true, clientId: true },
@@ -172,91 +263,136 @@ export class BookingsService {
     if (!service) throw new BadRequestException('Service not found');
 
     const baseDur = this._serviceDurationOrDefault(service.durationMin);
-    const newDurTotal = baseDur + bufferMin;
+    const rawDur = baseDur + bufferMin;
+    const newDurTotal = this._roundUpToStepMin(
+      rawDur,
+      BookingsService.SLOT_STEP_MIN,
+    );
 
     const newStart = dt;
     const newEnd = this._end(newStart, newDurTotal);
 
-    const windowStart = new Date(newStart.getTime() - 24 * 60 * 60 * 1000);
-    const windowEnd = new Date(newEnd.getTime() + 24 * 60 * 60 * 1000);
-
-    const busyStatuses = [BookingStatus.ACTIVE, BookingStatus.PENDING_PAYMENT];
-
-    const nearby = await this.prisma.booking.findMany({
-      where: {
-        status: { in: busyStatuses },
-        bayId,
-        dateTime: { gte: windowStart, lte: windowEnd },
-      },
-      select: {
-        id: true,
-        carId: true,
-        dateTime: true,
-        status: true,
-        paymentDueAt: true,
-        bufferMin: true,
-        service: { select: { durationMin: true } },
-      },
-    });
-
-    const now = new Date();
-    const relevant = nearby.filter((b) => {
-      if (b.status === BookingStatus.PENDING_PAYMENT) {
-        if (!b.paymentDueAt) return false;
-        return b.paymentDueAt.getTime() > now.getTime();
-      }
-      return true;
-    });
-
-    const anyOverlap = relevant.find((b) => {
-      const bBase = this._serviceDurationOrDefault(b.service?.durationMin);
-      const bTotal = bBase + (b.bufferMin ?? 0);
-      const bStart = b.dateTime;
-      const bEnd = this._end(bStart, bTotal);
-      return this._overlaps(newStart, newEnd, bStart, bEnd);
-    });
-
-    if (anyOverlap) {
-      throw new ConflictException('Selected time slot is already booked');
-    }
-
-    const carOverlap = relevant.find((b) => {
-      if (b.carId !== body.carId) return false;
-
-      const bBase = this._serviceDurationOrDefault(b.service?.durationMin);
-      const bTotal = bBase + (b.bufferMin ?? 0);
-      const bStart = b.dateTime;
-      const bEnd = this._end(bStart, bTotal);
-      return this._overlaps(newStart, newEnd, bStart, bEnd);
-    });
-
-    if (carOverlap) {
-      throw new ConflictException('This car already has a booking at this time');
-    }
+    const busyStatuses: BookingStatus[] = [
+      BookingStatus.ACTIVE,
+      BookingStatus.PENDING_PAYMENT,
+    ];
 
     const dueAt = new Date(Date.now() + 15 * 60 * 1000);
 
-    return this.prisma.booking.create({
-      data: {
-        carId: body.carId,
-        serviceId: body.serviceId,
-        dateTime: dt,
-        clientId, // ✅ сохраняем владельца
+    let created: any;
 
-        bayId,
-        bufferMin,
-        depositRub,
-        comment,
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        created = await this.prisma.$transaction(
+          async (tx) => {
+            const now = new Date();
 
-        status: BookingStatus.PENDING_PAYMENT,
-        paymentDueAt: dueAt,
-      },
-      include: {
-        car: true,
-        service: true,
-        payments: { orderBy: { paidAt: 'asc' } },
-      },
-    });
+            const windowStart = new Date(newStart.getTime() - 24 * 60 * 60 * 1000);
+            const windowEnd = new Date(newEnd.getTime() + 24 * 60 * 60 * 1000);
+
+            const nearby = await tx.booking.findMany({
+              where: {
+                status: { in: busyStatuses },
+                bayId,
+                dateTime: { gte: windowStart, lte: windowEnd },
+              },
+              select: {
+                id: true,
+                carId: true,
+                dateTime: true,
+                status: true,
+                paymentDueAt: true,
+                bufferMin: true,
+                service: { select: { durationMin: true } },
+              },
+            });
+
+            const relevant = nearby.filter((b) => {
+              if (b.status === BookingStatus.PENDING_PAYMENT) {
+                if (!b.paymentDueAt) return false;
+                return b.paymentDueAt.getTime() > now.getTime();
+              }
+              return true;
+            });
+
+            const anyOverlap = relevant.find((b) => {
+              const bBase = this._serviceDurationOrDefault(b.service?.durationMin);
+              const bRaw = bBase + (b.bufferMin ?? 0);
+              const bTotal = this._roundUpToStepMin(
+                bRaw,
+                BookingsService.SLOT_STEP_MIN,
+              );
+              const bStart = b.dateTime;
+              const bEnd = this._end(bStart, bTotal);
+              return this._overlaps(newStart, newEnd, bStart, bEnd);
+            });
+
+            if (anyOverlap) {
+              throw new ConflictException('Selected time slot is already booked');
+            }
+
+            const carOverlap = relevant.find((b) => {
+              if (b.carId !== body.carId) return false;
+
+              const bBase = this._serviceDurationOrDefault(b.service?.durationMin);
+              const bRaw = bBase + (b.bufferMin ?? 0);
+              const bTotal = this._roundUpToStepMin(
+                bRaw,
+                BookingsService.SLOT_STEP_MIN,
+              );
+              const bStart = b.dateTime;
+              const bEnd = this._end(bStart, bTotal);
+              return this._overlaps(newStart, newEnd, bStart, bEnd);
+            });
+
+            if (carOverlap) {
+              throw new ConflictException('This car already has a booking at this time');
+            }
+
+            return tx.booking.create({
+              data: {
+                carId: body.carId,
+                serviceId: body.serviceId,
+                dateTime: dt,
+                clientId,
+
+                bayId,
+                bufferMin,
+                depositRub,
+                comment,
+
+                status: BookingStatus.PENDING_PAYMENT,
+                paymentDueAt: dueAt,
+              },
+              include: {
+                car: true,
+                service: true,
+                payments: { orderBy: { paidAt: 'asc' } },
+              },
+            });
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+        );
+
+        break;
+      } catch (e: any) {
+        if (e instanceof Prisma.PrismaClientKnownRequestError) {
+          if (e.code === 'P2002') {
+            throw new ConflictException('Selected time slot is already booked');
+          }
+          if (e.code === 'P2034') {
+            if (attempt < 2) continue;
+            throw new ConflictException('Selected time slot is already booked');
+          }
+        }
+        throw e;
+      }
+    }
+
+    // ✅ push событие — всем клиентам обновить busy по bayId
+    this.ws.emitBookingChanged(bayId);
+
+    return created;
   }
 
   private _parsePayKind(raw?: string): PaymentKind {
@@ -328,7 +464,12 @@ export class BookingsService {
         throw new ConflictException('Booking already started');
       }
 
-      const amountRub = this._clampInt(body?.amountRub, booking.depositRub ?? 0, 0, 1_000_000);
+      const amountRub = this._clampInt(
+        body?.amountRub,
+        booking.depositRub ?? 0,
+        0,
+        1_000_000,
+      );
 
       await this.prisma.payment.create({
         data: {
@@ -340,22 +481,23 @@ export class BookingsService {
         },
       });
 
-      await this.prisma.booking.update({
+      const updated = await this.prisma.booking.update({
         where: { id },
         data: {
           status: BookingStatus.ACTIVE,
           paymentDueAt: null,
         },
-      });
-
-      return this.prisma.booking.findUnique({
-        where: { id },
         include: {
           car: true,
           service: true,
           payments: { orderBy: { paidAt: 'asc' } },
         },
       });
+
+      // ✅ push
+      this.ws.emitBookingChanged(updated.bayId ?? 1);
+
+      return updated;
     }
 
     const amountRub = this._clampInt(body?.amountRub, 0, 0, 1_000_000);
@@ -374,7 +516,7 @@ export class BookingsService {
       throw new ConflictException(`Payment kind ${kind} already exists for this booking`);
     }
 
-    return this.prisma.booking.findUnique({
+    const refreshed = await this.prisma.booking.findUnique({
       where: { id },
       include: {
         car: true,
@@ -382,6 +524,12 @@ export class BookingsService {
         payments: { orderBy: { paidAt: 'asc' } },
       },
     });
+
+    if (refreshed) {
+      this.ws.emitBookingChanged(refreshed.bayId ?? 1);
+    }
+
+    return refreshed;
   }
 
   async cancel(id: string, clientId?: string) {
@@ -396,13 +544,13 @@ export class BookingsService {
         paymentDueAt: true,
         bufferMin: true,
         clientId: true,
+        bayId: true,
         service: { select: { durationMin: true } },
       },
     });
 
     if (!existing) throw new NotFoundException('Booking not found');
 
-    // ✅ запретим отменять чужую запись (если передали clientId)
     if (existing.clientId && existing.clientId !== clientId) {
       throw new ForbiddenException('Not your booking');
     }
@@ -415,7 +563,8 @@ export class BookingsService {
     }
 
     const base = this._serviceDurationOrDefault(existing.service?.durationMin);
-    const total = base + (existing.bufferMin ?? 0);
+    const raw = base + (existing.bufferMin ?? 0);
+    const total = this._roundUpToStepMin(raw, BookingsService.SLOT_STEP_MIN);
 
     const end = this._end(existing.dateTime, total);
     const now = new Date();
@@ -428,7 +577,7 @@ export class BookingsService {
       throw new BadRequestException('Cannot cancel a started booking');
     }
 
-    return this.prisma.booking.update({
+    const updated = await this.prisma.booking.update({
       where: { id },
       data: {
         status: BookingStatus.CANCELED,
@@ -440,5 +589,10 @@ export class BookingsService {
       },
       include: { car: true, service: true, payments: true },
     });
+
+    // ✅ push
+    this.ws.emitBookingChanged(updated.bayId ?? (existing.bayId ?? 1));
+
+    return updated;
   }
 }

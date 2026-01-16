@@ -48,8 +48,10 @@ export class CarsService {
     const plateDisplay = normalizePlate(body.plateDisplay ?? '');
 
     if (!makeDisplay) throw new BadRequestException('makeDisplay is required');
-    if (!modelDisplay) throw new BadRequestException('modelDisplay is required');
-    if (!plateDisplay) throw new BadRequestException('plateDisplay is required');
+    if (!modelDisplay)
+      throw new BadRequestException('modelDisplay is required');
+    if (!plateDisplay)
+      throw new BadRequestException('plateDisplay is required');
 
     const clientId = (body.clientId ?? '').trim();
     if (!clientId) throw new BadRequestException('clientId is required');
