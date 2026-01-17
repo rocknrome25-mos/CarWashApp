@@ -22,6 +22,9 @@ class BookingDetailsPage extends StatefulWidget {
 class _BookingDetailsPageState extends State<BookingDetailsPage> {
   static const int _depositRubFallback = 500;
 
+  // 🎨 брендовый голубой
+  static const Color _brandBlue = Color(0xFF2D9CDB);
+
   late Future<_Details> _future;
 
   bool _canceling = false;
@@ -68,6 +71,31 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
     return '$make $model (${c.plateDisplay})';
   }
 
+  Color _bayColor(int bayId) {
+    if (bayId == 1) return _brandBlue;
+    if (bayId == 2) {
+      return const Color(0xFF6C5CE7); // можно заменить на второй "фирменный"
+    }
+    return Colors.grey;
+  }
+
+  ImageProvider _serviceHero(Service? s) {
+    final url = s?.imageUrl;
+    if (url != null && url.isNotEmpty) return NetworkImage(url);
+
+    final name = (s?.name ?? '').toLowerCase();
+    if (name.contains('воск')) {
+      return const AssetImage('assets/images/services/vosk_1080.jpg');
+    }
+    if (name.contains('комплекс')) {
+      return const AssetImage('assets/images/services/kompleks_1080.jpg');
+    }
+    if (name.contains('кузов')) {
+      return const AssetImage('assets/images/services/kuzov_1080.jpg');
+    }
+    return const AssetImage('assets/images/services/kuzov_1080.jpg');
+  }
+
   Widget _badge({required String text, required Color color}) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
@@ -87,16 +115,16 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
   }
 
   Widget _detailsBadge(Booking b) {
-    // по статусам как ты задал
+    // ✅ более "в одной гамме" (без кричащих цветов)
     switch (b.status) {
       case BookingStatus.active:
-        return _badge(text: 'ЗАБРОНИРОВАНО', color: Colors.blueGrey);
+        return _badge(text: 'ЗАБРОНИРОВАНО', color: _brandBlue);
       case BookingStatus.pendingPayment:
-        return _badge(text: 'ОЖИДАЕТ ОПЛАТЫ', color: Colors.orange);
+        return _badge(text: 'ОЖИДАЕТ ОПЛАТЫ', color: Colors.blueGrey);
       case BookingStatus.completed:
-        return _badge(text: 'ЗАВЕРШЕНО', color: Colors.grey);
+        return _badge(text: 'ЗАВЕРШЕНО', color: Colors.black54);
       case BookingStatus.canceled:
-        return _badge(text: 'ОТМЕНЕНО', color: Colors.red);
+        return _badge(text: 'ОТМЕНЕНО', color: Colors.black45);
     }
   }
 
@@ -163,37 +191,6 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
     }
   }
 
-  Widget _serviceThumb(Service? service) {
-    final url = service?.imageUrl;
-    if (url == null || url.isEmpty) {
-      return Container(
-        width: 56,
-        height: 56,
-        decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.04),
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: const Icon(Icons.local_car_wash),
-      );
-    }
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(16),
-      child: Image.network(
-        url,
-        width: 56,
-        height: 56,
-        fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => Container(
-          width: 56,
-          height: 56,
-          color: Colors.black.withValues(alpha: 0.04),
-          child: const Icon(Icons.local_car_wash),
-        ),
-      ),
-    );
-  }
-
   Future<void> _confirmAndCancel(String bookingId) async {
     if (_canceling) return;
 
@@ -256,6 +253,24 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
         ],
       ),
       child: child,
+    );
+  }
+
+  Widget _serviceThumb(Service? service) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: Image(
+        image: _serviceHero(service),
+        width: 64,
+        height: 64,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => Container(
+          width: 64,
+          height: 64,
+          color: Colors.black.withValues(alpha: 0.04),
+          child: const Icon(Icons.local_car_wash),
+        ),
+      ),
     );
   }
 
@@ -358,9 +373,34 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                             ),
                           ),
 
+                          // ✅ пост/линия
+                          if (booking.bayId != null) ...[
+                            const SizedBox(height: 10),
+                            Row(
+                              children: [
+                                Container(
+                                  width: 10,
+                                  height: 10,
+                                  decoration: BoxDecoration(
+                                    color: _bayColor(booking.bayId!),
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'Пост: ${booking.bayId}',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.black.withValues(alpha: 0.75),
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+
                           const SizedBox(height: 10),
 
-                          // ✅ 2 строки, как ты просил
                           Text(
                             'Оплата брони: $depositRub ₽',
                             style: TextStyle(
@@ -489,6 +529,10 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: _brandBlue,
+                      foregroundColor: Colors.white,
+                    ),
                     onPressed: _paying
                         ? null
                         : () => _payNow(booking: booking, service: service),

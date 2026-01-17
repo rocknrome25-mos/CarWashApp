@@ -21,6 +21,11 @@ class BookingsPage extends StatefulWidget {
 }
 
 class _BookingsPageState extends State<BookingsPage> {
+  // 🎨 линия-цвета (как договорились)
+  static const Color _pinkAny = Color(0xFFE7A2B3);
+  static const Color _greenLine = Color(0xFF2DBD6E);
+  static const Color _blueLine = Color(0xFF2D9CDB);
+
   late Future<_BookingsBundle> _future;
 
   @override
@@ -118,7 +123,7 @@ class _BookingsPageState extends State<BookingsPage> {
       case BookingStatus.active:
         return 'Забронировано';
       case BookingStatus.pendingPayment:
-        return 'Ожидает оплаты бронирования';
+        return 'Ожидает оплаты';
       case BookingStatus.completed:
         return 'Завершено';
       case BookingStatus.canceled:
@@ -126,39 +131,49 @@ class _BookingsPageState extends State<BookingsPage> {
     }
   }
 
+  // ✅ цвета статусов (в одной гамме, без “ядовитых”)
   Color _statusColor(Booking b) {
     switch (b.status) {
       case BookingStatus.active:
-        return Colors.blueGrey;
+        return Colors.black.withValues(alpha: 0.70);
       case BookingStatus.pendingPayment:
-        return Colors.orange;
+        return _pinkAny;
       case BookingStatus.completed:
         return Colors.grey;
       case BookingStatus.canceled:
-        return Colors.red;
+        return const Color(0xFFD16B7A); // приглушённый розово-красный
     }
   }
 
   Widget _statusBadgeForTabs({required Booking b, required bool isActiveTab}) {
-    // На активной вкладке показываем бейдж:
-    // - pendingPayment -> ожидает оплаты
-    // - active -> забронировано
     if (isActiveTab) {
       if (b.status == BookingStatus.pendingPayment) {
-        return _badge(text: 'ОЖИДАЕТ ОПЛАТЫ', color: Colors.orange);
+        return _badge(text: 'ОЖИДАЕТ ОПЛАТЫ', color: _statusColor(b));
       }
       if (b.status == BookingStatus.active) {
-        return _badge(text: 'ЗАБРОНИРОВАНО', color: Colors.blueGrey);
+        return _badge(text: 'ЗАБРОНИРОВАНО', color: _statusColor(b));
       }
       return const SizedBox.shrink();
     }
 
-    // На остальных вкладках
     return _badge(text: _statusText(b).toUpperCase(), color: _statusColor(b));
   }
 
   int _compareBookings(Booking a, Booking b) =>
       b.dateTime.compareTo(a.dateTime);
+
+  // ✅ линия (bayId) -> текст + цвет
+  Color _lineColor(int? bayId) {
+    if (bayId == 1) return _greenLine;
+    if (bayId == 2) return _blueLine;
+    return _pinkAny; // “любая”
+  }
+
+  String _lineText(int? bayId) {
+    if (bayId == 1) return 'Зелёная линия';
+    if (bayId == 2) return 'Синяя линия';
+    return 'Любая линия';
+  }
 
   Widget _bookingCard({
     required Booking b,
@@ -185,6 +200,9 @@ class _BookingsPageState extends State<BookingsPage> {
     }
 
     final badge = _statusBadgeForTabs(b: b, isActiveTab: isActiveTab);
+
+    // если bayId есть в Booking — покажем линию (это то, что ты хотел)
+    final int? bayId = b.bayId;
 
     return InkWell(
       borderRadius: BorderRadius.circular(18),
@@ -258,6 +276,31 @@ class _BookingsPageState extends State<BookingsPage> {
                       fontWeight: FontWeight.w700,
                     ),
                   ),
+
+                  // ✅ линия (то, что ты просил)
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Container(
+                        width: 10,
+                        height: 10,
+                        decoration: BoxDecoration(
+                          color: _lineColor(bayId),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Линия: ${_lineText(bayId)}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.black.withValues(alpha: 0.75),
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ],
+                  ),
+
                   if (paymentLine != null) ...[
                     const SizedBox(height: 6),
                     Text(

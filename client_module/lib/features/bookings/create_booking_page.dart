@@ -1,4 +1,3 @@
-// C:\dev\carwash\client_module\lib\features\bookings\create_booking_page.dart
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -8,6 +7,8 @@ import '../../core/models/car.dart';
 import '../../core/models/service.dart';
 import '../../core/realtime/realtime_client.dart';
 import 'payment_page.dart';
+
+enum _BayMode { any, bay1, bay2 }
 
 class CreateBookingPage extends StatefulWidget {
   final AppRepository repo;
@@ -33,9 +34,14 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
   static const int _quickDaysTotal = 14;
   static const int _quickPinnedDays = 2;
 
-  // ✅ новые правила
+  // ✅ правила
   static const int _bufferMin = 15;
   static const int _depositRub = 500;
+
+  // 🎨 бренд (как ты хочешь)
+  static const Color _pink = Color(0xFFE7A2B3); // розовый как выбор даты/слотов
+  static const Color _greenLine = Color(0xFF2DBD6E); // зелёная линия
+  static const Color _blueLine = Color(0xFF2D9CDB); // синяя линия
 
   final _formKey = GlobalKey<FormState>();
   final Map<DateTime, GlobalKey> _dateKeys = {};
@@ -43,16 +49,19 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
   List<Car> _cars = const [];
   List<Service> _services = const [];
 
-  // ✅ занятость теперь PUBLIC
-  List<DateTimeRange> _busyRanges = const [];
+  // ✅ busy по каждому посту, чтобы any-mode был корректным для длительности
+  Map<int, List<DateTimeRange>> _busyByBay = const {1: [], 2: []};
 
   String? carId;
   String? serviceId;
 
-  int _bayId = 1;
+  _BayMode _bayMode = _BayMode.any;
 
   DateTime _selectedDate = _dateOnly(DateTime.now());
   DateTime? _selectedSlotStart;
+
+  // ✅ если режим "Любая линия" — при выборе слота запоминаем какая линия реально будет
+  int? _pickedBayIdForAny;
 
   final _commentCtrl = TextEditingController();
 
@@ -76,34 +85,20 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     _rtSub = widget.repo.bookingEvents.listen((ev) async {
       if (!mounted) return;
 
-      // ✅ во время save мы НЕ показываем "слот только что заняли",
-      // потому что это может быть наша же бронь.
-      if (_saving) return;
+      final affected = ev.type == 'booking.changed';
+      if (!affected) return;
 
-      if (ev.type == 'booking.changed' && ev.bayId == _bayId) {
-        // ✅ мгновенное обновление занятости для выбранного дня и линии
-        await _refreshBusy(force: true);
+      // ✅ всегда обновляем оба поста
+      await _refreshBusy(force: true);
 
-        // ✅ если пользователь выбрал слот, и он внезапно стал busy — не прыгаем,
-        // просто сбрасываем выбор и показываем подсказку
-        final cur = _selectedSlotStart;
-        if (cur != null && _isBusySlot(cur)) {
-          if (!mounted) return;
-          setState(() {
-            _selectedSlotStart = null;
-          });
-
-          final messenger = ScaffoldMessenger.of(context);
-          messenger.hideCurrentSnackBar();
-          messenger.showSnackBar(
-            const SnackBar(
-              content: Text(
-                'Этот слот только что заняли. Выбери другое время.',
-              ),
-              duration: Duration(seconds: 2),
-            ),
-          );
-        }
+      // если выбранный слот стал недоступен — сбрасываем выбор
+      final cur = _selectedSlotStart;
+      if (cur != null && _isBusySlot(cur)) {
+        if (!mounted) return;
+        setState(() {
+          _selectedSlotStart = null;
+          _pickedBayIdForAny = null;
+        });
       }
     });
   }
@@ -217,14 +212,39 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     return aStart.isBefore(bEnd) && bStart.isBefore(aEnd);
   }
 
-  bool _isBusySlot(DateTime slotStart) {
+  int? _currentBayIdOrNull() {
+    switch (_bayMode) {
+      case _BayMode.any:
+        return null;
+      case _BayMode.bay1:
+        return 1;
+      case _BayMode.bay2:
+        return 2;
+    }
+  }
+
+  bool _isBusySlotForBay(DateTime slotStart, int bayId) {
     final blockMin = _effectiveBlockMinForSelectedService();
     final slotEnd = slotStart.add(Duration(minutes: blockMin));
 
-    for (final r in _busyRanges) {
+    final ranges = _busyByBay[bayId] ?? const [];
+    for (final r in ranges) {
       if (_overlaps(slotStart, slotEnd, r.start, r.end)) return true;
     }
     return false;
+  }
+
+  bool _isBusySlot(DateTime slotStart) {
+    final bayId = _currentBayIdOrNull();
+
+    if (bayId != null) {
+      return _isBusySlotForBay(slotStart, bayId);
+    }
+
+    // ✅ any-mode: busy только если оба поста busy на весь блок
+    final busy1 = _isBusySlotForBay(slotStart, 1);
+    final busy2 = _isBusySlotForBay(slotStart, 2);
+    return busy1 && busy2;
   }
 
   bool _endsBeforeClose(DateTime slotStart) {
@@ -267,22 +287,46 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     return null;
   }
 
+  Future<int?> _pickBayForSlotAny(DateTime slotStart) async {
+    final busy1 = _isBusySlotForBay(slotStart, 1);
+    final busy2 = _isBusySlotForBay(slotStart, 2);
+
+    if (!busy1) return 1;
+    if (!busy2) return 2;
+    return null;
+  }
+
   Future<void> _refreshBusy({bool force = false}) async {
     final day = _selectedDate;
     final from = DateTime(day.year, day.month, day.day, _openHour, 0);
     final to = DateTime(day.year, day.month, day.day, _closeHour, 0);
 
-    final ranges = await widget.repo.getBusySlots(
-      bayId: _bayId,
-      from: from,
-      to: to,
-      forceRefresh: force,
-    );
+    final List<List<DateTimeRange>> results =
+        await Future.wait<List<DateTimeRange>>([
+          widget.repo.getBusySlots(
+            bayId: 1,
+            from: from,
+            to: to,
+            forceRefresh: force,
+          ),
+          widget.repo.getBusySlots(
+            bayId: 2,
+            from: from,
+            to: to,
+            forceRefresh: force,
+          ),
+        ]);
 
     if (!mounted) return;
     setState(() {
-      _busyRanges = ranges;
+      _busyByBay = {1: results[0], 2: results[1]};
     });
+
+    if (_bayMode == _BayMode.any && _selectedSlotStart != null && mounted) {
+      final bay = await _pickBayForSlotAny(_selectedSlotStart!);
+      if (!mounted) return;
+      setState(() => _pickedBayIdForAny = bay);
+    }
   }
 
   Future<void> _bootstrap() async {
@@ -322,13 +366,13 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
         _selectedDate = _dateOnly(DateTime.now());
         _selectedSlotStart = null;
+        _pickedBayIdForAny = null;
 
         _loading = false;
       });
 
       await _refreshBusy(force: true);
 
-      // ✅ авто-подбор ТОЛЬКО один раз при первом входе
       if (!_didInitialAutoPick) {
         final picked = _firstFreeSlotForDay(_selectedDate);
         if (picked != null && mounted) {
@@ -336,6 +380,11 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
             _selectedSlotStart = picked;
             _didInitialAutoPick = true;
           });
+
+          if (_bayMode == _BayMode.any) {
+            final bay = await _pickBayForSlotAny(picked);
+            if (mounted) setState(() => _pickedBayIdForAny = bay);
+          }
         }
       }
 
@@ -349,10 +398,11 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     }
   }
 
-  void _selectDate(DateTime d) async {
+  Future<void> _selectDate(DateTime d) async {
     setState(() {
       _selectedDate = _dateOnly(d);
-      _selectedSlotStart = null; // для новой даты выбор заново
+      _selectedSlotStart = null;
+      _pickedBayIdForAny = null;
     });
 
     _scrollDateIntoCenter(d);
@@ -377,94 +427,230 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     return _fmtDateShort(d);
   }
 
-  int _slotColumns(BuildContext context) {
-    final w = MediaQuery.of(context).size.width;
-    if (w >= 520) return 5;
-    if (w >= 420) return 4;
-    return 3;
+  Color _bayColorForMode(_BayMode m) {
+    switch (m) {
+      case _BayMode.any:
+        return _pink;
+      case _BayMode.bay1:
+        return _greenLine;
+      case _BayMode.bay2:
+        return _blueLine;
+    }
+  }
+
+  String _bayTitleForMode(_BayMode m) {
+    switch (m) {
+      case _BayMode.any:
+        return 'Любая линия';
+      case _BayMode.bay1:
+        return 'Зелёная линия';
+      case _BayMode.bay2:
+        return 'Синяя линия';
+    }
+  }
+
+  String _pickedBayLabel(int bayId) {
+    if (bayId == 1) return 'Зелёная линия';
+    if (bayId == 2) return 'Синяя линия';
+    return 'Линия';
+  }
+
+  Color _pickedBayColor(int bayId) {
+    if (bayId == 1) return _greenLine;
+    if (bayId == 2) return _blueLine;
+    return Colors.grey;
+  }
+
+  Future<void> _selectBay(_BayMode mode) async {
+    setState(() {
+      _bayMode = mode;
+      _selectedSlotStart = null;
+      _pickedBayIdForAny = null;
+    });
+    await _refreshBusy(force: true);
+  }
+
+  Widget _lineSelector() {
+    Widget item({
+      required _BayMode mode,
+      required String title,
+      required Color stripe,
+    }) {
+      final selected = _bayMode == mode;
+
+      return InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () async => _selectBay(mode),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          decoration: BoxDecoration(
+            color: selected ? stripe.withValues(alpha: 0.10) : Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: selected
+                  ? stripe.withValues(alpha: 0.55)
+                  : Colors.black.withValues(alpha: 0.08),
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 6,
+                height: 28,
+                decoration: BoxDecoration(
+                  color: stripe,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  title.toUpperCase(),
+                  style: TextStyle(
+                    fontWeight: FontWeight.w900,
+                    color: Colors.black.withValues(alpha: 0.85),
+                  ),
+                ),
+              ),
+              if (selected)
+                Icon(Icons.check_circle, color: stripe, size: 18)
+              else
+                Icon(
+                  Icons.circle_outlined,
+                  color: Colors.black.withValues(alpha: 0.25),
+                  size: 18,
+                ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      children: [
+        item(mode: _BayMode.any, title: 'Любая линия', stripe: _pink),
+        const SizedBox(height: 8),
+        item(mode: _BayMode.bay1, title: 'Зелёная линия', stripe: _greenLine),
+        const SizedBox(height: 8),
+        item(mode: _BayMode.bay2, title: 'Синяя линия', stripe: _blueLine),
+      ],
+    );
+  }
+
+  List<DateTime> _visibleSlotsForCurrentMode() {
+    final allSlots = _buildSlotsForDay(_selectedDate);
+
+    final minNow = _minSelectableNowLocal();
+    final isSelectedDayToday = _selectedDate == _dateOnly(DateTime.now());
+
+    final visible = <DateTime>[];
+    for (final s in allSlots) {
+      if (isSelectedDayToday && s.isBefore(minNow)) continue;
+      if (_isBusySlot(s)) continue;
+      visible.add(s);
+    }
+    return visible;
+  }
+
+  List<DateTime> _filterByHourRange(
+    List<DateTime> slots,
+    int fromHour,
+    int toHourExclusive,
+  ) {
+    return slots
+        .where((d) => d.hour >= fromHour && d.hour < toHourExclusive)
+        .toList();
   }
 
   ButtonStyle _slotStyleOutlined() {
     return OutlinedButton.styleFrom(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      minimumSize: const Size(0, 34),
+      side: BorderSide(color: Colors.black.withValues(alpha: 0.10)),
+      backgroundColor: Colors.black.withValues(alpha: 0.03),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      shape: const StadiumBorder(),
       visualDensity: const VisualDensity(horizontal: -2, vertical: -2),
     );
   }
 
   ButtonStyle _slotStyleFilled() {
     return FilledButton.styleFrom(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      minimumSize: const Size(0, 34),
+      backgroundColor: _pink,
+      foregroundColor: Colors.white,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      shape: const StadiumBorder(),
       visualDensity: const VisualDensity(horizontal: -2, vertical: -2),
     );
   }
 
-  Widget _slotLabel(String time, {String? badge}) {
-    final timeW = Text(
-      time,
-      style: const TextStyle(
-        fontSize: 12,
-        fontWeight: FontWeight.w700,
-        height: 1.0,
-      ),
-    );
+  Widget _slotButton(DateTime s) {
+    final selected = _selectedSlotStart == s;
+    final label = _fmtTime(s);
 
-    if (badge == null) return timeW;
+    Future<void> select() async {
+      setState(() {
+        _selectedSlotStart = s;
+        _pickedBayIdForAny = null;
+      });
 
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        timeW,
-        const SizedBox(height: 1),
-        Text(
-          badge,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontSize: 9, height: 1.0),
-        ),
-      ],
-    );
+      if (_bayMode == _BayMode.any) {
+        final bay = await _pickBayForSlotAny(s);
+        if (!mounted) return;
+        setState(() => _pickedBayIdForAny = bay);
+      }
+    }
+
+    return selected
+        ? FilledButton(
+            style: _slotStyleFilled(),
+            onPressed: select,
+            child: Text(
+              label,
+              style: const TextStyle(fontWeight: FontWeight.w900),
+            ),
+          )
+        : OutlinedButton(
+            style: _slotStyleOutlined(),
+            onPressed: select,
+            child: Text(
+              label,
+              style: const TextStyle(fontWeight: FontWeight.w900),
+            ),
+          );
   }
 
-  Widget _bayPicker() {
-    const vd = VisualDensity(horizontal: -2, vertical: -2);
-    const pad = EdgeInsets.symmetric(horizontal: 10);
+  Widget _timeSection({
+    required String title,
+    required List<DateTime> slots,
+    bool initiallyExpanded = true,
+  }) {
+    if (slots.isEmpty) return const SizedBox.shrink();
 
-    // ✅ термин "Линия"
-    return Row(
-      children: [
-        const Text('Линия', style: TextStyle(fontWeight: FontWeight.w900)),
-        const SizedBox(width: 10),
-        ChoiceChip(
-          label: const Text('1'),
-          labelPadding: pad,
-          selected: _bayId == 1,
-          visualDensity: vd,
-          onSelected: (_) async {
-            setState(() {
-              _bayId = 1;
-              _selectedSlotStart = null;
-            });
-            await _refreshBusy(force: true);
-          },
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+      ),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          initiallyExpanded: initiallyExpanded,
+          tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+          childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+          title: Text(
+            title.toUpperCase(),
+            style: const TextStyle(fontWeight: FontWeight.w900),
+          ),
+          children: [
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: slots.map(_slotButton).toList(),
+            ),
+          ],
         ),
-        const SizedBox(width: 8),
-        ChoiceChip(
-          label: const Text('2'),
-          labelPadding: pad,
-          selected: _bayId == 2,
-          visualDensity: vd,
-          onSelected: (_) async {
-            setState(() {
-              _bayId = 2;
-              _selectedSlotStart = null;
-            });
-            await _refreshBusy(force: true);
-          },
-        ),
-        const Spacer(),
-      ],
+      ),
     );
   }
 
@@ -476,29 +662,26 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     final messenger = ScaffoldMessenger.of(context);
 
     final slot = _selectedSlotStart;
-    if (slot == null) {
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Выбери слот времени')),
-      );
-      return;
-    }
+    if (slot == null) return;
 
     final isToday = _selectedDate == _dateOnly(DateTime.now());
     final minNow = _minSelectableNowLocal();
-    if (isToday && slot.isBefore(minNow)) {
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text('Слишком рано. Выбери ближайший доступный слот.'),
-        ),
-      );
-      return;
-    }
+    if (isToday && slot.isBefore(minNow)) return;
 
-    if (_isBusySlot(slot)) {
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Этот слот уже занят. Выбери другой.')),
-      );
-      return;
+    if (_isBusySlot(slot)) return;
+
+    int? bayIdToSend = _currentBayIdOrNull();
+    if (bayIdToSend == null) {
+      bayIdToSend = _pickedBayIdForAny;
+      bayIdToSend ??= await _pickBayForSlotAny(slot);
+      if (bayIdToSend == null) {
+        messenger.showSnackBar(
+          const SnackBar(
+            content: Text('Нет доступной линии на это время. Выбери другое.'),
+          ),
+        );
+        return;
+      }
     }
 
     setState(() => _saving = true);
@@ -508,7 +691,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
         carId: carId!,
         serviceId: serviceId!,
         dateTime: slot,
-        bayId: _bayId,
+        bayId: bayIdToSend,
         depositRub: _depositRub,
         comment: _commentCtrl.text.trim().isEmpty
             ? null
@@ -517,11 +700,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
       );
 
       if (!mounted) return;
-
-      // ✅ сразу сбрасываем выбор, чтобы realtime не давал "ложный" снекбар
-      setState(() {
-        _selectedSlotStart = null;
-      });
 
       final service = _findService(serviceId);
 
@@ -551,6 +729,23 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  bool _canProceed() {
+    if (_saving) return false;
+    if (_cars.isEmpty || _services.isEmpty) return false;
+    if (carId == null || serviceId == null) return false;
+
+    final slot = _selectedSlotStart;
+    if (slot == null) return false;
+
+    final isToday = _selectedDate == _dateOnly(DateTime.now());
+    final minNow = _minSelectableNowLocal();
+    if (isToday && slot.isBefore(minNow)) return false;
+
+    if (_isBusySlot(slot)) return false;
+
+    return true;
   }
 
   @override
@@ -591,12 +786,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
         ? serviceId
         : null;
 
-    final slots = _buildSlotsForDay(_selectedDate);
-
-    final minNow = _minSelectableNowLocal();
-    final isSelectedDayToday = _selectedDate == _dateOnly(DateTime.now());
-    final cols = _slotColumns(context);
-
     final today = _dateOnly(DateTime.now());
     final tomorrow = today.add(const Duration(days: 1));
     final scrollDates = _quickDatesScrollable();
@@ -610,7 +799,23 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
         ? (priceRub - _depositRub)
         : 0;
 
-    final blockMin = _effectiveBlockMinForSelectedService();
+    final visibleSlots = _visibleSlotsForCurrentMode();
+    final morningSlots = _filterByHourRange(visibleSlots, _openHour, 12);
+    final daySlots = _filterByHourRange(visibleSlots, 12, 17);
+    final eveningSlots = _filterByHourRange(visibleSlots, 17, _closeHour);
+
+    final canProceed = _canProceed();
+
+    // ✅ если any-mode и слот выбран, то покажем реальную линию (зел/син)
+    final pickedLineText =
+        (_bayMode == _BayMode.any && _pickedBayIdForAny != null)
+        ? _pickedBayLabel(_pickedBayIdForAny!)
+        : _bayTitleForMode(_bayMode);
+
+    final pickedLineColor =
+        (_bayMode == _BayMode.any && _pickedBayIdForAny != null)
+        ? _pickedBayColor(_pickedBayIdForAny!)
+        : _bayColorForMode(_bayMode);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Создать запись')),
@@ -618,7 +823,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
         padding: const EdgeInsets.all(16),
         child: Form(
           key: _formKey,
-          child: Column(
+          child: ListView(
             children: [
               DropdownButtonFormField<String>(
                 initialValue: safeCarId,
@@ -642,6 +847,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                 },
               ),
               const SizedBox(height: 12),
+
               DropdownButtonFormField<String>(
                 initialValue: safeServiceId,
                 decoration: const InputDecoration(
@@ -662,6 +868,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                   setState(() {
                     serviceId = v;
                     _selectedSlotStart = null;
+                    _pickedBayIdForAny = null;
                   });
                   await _refreshBusy(force: true);
                 },
@@ -671,17 +878,22 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                   return null;
                 },
               ),
-              const SizedBox(height: 10),
 
-              _bayPicker(),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
 
+              // ✅ вертикальный выбор линии с цветной полоской
+              _lineSelector(),
+
+              const SizedBox(height: 12),
+
+              // даты как и было, но подчёркиваем розовым
               Row(
                 children: [
                   ChoiceChip(
                     label: Text(_chipLabelForDate(today)),
                     labelPadding: chipLabelPadding,
                     selected: _selectedDate == today,
+                    selectedColor: _pink.withValues(alpha: 0.25),
                     onSelected: (_) => _selectDate(today),
                     visualDensity: chipVD,
                   ),
@@ -690,6 +902,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                     label: Text(_chipLabelForDate(tomorrow)),
                     labelPadding: chipLabelPadding,
                     selected: _selectedDate == tomorrow,
+                    selectedColor: _pink.withValues(alpha: 0.25),
                     onSelected: (_) => _selectDate(tomorrow),
                     visualDensity: chipVD,
                   ),
@@ -713,6 +926,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                                 label: Text(_chipLabelForDate(dd)),
                                 labelPadding: chipLabelPadding,
                                 selected: selected,
+                                selectedColor: _pink.withValues(alpha: 0.25),
                                 onSelected: (_) => _selectDate(dd),
                                 visualDensity: chipVD,
                               ),
@@ -725,86 +939,33 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                 ],
               ),
 
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
 
-              Row(
-                children: [
-                  const Text(
-                    'Время',
-                    style: TextStyle(fontWeight: FontWeight.w800),
+              if (visibleSlots.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 10),
+                  child: Center(
+                    child: Text('В этот день нет свободного времени'),
                   ),
-                  const Spacer(),
-                  Text(
-                    'занятость: $blockMin мин',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.black.withValues(alpha: 0.55),
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'Мы округляем занятость вверх до сетки $_slotStepMin мин для предсказуемого расписания.',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.black.withValues(alpha: 0.60),
-                  fontWeight: FontWeight.w600,
+                )
+              else ...[
+                // ✅ секции как в yclients
+                _timeSection(
+                  title: 'Утро',
+                  slots: morningSlots,
+                  initiallyExpanded: true,
                 ),
-              ),
-              const SizedBox(height: 8),
-
-              Expanded(
-                child: slots.isEmpty
-                    ? const Center(child: Text('Нет слотов на выбранную дату'))
-                    : GridView.builder(
-                        gridDelegate:
-                            const SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: 3,
-                              mainAxisSpacing: 8,
-                              crossAxisSpacing: 8,
-                              childAspectRatio: 3.2,
-                            ).copyWith(crossAxisCount: cols),
-                        itemCount: slots.length,
-                        itemBuilder: (context, i) {
-                          final s = slots[i];
-
-                          final tooEarly =
-                              isSelectedDayToday && s.isBefore(minNow);
-                          final busy = _isBusySlot(s);
-                          final disabled = tooEarly || busy;
-
-                          final selected = _selectedSlotStart == s;
-                          final time = _fmtTime(s);
-                          final badge = busy
-                              ? 'занято'
-                              : (tooEarly ? 'рано' : null);
-
-                          if (selected) {
-                            return FilledButton(
-                              style: _slotStyleFilled(),
-                              onPressed: disabled
-                                  ? null
-                                  : () => setState(() {
-                                      _selectedSlotStart = s;
-                                    }),
-                              child: _slotLabel(time, badge: badge),
-                            );
-                          }
-
-                          return OutlinedButton(
-                            style: _slotStyleOutlined(),
-                            onPressed: disabled
-                                ? null
-                                : () => setState(() {
-                                    _selectedSlotStart = s;
-                                  }),
-                            child: _slotLabel(time, badge: badge),
-                          );
-                        },
-                      ),
-              ),
+                _timeSection(
+                  title: 'День',
+                  slots: daySlots,
+                  initiallyExpanded: true,
+                ),
+                _timeSection(
+                  title: 'Вечер',
+                  slots: eveningSlots,
+                  initiallyExpanded: true,
+                ),
+              ],
 
               const SizedBox(height: 10),
 
@@ -838,7 +999,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                     const Text(
                       'Оплата брони: $_depositRub ₽',
                       style: TextStyle(
-                        fontWeight: FontWeight.w800,
+                        fontWeight: FontWeight.w900,
                         fontSize: 12,
                       ),
                     ),
@@ -851,6 +1012,28 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                         color: Colors.black.withValues(alpha: 0.65),
                       ),
                     ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Container(
+                          width: 10,
+                          height: 10,
+                          decoration: BoxDecoration(
+                            color: pickedLineColor,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Линия: $pickedLineText',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.black.withValues(alpha: 0.75),
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
               ),
@@ -860,9 +1043,11 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
-                  onPressed: (_cars.isEmpty || _services.isEmpty || _saving)
-                      ? null
-                      : _save,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: _pink,
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: canProceed ? _save : null,
                   icon: const Icon(Icons.credit_card),
                   label: Text(_saving ? 'Сохраняю...' : 'Продолжить к оплате'),
                 ),
@@ -871,22 +1056,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
           ),
         ),
       ),
-    );
-  }
-}
-
-extension on SliverGridDelegateWithFixedCrossAxisCount {
-  SliverGridDelegateWithFixedCrossAxisCount copyWith({
-    int? crossAxisCount,
-    double? mainAxisSpacing,
-    double? crossAxisSpacing,
-    double? childAspectRatio,
-  }) {
-    return SliverGridDelegateWithFixedCrossAxisCount(
-      crossAxisCount: crossAxisCount ?? this.crossAxisCount,
-      mainAxisSpacing: mainAxisSpacing ?? this.mainAxisSpacing,
-      crossAxisSpacing: crossAxisSpacing ?? this.crossAxisSpacing,
-      childAspectRatio: childAspectRatio ?? this.childAspectRatio,
     );
   }
 }
