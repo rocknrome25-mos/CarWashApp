@@ -31,20 +31,18 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
   static const int _openHour = 8;
   static const int _closeHour = 22;
 
-  static const int _quickDaysTotal = 14;
-  static const int _quickPinnedDays = 2;
+  // ✅ без скролла, всё влезает
+  static const int _quickDaysTotal = 7;
 
   // ✅ правила
   static const int _bufferMin = 15;
   static const int _depositRub = 500;
 
-  // 🎨 бренд (как ты хочешь)
-  static const Color _pink = Color(0xFFE7A2B3); // розовый как выбор даты/слотов
-  static const Color _greenLine = Color(0xFF2DBD6E); // зелёная линия
-  static const Color _blueLine = Color(0xFF2D9CDB); // синяя линия
+  // ✅ цвета линий/постов — оставляем (идентификация)
+  static const Color _greenLine = Color(0xFF2DBD6E);
+  static const Color _blueLine = Color(0xFF2D9CDB);
 
   final _formKey = GlobalKey<FormState>();
-  final Map<DateTime, GlobalKey> _dateKeys = {};
 
   List<Car> _cars = const [];
   List<Service> _services = const [];
@@ -112,32 +110,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
   static DateTime _dateOnly(DateTime dt) => DateTime(dt.year, dt.month, dt.day);
 
-  GlobalKey _keyForDate(DateTime d) {
-    final dd = _dateOnly(d);
-    return _dateKeys.putIfAbsent(dd, () => GlobalKey());
-  }
-
-  void _scrollDateIntoCenter(DateTime d) {
-    final dd = _dateOnly(d);
-
-    final today = _dateOnly(DateTime.now());
-    final diff = dd.difference(today).inDays;
-    if (diff < _quickPinnedDays) return;
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final key = _dateKeys[dd];
-      final ctx = key?.currentContext;
-      if (ctx == null) return;
-
-      Scrollable.ensureVisible(
-        ctx,
-        alignment: 0.5,
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeOutCubic,
-      );
-    });
-  }
-
   Service? _findService(String? id) {
     if (id == null) return null;
     for (final s in _services) {
@@ -162,11 +134,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     final base = _serviceDurationOrDefault(serviceId);
     final raw = base + _bufferMin;
     return _roundUpToStepMin(raw, _slotStepMin);
-  }
-
-  String _fmtDateShort(DateTime d) {
-    String two(int n) => n.toString().padLeft(2, '0');
-    return '${two(d.day)}.${two(d.month)}';
   }
 
   String _fmtTime(DateTime d) {
@@ -387,8 +354,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
           }
         }
       }
-
-      _scrollDateIntoCenter(_selectedDate);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -405,32 +370,48 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
       _pickedBayIdForAny = null;
     });
 
-    _scrollDateIntoCenter(d);
     await _refreshBusy(force: true);
   }
 
-  List<DateTime> _quickDatesAll() {
+  List<DateTime> _quickDates() {
     final today = _dateOnly(DateTime.now());
     return List.generate(_quickDaysTotal, (i) => today.add(Duration(days: i)));
   }
 
-  List<DateTime> _quickDatesScrollable() {
-    final all = _quickDatesAll();
-    if (all.length <= _quickPinnedDays) return const [];
-    return all.sublist(_quickPinnedDays);
+  String _weekdayShortRu(int weekday) {
+    // DateTime: 1=Mon ... 7=Sun
+    switch (weekday) {
+      case DateTime.monday:
+        return 'Пн';
+      case DateTime.tuesday:
+        return 'Вт';
+      case DateTime.wednesday:
+        return 'Ср';
+      case DateTime.thursday:
+        return 'Чт';
+      case DateTime.friday:
+        return 'Пт';
+      case DateTime.saturday:
+        return 'Сб';
+      case DateTime.sunday:
+        return 'Вс';
+    }
+    return '';
   }
 
   String _chipLabelForDate(DateTime d) {
     final today = _dateOnly(DateTime.now());
     final diff = _dateOnly(d).difference(today).inDays;
     if (diff == 0) return 'Сегодня';
-    return _fmtDateShort(d);
+    if (diff == 1) return 'Завтра';
+    return '${_weekdayShortRu(d.weekday)} ${d.day}';
   }
 
-  Color _bayColorForMode(_BayMode m) {
+  Color _bayStripeColor(BuildContext context, _BayMode m) {
+    final primary = Theme.of(context).colorScheme.primary;
     switch (m) {
       case _BayMode.any:
-        return _pink;
+        return primary;
       case _BayMode.bay1:
         return _greenLine;
       case _BayMode.bay2:
@@ -455,10 +436,10 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     return 'Линия';
   }
 
-  Color _pickedBayColor(int bayId) {
+  Color _pickedBayColor(BuildContext context, int bayId) {
     if (bayId == 1) return _greenLine;
     if (bayId == 2) return _blueLine;
-    return Colors.grey;
+    return Theme.of(context).colorScheme.primary;
   }
 
   Future<void> _selectBay(_BayMode mode) async {
@@ -470,70 +451,137 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     await _refreshBusy(force: true);
   }
 
-  Widget _lineSelector() {
-    Widget item({
-      required _BayMode mode,
-      required String title,
-      required Color stripe,
-    }) {
-      final selected = _bayMode == mode;
-
-      return InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: () async => _selectBay(mode),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-          decoration: BoxDecoration(
-            color: selected ? stripe.withValues(alpha: 0.10) : Colors.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: selected
-                  ? stripe.withValues(alpha: 0.55)
-                  : Colors.black.withValues(alpha: 0.08),
-            ),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 6,
-                height: 28,
-                decoration: BoxDecoration(
-                  color: stripe,
-                  borderRadius: BorderRadius.circular(999),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  title.toUpperCase(),
-                  style: TextStyle(
-                    fontWeight: FontWeight.w900,
-                    color: Colors.black.withValues(alpha: 0.85),
-                  ),
-                ),
-              ),
-              if (selected)
-                Icon(Icons.check_circle, color: stripe, size: 18)
-              else
-                Icon(
-                  Icons.circle_outlined,
-                  color: Colors.black.withValues(alpha: 0.25),
-                  size: 18,
-                ),
-            ],
-          ),
-        ),
-      );
+  // ✅ иконки постов — пути ожидаемые
+  String _bayIconAsset(_BayMode mode) {
+    switch (mode) {
+      case _BayMode.any:
+        return 'assets/images/posts/post_any.png';
+      case _BayMode.bay1:
+        return 'assets/images/posts/post_green.png';
+      case _BayMode.bay2:
+        return 'assets/images/posts/post_blue.png';
     }
+  }
 
-    return Column(
-      children: [
-        item(mode: _BayMode.any, title: 'Любая линия', stripe: _pink),
-        const SizedBox(height: 8),
-        item(mode: _BayMode.bay1, title: 'Зелёная линия', stripe: _greenLine),
-        const SizedBox(height: 8),
-        item(mode: _BayMode.bay2, title: 'Синяя линия', stripe: _blueLine),
-      ],
+  Widget _bayIcon(_BayMode mode, Color fallbackColor) {
+    return Image.asset(
+      _bayIconAsset(mode),
+      width: 24,
+      height: 24,
+      fit: BoxFit.contain,
+      errorBuilder: (_, __, ___) {
+        return Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(
+            color: fallbackColor,
+            borderRadius: BorderRadius.circular(999),
+          ),
+        );
+      },
+    );
+  }
+
+  // ✅ ГОРИЗОНТАЛЬНЫЙ “АККОРДЕОН”: [ANY EXPANDED] [🟢] [🔵]
+  Widget _lineSelectorAccordion() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        const double h = 56;
+        const double gap = 8;
+        const double collapsedW = 64;
+
+        final totalW = constraints.maxWidth;
+        final expandedW = (totalW - (collapsedW * 2) - (gap * 2)).clamp(
+          160.0,
+          totalW,
+        );
+
+        Widget item({
+          required _BayMode mode,
+          required bool expanded,
+          required String title,
+          required Color stripe,
+        }) {
+          final cs = Theme.of(context).colorScheme;
+
+          return InkWell(
+            borderRadius: BorderRadius.circular(16),
+            onTap: () => _selectBay(mode),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              width: expanded ? expandedW : collapsedW,
+              height: h,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                color: expanded
+                    ? stripe.withValues(alpha: 0.10)
+                    : Theme.of(context).cardColor,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: expanded
+                      ? stripe.withValues(alpha: 0.55)
+                      : cs.outlineVariant.withValues(alpha: 0.6),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 5,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      color: stripe,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  _bayIcon(mode, stripe),
+                  if (expanded) ...[
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        title.toUpperCase(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w900,
+                          color: Colors.black.withValues(alpha: 0.85),
+                        ),
+                      ),
+                    ),
+                    Icon(Icons.check_circle, color: stripe, size: 18),
+                  ],
+                ],
+              ),
+            ),
+          );
+        }
+
+        return Row(
+          children: [
+            item(
+              mode: _BayMode.any,
+              expanded: _bayMode == _BayMode.any,
+              title: 'Любая линия',
+              stripe: Theme.of(context).colorScheme.primary,
+            ),
+            const SizedBox(width: gap),
+            item(
+              mode: _BayMode.bay1,
+              expanded: _bayMode == _BayMode.bay1,
+              title: 'Зелёная линия',
+              stripe: _greenLine,
+            ),
+            const SizedBox(width: gap),
+            item(
+              mode: _BayMode.bay2,
+              expanded: _bayMode == _BayMode.bay2,
+              title: 'Синяя линия',
+              stripe: _blueLine,
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -563,8 +611,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
   }
 
   ButtonStyle _slotStyleOutlined() {
+    final cs = Theme.of(context).colorScheme;
     return OutlinedButton.styleFrom(
-      side: BorderSide(color: Colors.black.withValues(alpha: 0.10)),
+      side: BorderSide(color: cs.outlineVariant.withValues(alpha: 0.8)),
       backgroundColor: Colors.black.withValues(alpha: 0.03),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       shape: const StadiumBorder(),
@@ -573,8 +622,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
   }
 
   ButtonStyle _slotStyleFilled() {
+    final primary = Theme.of(context).colorScheme.primary;
     return FilledButton.styleFrom(
-      backgroundColor: _pink,
+      backgroundColor: primary,
       foregroundColor: Colors.white,
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       shape: const StadiumBorder(),
@@ -625,12 +675,14 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
   }) {
     if (slots.isEmpty) return const SizedBox.shrink();
 
+    final cs = Theme.of(context).colorScheme;
+
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
       ),
       child: Theme(
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
@@ -786,12 +838,13 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
         ? serviceId
         : null;
 
-    final today = _dateOnly(DateTime.now());
-    final tomorrow = today.add(const Duration(days: 1));
-    final scrollDates = _quickDatesScrollable();
+    final dates = _quickDates();
 
     const chipLabelPadding = EdgeInsets.symmetric(horizontal: 10);
     const chipVD = VisualDensity(horizontal: -2, vertical: -2);
+
+    final cs = Theme.of(context).colorScheme;
+    final primary = cs.primary;
 
     final service = _findService(safeServiceId);
     final priceRub = service?.priceRub ?? 0;
@@ -806,7 +859,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
     final canProceed = _canProceed();
 
-    // ✅ если any-mode и слот выбран, то покажем реальную линию (зел/син)
     final pickedLineText =
         (_bayMode == _BayMode.any && _pickedBayIdForAny != null)
         ? _pickedBayLabel(_pickedBayIdForAny!)
@@ -814,8 +866,8 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
     final pickedLineColor =
         (_bayMode == _BayMode.any && _pickedBayIdForAny != null)
-        ? _pickedBayColor(_pickedBayIdForAny!)
-        : _bayColorForMode(_bayMode);
+        ? _pickedBayColor(context, _pickedBayIdForAny!)
+        : _bayStripeColor(context, _bayMode);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Создать запись')),
@@ -881,62 +933,28 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
               const SizedBox(height: 12),
 
-              // ✅ вертикальный выбор линии с цветной полоской
-              _lineSelector(),
+              // ✅ аккордеон-плашки линий
+              _lineSelectorAccordion(),
 
               const SizedBox(height: 12),
 
-              // даты как и было, но подчёркиваем розовым
-              Row(
-                children: [
-                  ChoiceChip(
-                    label: Text(_chipLabelForDate(today)),
-                    labelPadding: chipLabelPadding,
-                    selected: _selectedDate == today,
-                    selectedColor: _pink.withValues(alpha: 0.25),
-                    onSelected: (_) => _selectDate(today),
-                    visualDensity: chipVD,
-                  ),
-                  const SizedBox(width: 8),
-                  ChoiceChip(
-                    label: Text(_chipLabelForDate(tomorrow)),
-                    labelPadding: chipLabelPadding,
-                    selected: _selectedDate == tomorrow,
-                    selectedColor: _pink.withValues(alpha: 0.25),
-                    onSelected: (_) => _selectDate(tomorrow),
-                    visualDensity: chipVD,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: SizedBox(
-                      height: 38,
-                      child: ListView(
-                        scrollDirection: Axis.horizontal,
-                        physics: const ClampingScrollPhysics(),
-                        children: scrollDates.map((d) {
-                          final dd = _dateOnly(d);
-                          final selected = dd == _selectedDate;
-                          final key = _keyForDate(dd);
+              // ✅ даты — без скролла, “Пн 18”
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: dates.map((d) {
+                  final dd = _dateOnly(d);
+                  final selected = dd == _selectedDate;
 
-                          return Padding(
-                            padding: const EdgeInsets.only(right: 8),
-                            child: Container(
-                              key: key,
-                              child: ChoiceChip(
-                                label: Text(_chipLabelForDate(dd)),
-                                labelPadding: chipLabelPadding,
-                                selected: selected,
-                                selectedColor: _pink.withValues(alpha: 0.25),
-                                onSelected: (_) => _selectDate(dd),
-                                visualDensity: chipVD,
-                              ),
-                            ),
-                          );
-                        }).toList(),
-                      ),
-                    ),
-                  ),
-                ],
+                  return ChoiceChip(
+                    label: Text(_chipLabelForDate(dd)),
+                    labelPadding: chipLabelPadding,
+                    selected: selected,
+                    selectedColor: primary.withValues(alpha: 0.18),
+                    onSelected: (_) => _selectDate(dd),
+                    visualDensity: chipVD,
+                  );
+                }).toList(),
               ),
 
               const SizedBox(height: 12),
@@ -949,7 +967,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                   ),
                 )
               else ...[
-                // ✅ секции как в yclients
                 _timeSection(
                   title: 'Утро',
                   slots: morningSlots,
@@ -990,7 +1007,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                   borderRadius: BorderRadius.circular(16),
                   color: Colors.black.withValues(alpha: 0.04),
                   border: Border.all(
-                    color: Colors.black.withValues(alpha: 0.06),
+                    color: cs.outlineVariant.withValues(alpha: 0.6),
                   ),
                 ),
                 child: Column(
@@ -1025,7 +1042,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                         ),
                         const SizedBox(width: 8),
                         Text(
-                          'Линия: $pickedLineText',
+                          pickedLineText,
                           style: TextStyle(
                             fontSize: 12,
                             color: Colors.black.withValues(alpha: 0.75),
@@ -1044,7 +1061,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                 width: double.infinity,
                 child: FilledButton.icon(
                   style: FilledButton.styleFrom(
-                    backgroundColor: _pink,
+                    backgroundColor: primary,
                     foregroundColor: Colors.white,
                   ),
                   onPressed: canProceed ? _save : null,

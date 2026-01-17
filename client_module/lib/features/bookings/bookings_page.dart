@@ -21,8 +21,7 @@ class BookingsPage extends StatefulWidget {
 }
 
 class _BookingsPageState extends State<BookingsPage> {
-  // 🎨 линия-цвета (как договорились)
-  static const Color _pinkAny = Color(0xFFE7A2B3);
+  // ✅ цвета линий/постов — оставляем (идентификация)
   static const Color _greenLine = Color(0xFF2DBD6E);
   static const Color _blueLine = Color(0xFF2D9CDB);
 
@@ -131,48 +130,112 @@ class _BookingsPageState extends State<BookingsPage> {
     }
   }
 
-  // ✅ цвета статусов (в одной гамме, без “ядовитых”)
-  Color _statusColor(Booking b) {
+  // ✅ статусы: active = primary, остальное — аккуратно цветом
+  Color _statusColor(BuildContext context, Booking b) {
+    final cs = Theme.of(context).colorScheme;
     switch (b.status) {
       case BookingStatus.active:
-        return Colors.black.withValues(alpha: 0.70);
+        return cs.primary;
       case BookingStatus.pendingPayment:
-        return _pinkAny;
+        return Colors.orange;
       case BookingStatus.completed:
         return Colors.grey;
       case BookingStatus.canceled:
-        return const Color(0xFFD16B7A); // приглушённый розово-красный
+        return Colors.red;
     }
   }
 
   Widget _statusBadgeForTabs({required Booking b, required bool isActiveTab}) {
     if (isActiveTab) {
       if (b.status == BookingStatus.pendingPayment) {
-        return _badge(text: 'ОЖИДАЕТ ОПЛАТЫ', color: _statusColor(b));
+        return _badge(text: 'ОЖИДАЕТ ОПЛАТЫ', color: _statusColor(context, b));
       }
       if (b.status == BookingStatus.active) {
-        return _badge(text: 'ЗАБРОНИРОВАНО', color: _statusColor(b));
+        return _badge(text: 'ЗАБРОНИРОВАНО', color: _statusColor(context, b));
       }
       return const SizedBox.shrink();
     }
 
-    return _badge(text: _statusText(b).toUpperCase(), color: _statusColor(b));
+    return _badge(
+      text: _statusText(b).toUpperCase(),
+      color: _statusColor(context, b),
+    );
   }
 
-  int _compareBookings(Booking a, Booking b) =>
-      b.dateTime.compareTo(a.dateTime);
+  int _compareBookings(Booking a, Booking b) => b.dateTime.compareTo(a.dateTime);
 
-  // ✅ линия (bayId) -> текст + цвет
-  Color _lineColor(int? bayId) {
+  Color _lineColor(BuildContext context, int? bayId) {
     if (bayId == 1) return _greenLine;
     if (bayId == 2) return _blueLine;
-    return _pinkAny; // “любая”
+    return Theme.of(context).colorScheme.outlineVariant; // любая/не задано
   }
 
   String _lineText(int? bayId) {
     if (bayId == 1) return 'Зелёная линия';
     if (bayId == 2) return 'Синяя линия';
     return 'Любая линия';
+  }
+
+  // ✅ сервис-картинка (по твоей структуре ассетов)
+  String _serviceImageAsset(Service? s) {
+    final name = (s?.name ?? '').toLowerCase();
+    if (name.contains('комплекс')) return 'assets/images/services/kompleks_512.jpg';
+    if (name.contains('кузов')) return 'assets/images/services/kuzov_512.jpg';
+    if (name.contains('воск')) return 'assets/images/services/vosk_512.jpg';
+
+    // fallback (не падаем)
+    return 'assets/images/services/kuzov_512.jpg';
+  }
+
+  Widget _serviceThumb(Service? service) {
+    final path = _serviceImageAsset(service);
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: Image.asset(
+        path,
+        width: 56,
+        height: 56,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) {
+          return Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.04),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: const Icon(Icons.local_car_wash),
+          );
+        },
+      ),
+    );
+  }
+
+  // ✅ (опционально) иконки постов — поменяешь пути под свои ассеты
+  String _bayIconAsset(int? bayId) {
+    if (bayId == 1) return 'assets/images/posts/post_green.png';
+    if (bayId == 2) return 'assets/images/posts/post_blue.png';
+    return 'assets/images/posts/post_any.png';
+  }
+
+  Widget _bayIndicator(int? bayId) {
+    final color = _lineColor(context, bayId);
+    return Image.asset(
+      _bayIconAsset(bayId),
+      width: 16,
+      height: 16,
+      fit: BoxFit.contain,
+      errorBuilder: (_, __, ___) {
+        return Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(999),
+          ),
+        );
+      },
+    );
   }
 
   Widget _bookingCard({
@@ -200,9 +263,9 @@ class _BookingsPageState extends State<BookingsPage> {
     }
 
     final badge = _statusBadgeForTabs(b: b, isActiveTab: isActiveTab);
-
-    // если bayId есть в Booking — покажем линию (это то, что ты хотел)
     final int? bayId = b.bayId;
+
+    final cs = Theme.of(context).colorScheme;
 
     return InkWell(
       borderRadius: BorderRadius.circular(18),
@@ -212,7 +275,7 @@ class _BookingsPageState extends State<BookingsPage> {
         decoration: BoxDecoration(
           color: Theme.of(context).cardColor,
           borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+          border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
           boxShadow: [
             BoxShadow(
               blurRadius: 10,
@@ -224,15 +287,7 @@ class _BookingsPageState extends State<BookingsPage> {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              width: 56,
-              height: 56,
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.04),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: const Icon(Icons.local_car_wash),
-            ),
+            _serviceThumb(service),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -277,21 +332,14 @@ class _BookingsPageState extends State<BookingsPage> {
                     ),
                   ),
 
-                  // ✅ линия (то, что ты просил)
+                  // ✅ линия (без "Линия:")
                   const SizedBox(height: 6),
                   Row(
                     children: [
-                      Container(
-                        width: 10,
-                        height: 10,
-                        decoration: BoxDecoration(
-                          color: _lineColor(bayId),
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                      ),
+                      _bayIndicator(bayId),
                       const SizedBox(width: 8),
                       Text(
-                        'Линия: ${_lineText(bayId)}',
+                        _lineText(bayId),
                         style: TextStyle(
                           fontSize: 12,
                           color: Colors.black.withValues(alpha: 0.75),
