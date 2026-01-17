@@ -35,5 +35,13 @@ class MemoryCache {
     }
   }
 
+  /// ✅ NEW: invalidate by prefix (for busy_slots_* etc.)
+  void invalidatePrefix(String prefix) {
+    final keys = _map.keys.where((k) => k.startsWith(prefix)).toList();
+    for (final k in keys) {
+      _map.remove(k);
+    }
+  }
+
   void clear() => _map.clear();
 }

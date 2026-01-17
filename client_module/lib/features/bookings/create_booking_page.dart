@@ -1,3 +1,4 @@
+// C:\dev\carwash\client_module\lib\features\bookings\create_booking_page.dart
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -72,12 +73,37 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
   void _subscribeRealtime() {
     _rtSub?.cancel();
-    _rtSub = widget.repo.bookingEvents.listen((ev) {
+    _rtSub = widget.repo.bookingEvents.listen((ev) async {
       if (!mounted) return;
 
+      // ✅ во время save мы НЕ показываем "слот только что заняли",
+      // потому что это может быть наша же бронь.
+      if (_saving) return;
+
       if (ev.type == 'booking.changed' && ev.bayId == _bayId) {
-        // ✅ мгновенное обновление занятости для выбранного дня и поста
-        _refreshBusy(force: true);
+        // ✅ мгновенное обновление занятости для выбранного дня и линии
+        await _refreshBusy(force: true);
+
+        // ✅ если пользователь выбрал слот, и он внезапно стал busy — не прыгаем,
+        // просто сбрасываем выбор и показываем подсказку
+        final cur = _selectedSlotStart;
+        if (cur != null && _isBusySlot(cur)) {
+          if (!mounted) return;
+          setState(() {
+            _selectedSlotStart = null;
+          });
+
+          final messenger = ScaffoldMessenger.of(context);
+          messenger.hideCurrentSnackBar();
+          messenger.showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Этот слот только что заняли. Выбери другое время.',
+              ),
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
       }
     });
   }
@@ -182,7 +208,12 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     return _ceilToStep(lead, _slotStepMin);
   }
 
-  bool _overlaps(DateTime aStart, DateTime aEnd, DateTime bStart, DateTime bEnd) {
+  bool _overlaps(
+    DateTime aStart,
+    DateTime aEnd,
+    DateTime bStart,
+    DateTime bEnd,
+  ) {
     return aStart.isBefore(bEnd) && bStart.isBefore(aEnd);
   }
 
@@ -272,7 +303,8 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
       final String? selectedCarId = cars.isNotEmpty ? cars.first.id : null;
 
       String? selectedServiceId =
-          widget.preselectedServiceId ?? (services.isNotEmpty ? services.first.id : null);
+          widget.preselectedServiceId ??
+          (services.isNotEmpty ? services.first.id : null);
 
       if (widget.preselectedServiceId != null &&
           !services.any((s) => s.id == widget.preselectedServiceId)) {
@@ -320,8 +352,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
   void _selectDate(DateTime d) async {
     setState(() {
       _selectedDate = _dateOnly(d);
-      // ❗️не переопределяем выбор пользователя автоподбором
-      _selectedSlotStart = null;
+      _selectedSlotStart = null; // для новой даты выбор заново
     });
 
     _scrollDateIntoCenter(d);
@@ -400,9 +431,10 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     const vd = VisualDensity(horizontal: -2, vertical: -2);
     const pad = EdgeInsets.symmetric(horizontal: 10);
 
+    // ✅ термин "Линия"
     return Row(
       children: [
-        const Text('Пост', style: TextStyle(fontWeight: FontWeight.w900)),
+        const Text('Линия', style: TextStyle(fontWeight: FontWeight.w900)),
         const SizedBox(width: 10),
         ChoiceChip(
           label: const Text('1'),
@@ -445,7 +477,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
     final slot = _selectedSlotStart;
     if (slot == null) {
-      messenger.showSnackBar(const SnackBar(content: Text('Выбери слот времени')));
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Выбери слот времени')),
+      );
       return;
     }
 
@@ -453,7 +487,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     final minNow = _minSelectableNowLocal();
     if (isToday && slot.isBefore(minNow)) {
       messenger.showSnackBar(
-        const SnackBar(content: Text('Слишком рано. Выбери ближайший доступный слот.')),
+        const SnackBar(
+          content: Text('Слишком рано. Выбери ближайший доступный слот.'),
+        ),
       );
       return;
     }
@@ -474,11 +510,18 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
         dateTime: slot,
         bayId: _bayId,
         depositRub: _depositRub,
-        comment: _commentCtrl.text.trim().isEmpty ? null : _commentCtrl.text.trim(),
+        comment: _commentCtrl.text.trim().isEmpty
+            ? null
+            : _commentCtrl.text.trim(),
         bufferMin: _bufferMin,
       );
 
       if (!mounted) return;
+
+      // ✅ сразу сбрасываем выбор, чтобы realtime не давал "ложный" снекбар
+      setState(() {
+        _selectedSlotStart = null;
+      });
 
       final service = _findService(serviceId);
 
@@ -544,8 +587,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     final carIds = _cars.map((c) => c.id).toSet();
     final serviceIds = _services.map((s) => s.id).toSet();
     final safeCarId = (carId != null && carIds.contains(carId)) ? carId : null;
-    final safeServiceId =
-        (serviceId != null && serviceIds.contains(serviceId)) ? serviceId : null;
+    final safeServiceId = (serviceId != null && serviceIds.contains(serviceId))
+        ? serviceId
+        : null;
 
     final slots = _buildSlotsForDay(_selectedDate);
 
@@ -562,7 +606,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
     final service = _findService(safeServiceId);
     final priceRub = service?.priceRub ?? 0;
-    final remaining = (priceRub - _depositRub) > 0 ? (priceRub - _depositRub) : 0;
+    final remaining = (priceRub - _depositRub) > 0
+        ? (priceRub - _depositRub)
+        : 0;
 
     final blockMin = _effectiveBlockMinForSelectedService();
 
@@ -683,7 +729,10 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
               Row(
                 children: [
-                  const Text('Время', style: TextStyle(fontWeight: FontWeight.w800)),
+                  const Text(
+                    'Время',
+                    style: TextStyle(fontWeight: FontWeight.w800),
+                  ),
                   const Spacer(),
                   Text(
                     'занятость: $blockMin мин',
@@ -721,25 +770,36 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                         itemBuilder: (context, i) {
                           final s = slots[i];
 
-                          final tooEarly = isSelectedDayToday && s.isBefore(minNow);
+                          final tooEarly =
+                              isSelectedDayToday && s.isBefore(minNow);
                           final busy = _isBusySlot(s);
                           final disabled = tooEarly || busy;
 
                           final selected = _selectedSlotStart == s;
                           final time = _fmtTime(s);
-                          final badge = busy ? 'занято' : (tooEarly ? 'рано' : null);
+                          final badge = busy
+                              ? 'занято'
+                              : (tooEarly ? 'рано' : null);
 
                           if (selected) {
                             return FilledButton(
                               style: _slotStyleFilled(),
-                              onPressed: disabled ? null : () => setState(() => _selectedSlotStart = s),
+                              onPressed: disabled
+                                  ? null
+                                  : () => setState(() {
+                                      _selectedSlotStart = s;
+                                    }),
                               child: _slotLabel(time, badge: badge),
                             );
                           }
 
                           return OutlinedButton(
                             style: _slotStyleOutlined(),
-                            onPressed: disabled ? null : () => setState(() => _selectedSlotStart = s),
+                            onPressed: disabled
+                                ? null
+                                : () => setState(() {
+                                    _selectedSlotStart = s;
+                                  }),
                             child: _slotLabel(time, badge: badge),
                           );
                         },
@@ -754,7 +814,8 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                 maxLines: 3,
                 decoration: const InputDecoration(
                   labelText: 'Комментарий (по желанию)',
-                  hintText: 'Например: машина в плёнке, арки под давлением не мыть…',
+                  hintText:
+                      'Например: машина в плёнке, арки под давлением не мыть…',
                   border: OutlineInputBorder(),
                 ),
               ),
@@ -767,14 +828,19 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(16),
                   color: Colors.black.withValues(alpha: 0.04),
-                  border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+                  border: Border.all(
+                    color: Colors.black.withValues(alpha: 0.06),
+                  ),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
                       'Оплата брони: $_depositRub ₽',
-                      style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12),
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 12,
+                      ),
                     ),
                     const SizedBox(height: 4),
                     Text(
@@ -794,7 +860,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
-                  onPressed: (_cars.isEmpty || _services.isEmpty || _saving) ? null : _save,
+                  onPressed: (_cars.isEmpty || _services.isEmpty || _saving)
+                      ? null
+                      : _save,
                   icon: const Icon(Icons.credit_card),
                   label: Text(_saving ? 'Сохраняю...' : 'Продолжить к оплате'),
                 ),

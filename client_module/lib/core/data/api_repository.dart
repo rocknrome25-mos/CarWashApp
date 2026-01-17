@@ -1,3 +1,4 @@
+// C:\dev\carwash\client_module\lib\core\data\api_repository.dart
 import 'package:flutter/material.dart';
 
 import '../api/api_client.dart';
@@ -12,6 +13,8 @@ import '../realtime/realtime_client.dart';
 class ApiRepository implements AppRepository {
   final ApiClient api;
   final MemoryCache cache;
+
+  /// ✅ realtime
   final RealtimeClient realtime;
 
   static const _kClient = 'current_client';
@@ -20,12 +23,9 @@ class ApiRepository implements AppRepository {
     required this.api,
     required this.cache,
     required this.realtime,
-  });
-
-  // ---------------- REALTIME ----------------
-
-  @override
-  Stream<BookingRealtimeEvent> get bookingEvents => realtime.events;
+  }) {
+    realtime.connect();
+  }
 
   // ---------------- SESSION ----------------
 
@@ -38,7 +38,7 @@ class ApiRepository implements AppRepository {
     cache.invalidate('cars');
     cache.invalidate('bookings_all');
     cache.invalidate('bookings_active');
-    cache.invalidate('busy_slots');
+    cache.invalidatePrefix('busy_slots_');
   }
 
   @override
@@ -47,12 +47,7 @@ class ApiRepository implements AppRepository {
     cache.invalidate('cars');
     cache.invalidate('bookings_all');
     cache.invalidate('bookings_active');
-    cache.invalidate('busy_slots');
-  }
-
-  @override
-  Future<void> dispose() async {
-    await realtime.close();
+    cache.invalidatePrefix('busy_slots_');
   }
 
   String _requireClientId() {
@@ -61,6 +56,17 @@ class ApiRepository implements AppRepository {
       throw Exception('Нет активного клиента. Перезапусти и войди заново.');
     }
     return cid.trim();
+  }
+
+  // ---------------- REALTIME ----------------
+
+  @override
+  Stream<BookingRealtimeEvent> get bookingEvents => realtime.events;
+
+  void _invalidateBookingCaches() {
+    cache.invalidate('bookings_all');
+    cache.invalidate('bookings_active');
+    cache.invalidatePrefix('busy_slots_');
   }
 
   // ---------------- AUTH / REGISTER ----------------
@@ -140,6 +146,7 @@ class ApiRepository implements AppRepository {
     }
 
     final cid = _requireClientId();
+
     final data = await api.getJson('/cars', query: {'clientId': cid}) as List;
 
     final list = data
@@ -174,9 +181,7 @@ class ApiRepository implements AppRepository {
     final j = await api.postJson('/cars', payload) as Map<String, dynamic>;
 
     cache.invalidate('cars');
-    cache.invalidate('bookings_all');
-    cache.invalidate('bookings_active');
-    cache.invalidate('busy_slots');
+    _invalidateBookingCaches();
 
     return Car.fromJson(j);
   }
@@ -188,9 +193,7 @@ class ApiRepository implements AppRepository {
     await api.deleteJson('/cars/$id', query: {'clientId': cid});
 
     cache.invalidate('cars');
-    cache.invalidate('bookings_all');
-    cache.invalidate('bookings_active');
-    cache.invalidate('busy_slots');
+    _invalidateBookingCaches();
   }
 
   // ---------------- BOOKINGS ----------------
@@ -228,8 +231,11 @@ class ApiRepository implements AppRepository {
     required DateTime to,
     bool forceRefresh = false,
   }) async {
-    final key =
-        'busy_slots_${bayId}_${from.toUtc().toIso8601String()}_${to.toUtc().toIso8601String()}';
+    final fromUtc = from.toUtc().toIso8601String();
+    final toUtc = to.toUtc().toIso8601String();
+
+    // ✅ ВАЖНО: скобки, иначе будет bayId_ / fromUtc_
+    final key = 'busy_slots_${bayId}_${fromUtc}_$toUtc';
 
     if (!forceRefresh) {
       final cached = cache.get<List<DateTimeRange>>(key);
@@ -238,8 +244,8 @@ class ApiRepository implements AppRepository {
 
     final query = <String, String>{
       'bayId': bayId.toString(),
-      'from': from.toUtc().toIso8601String(),
-      'to': to.toUtc().toIso8601String(),
+      'from': fromUtc,
+      'to': toUtc,
     };
 
     final data = await api.getJson('/bookings/busy', query: query) as List;
@@ -280,9 +286,7 @@ class ApiRepository implements AppRepository {
 
     final j = await api.postJson('/bookings', payload) as Map<String, dynamic>;
 
-    cache.invalidate('bookings_all');
-    cache.invalidate('bookings_active');
-    cache.invalidate('busy_slots');
+    _invalidateBookingCaches();
 
     return Booking.fromJson(j);
   }
@@ -298,9 +302,7 @@ class ApiRepository implements AppRepository {
             })
             as Map<String, dynamic>;
 
-    cache.invalidate('bookings_all');
-    cache.invalidate('bookings_active');
-    cache.invalidate('busy_slots');
+    _invalidateBookingCaches();
 
     return Booking.fromJson(j);
   }
@@ -313,10 +315,15 @@ class ApiRepository implements AppRepository {
         await api.deleteJson('/bookings/$id', query: {'clientId': cid})
             as Map<String, dynamic>;
 
-    cache.invalidate('bookings_all');
-    cache.invalidate('bookings_active');
-    cache.invalidate('busy_slots');
+    _invalidateBookingCaches();
 
     return Booking.fromJson(j);
+  }
+
+  // ---------------- LIFECYCLE ----------------
+
+  @override
+  Future<void> dispose() async {
+    await realtime.close();
   }
 }
