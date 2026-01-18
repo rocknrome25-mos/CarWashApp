@@ -8,11 +8,7 @@ type ServiceSeed = {
   durationMin: number;
 };
 
-async function upsertService({
-  name,
-  priceRub,
-  durationMin,
-}: ServiceSeed) {
+async function upsertService({ name, priceRub, durationMin }: ServiceSeed) {
   const existing = await prisma.service.findFirst({
     where: { name },
   });
@@ -20,20 +16,13 @@ async function upsertService({
   if (existing) {
     await prisma.service.update({
       where: { id: existing.id },
-      data: {
-        priceRub,
-        durationMin,
-      },
+      data: { priceRub, durationMin },
     });
     return;
   }
 
   await prisma.service.create({
-    data: {
-      name,
-      priceRub,
-      durationMin,
-    },
+    data: { name, priceRub, durationMin },
   });
 }
 

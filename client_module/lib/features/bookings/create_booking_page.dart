@@ -131,6 +131,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
   }
 
   int _effectiveBlockMinForSelectedService() {
+    // ✅ универсально: (durationMin + bufferMin) округлить вверх до 30
     final base = _serviceDurationOrDefault(serviceId);
     final raw = base + _bufferMin;
     return _roundUpToStepMin(raw, _slotStepMin);
@@ -379,7 +380,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
   }
 
   String _weekdayShortRu(int weekday) {
-    // DateTime: 1=Mon ... 7=Sun
     switch (weekday) {
       case DateTime.monday:
         return 'Пн';
@@ -483,24 +483,31 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
   }
 
   // ✅ ГОРИЗОНТАЛЬНЫЙ “АККОРДЕОН”: [ANY EXPANDED] [🟢] [🔵]
+  // ✅ FIX: убрали RIGHT OVERFLOWED (5px) — точный расчёт expandedW + чуть уже collapsed
   Widget _lineSelectorAccordion() {
     return LayoutBuilder(
       builder: (context, constraints) {
         const double h = 56;
-        const double gap = 8;
-        const double collapsedW = 64;
+
+        // было: gap=8 => иногда не влезает на узких экранах
+        const double gap = 6;
+
+        // немного компактнее, чтобы стабильно помещалось без скролла
+        const double collapsedWAny = 56;
+        const double collapsedW = 56;
 
         final totalW = constraints.maxWidth;
-        final expandedW = (totalW - (collapsedW * 2) - (gap * 2)).clamp(
-          160.0,
-          totalW,
-        );
+
+        final expandedW =
+            (totalW - (collapsedWAny + collapsedW + collapsedW) - (gap * 2))
+                .clamp(140.0, totalW);
 
         Widget item({
           required _BayMode mode,
           required bool expanded,
           required String title,
           required Color stripe,
+          required double collapsedWidth,
         }) {
           final cs = Theme.of(context).colorScheme;
 
@@ -510,9 +517,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 220),
               curve: Curves.easeOutCubic,
-              width: expanded ? expandedW : collapsedW,
+              width: expanded ? expandedW : collapsedWidth,
               height: h,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 10),
               decoration: BoxDecoration(
                 color: expanded
                     ? stripe.withValues(alpha: 0.10)
@@ -527,17 +534,17 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
               child: Row(
                 children: [
                   Container(
-                    width: 5,
+                    width: 4,
                     height: 28,
                     decoration: BoxDecoration(
                       color: stripe,
                       borderRadius: BorderRadius.circular(999),
                     ),
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 8),
                   _bayIcon(mode, stripe),
                   if (expanded) ...[
-                    const SizedBox(width: 10),
+                    const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         title.toUpperCase(),
@@ -564,6 +571,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
               expanded: _bayMode == _BayMode.any,
               title: 'Любая линия',
               stripe: Theme.of(context).colorScheme.primary,
+              collapsedWidth: collapsedWAny,
             ),
             const SizedBox(width: gap),
             item(
@@ -571,6 +579,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
               expanded: _bayMode == _BayMode.bay1,
               title: 'Зелёная линия',
               stripe: _greenLine,
+              collapsedWidth: collapsedW,
             ),
             const SizedBox(width: gap),
             item(
@@ -578,6 +587,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
               expanded: _bayMode == _BayMode.bay2,
               title: 'Синяя линия',
               stripe: _blueLine,
+              collapsedWidth: collapsedW,
             ),
           ],
         );
@@ -899,7 +909,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                 },
               ),
               const SizedBox(height: 12),
-
               DropdownButtonFormField<String>(
                 initialValue: safeServiceId,
                 decoration: const InputDecoration(
@@ -911,7 +920,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                       (s) => DropdownMenuItem<String>(
                         value: s.id,
                         child: Text(
-                          '${s.name} (${s.priceRub} ₽) • ${s.durationMin ?? 30} мин',
+                          '${s.name} (${s.priceRub} ₽) • ${s.durationMin} мин',
                         ),
                       ),
                     )
@@ -930,15 +939,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                   return null;
                 },
               ),
-
               const SizedBox(height: 12),
-
-              // ✅ аккордеон-плашки линий
               _lineSelectorAccordion(),
-
               const SizedBox(height: 12),
-
-              // ✅ даты — без скролла, “Пн 18”
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
@@ -956,9 +959,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                   );
                 }).toList(),
               ),
-
               const SizedBox(height: 12),
-
               if (visibleSlots.isEmpty)
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 10),
@@ -983,9 +984,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                   initiallyExpanded: true,
                 ),
               ],
-
               const SizedBox(height: 10),
-
               TextFormField(
                 controller: _commentCtrl,
                 minLines: 1,
@@ -997,9 +996,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                   border: OutlineInputBorder(),
                 ),
               ),
-
               const SizedBox(height: 10),
-
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(12),
@@ -1054,9 +1051,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                   ],
                 ),
               ),
-
               const SizedBox(height: 12),
-
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(

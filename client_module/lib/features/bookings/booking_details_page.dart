@@ -22,10 +22,14 @@ class BookingDetailsPage extends StatefulWidget {
 class _BookingDetailsPageState extends State<BookingDetailsPage> {
   static const int _depositRubFallback = 500;
 
-  // ✅ ИКОНКИ ПОСТОВ (ПОДСТАВЬ РЕАЛЬНЫЕ ПУТИ ИЗ assets)
+  // ✅ Иконки постов (пути как договорились)
   static const String _bayAnyIcon = 'assets/images/posts/post_any.png';
   static const String _bayGreenIcon = 'assets/images/posts/post_green.png';
   static const String _bayBlueIcon = 'assets/images/posts/post_blue.png';
+
+  // ✅ Цвета линий/постов — идентификация
+  static const Color _greenLine = Color(0xFF2DBD6E);
+  static const Color _blueLine = Color(0xFF2D9CDB);
 
   late Future<_Details> _future;
 
@@ -74,16 +78,13 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
     return '$make $model (${c.plateDisplay})';
   }
 
-  // ✅ Цвета ТОЛЬКО для линий/постов
-  Color _bayColor(int? bayId) {
-    // Любая линия — нейтральная (без “кислоты”)
-    if (bayId == null) return Colors.grey.shade600;
-
-    // Принял твою идею: 1 = зелёная линия, 2 = синяя линия
-    if (bayId == 1) return Colors.green.shade600;
-    if (bayId == 2) return Colors.blue.shade700;
-
-    return Colors.grey.shade600;
+  // ✅ Цвет линии: Любая линия = primary, остальное = green/blue
+  Color _bayColor(BuildContext context, int? bayId) {
+    final primary = Theme.of(context).colorScheme.primary;
+    if (bayId == null) return primary;
+    if (bayId == 1) return _greenLine;
+    if (bayId == 2) return _blueLine;
+    return primary;
   }
 
   String _bayLabel(int? bayId) {
@@ -100,7 +101,7 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
     return _bayAnyIcon;
   }
 
-  // ✅ Картинка услуги: из assets по названию (как ты уже сделал)
+  // ✅ Картинка услуги: из assets по названию
   ImageProvider _serviceHero(Service? s) {
     final url = s?.imageUrl;
     if (url != null && url.isNotEmpty) return NetworkImage(url);
@@ -119,17 +120,18 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
     return const AssetImage('assets/images/services/kuzov_1080.jpg');
   }
 
-  // ✅ Цвета ТОЛЬКО для статусов
-  Color _statusColor(BookingStatus s) {
+  // ✅ Цвета статусов: active = primary (дефолт), остальное — стандартно
+  Color _statusColor(BuildContext context, BookingStatus s) {
+    final cs = Theme.of(context).colorScheme;
     switch (s) {
       case BookingStatus.active:
-        return Colors.green.shade700;
+        return cs.primary;
       case BookingStatus.pendingPayment:
-        return Colors.orange.shade700;
+        return Colors.orange;
       case BookingStatus.completed:
-        return Colors.grey.shade700;
+        return Colors.grey;
       case BookingStatus.canceled:
-        return Colors.red.shade700;
+        return Colors.red;
     }
   }
 
@@ -165,7 +167,7 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
   }
 
   Widget _statusBadge(Booking b) {
-    final c = _statusColor(b.status);
+    final c = _statusColor(context, b.status);
     return _badge(text: _statusText(b.status).toUpperCase(), color: c);
   }
 
@@ -277,12 +279,13 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
   }
 
   Widget _card({required Widget child}) {
+    final cs = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
         boxShadow: [
           BoxShadow(
             blurRadius: 10,
@@ -313,46 +316,60 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
     );
   }
 
-  Widget _bayRow(int? bayId) {
-    final color = _bayColor(bayId);
+  // ✅ ЕДИНЫЙ ПАТТЕРН как в bookings_page: полоса слева + иконка + текст
+  Widget _bayPill(int? bayId) {
+    final cs = Theme.of(context).colorScheme;
+    final stripe = _bayColor(context, bayId);
     final label = _bayLabel(bayId);
     final iconPath = _bayIconPath(bayId);
 
-    return Row(
-      children: [
-        // Иконка поста (если нет файла — fallback в точку)
-        Image.asset(
-          iconPath,
-          width: 22,
-          height: 22,
-          errorBuilder: (_, __, ___) => Container(
-            width: 10,
-            height: 10,
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 6,
+            height: 28,
             decoration: BoxDecoration(
-              color: color,
+              color: stripe,
               borderRadius: BorderRadius.circular(999),
             ),
           ),
-        ),
-        const SizedBox(width: 10),
-        Container(
-          width: 10,
-          height: 10,
-          decoration: BoxDecoration(
-            color: color,
-            borderRadius: BorderRadius.circular(999),
+          const SizedBox(width: 10),
+          Image.asset(
+            iconPath,
+            width: 22,
+            height: 22,
+            fit: BoxFit.contain,
+            errorBuilder: (_, __, ___) {
+              return Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                  color: stripe,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              );
+            },
           ),
-        ),
-        const SizedBox(width: 10),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            color: Colors.black.withValues(alpha: 0.80),
-            fontWeight: FontWeight.w900,
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.black.withValues(alpha: 0.80),
+                fontWeight: FontWeight.w900,
+              ),
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -422,7 +439,6 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
           return ListView(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
             children: [
-              // ✅ Hero картинка услуги
               _hero(service),
               const SizedBox(height: 12),
 
@@ -459,8 +475,8 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
 
                     const SizedBox(height: 12),
 
-                    // ✅ Линия / бокс — красиво
-                    _bayRow(booking.bayId),
+                    // ✅ Линия / пост — тот же вид, что в списке
+                    _bayPill(booking.bayId),
 
                     const SizedBox(height: 14),
 
@@ -590,7 +606,6 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton.icon(
-                    // ✅ дефолтный цвет темы
                     style: FilledButton.styleFrom(
                       backgroundColor: primary,
                       foregroundColor: Colors.white,

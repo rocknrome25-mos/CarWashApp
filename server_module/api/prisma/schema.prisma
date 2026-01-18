@@ -60,9 +60,9 @@ model Service {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  name        String
+  name        String  @unique
   priceRub    Int
-  durationMin Int @default(30)
+  durationMin Int     @default(30)
 
   bookings Booking[]
 }

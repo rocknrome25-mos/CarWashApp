@@ -21,7 +21,6 @@ class BookingsPage extends StatefulWidget {
 }
 
 class _BookingsPageState extends State<BookingsPage> {
-  // ✅ цвета линий/постов — оставляем (идентификация)
   static const Color _greenLine = Color(0xFF2DBD6E);
   static const Color _blueLine = Color(0xFF2D9CDB);
 
@@ -37,103 +36,55 @@ class _BookingsPageState extends State<BookingsPage> {
   void didUpdateWidget(covariant BookingsPage oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.refreshToken != widget.refreshToken) {
-      _refreshSync(force: true);
+      _refresh();
     }
   }
 
-  Future<_BookingsBundle> _load({bool forceRefresh = false}) async {
-    final results = await Future.wait([
-      widget.repo.getBookings(
-        includeCanceled: true,
-        forceRefresh: forceRefresh,
-      ),
-      widget.repo.getCars(forceRefresh: forceRefresh),
-      widget.repo.getServices(forceRefresh: forceRefresh),
+  Future<_BookingsBundle> _load({bool force = false}) async {
+    final res = await Future.wait([
+      widget.repo.getBookings(includeCanceled: true, forceRefresh: force),
+      widget.repo.getCars(forceRefresh: force),
+      widget.repo.getServices(forceRefresh: force),
     ]);
 
     return _BookingsBundle(
-      bookings: results[0] as List<Booking>,
-      cars: results[1] as List<Car>,
-      services: results[2] as List<Service>,
+      bookings: res[0] as List<Booking>,
+      cars: res[1] as List<Car>,
+      services: res[2] as List<Service>,
     );
   }
 
-  void _refreshSync({bool force = true}) {
+  void _refresh() {
     setState(() {
-      _future = _load(forceRefresh: force);
+      _future = _load(force: true);
     });
   }
 
-  Future<void> _pullToRefresh() async {
-    _refreshSync(force: true);
-    try {
-      await _future;
-    } catch (_) {}
+  // ================= helpers =================
+
+  DateTime _local(DateTime d) => d.toLocal();
+
+  String _dateKey(DateTime d) {
+    final x = _local(d);
+    return '${x.year}-${x.month}-${x.day}';
   }
 
-  DateTime _local(DateTime dt) => dt.toLocal();
-
-  String _dateKey(DateTime dt) {
-    final x = _local(dt);
-    return '${x.year}-${x.month.toString().padLeft(2, '0')}-${x.day.toString().padLeft(2, '0')}';
+  String _dateHeader(DateTime d) {
+    final x = _local(d);
+    return '${x.day.toString().padLeft(2, '0')}.'
+        '${x.month.toString().padLeft(2, '0')}.'
+        '${x.year}';
   }
 
-  String _dateHeader(DateTime dt) {
-    final x = _local(dt);
-    return '${x.day.toString().padLeft(2, '0')}.${x.month.toString().padLeft(2, '0')}.${x.year}';
+  String _time(DateTime d) {
+    final x = _local(d);
+    return '${x.hour.toString().padLeft(2, '0')}:'
+        '${x.minute.toString().padLeft(2, '0')}';
   }
 
-  String _dateText(DateTime dt) {
-    final x = _local(dt);
-    return '${x.day.toString().padLeft(2, '0')}.${x.month.toString().padLeft(2, '0')}.${x.year}';
-  }
-
-  String _timeText(DateTime dt) {
-    final x = _local(dt);
-    return '${x.hour.toString().padLeft(2, '0')}:${x.minute.toString().padLeft(2, '0')}';
-  }
-
-  String _dateTimeText(DateTime dt) {
-    final x = _local(dt);
-    return '${x.day.toString().padLeft(2, '0')}.${x.month.toString().padLeft(2, '0')}.${x.year} '
-        '${x.hour.toString().padLeft(2, '0')}:${x.minute.toString().padLeft(2, '0')}';
-  }
-
-  Widget _badge({required String text, required Color color}) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(
-          color: color,
-          fontWeight: FontWeight.w800,
-          fontSize: 12,
-        ),
-      ),
-    );
-  }
-
-  String _statusText(Booking b) {
-    switch (b.status) {
-      case BookingStatus.active:
-        return 'Забронировано';
-      case BookingStatus.pendingPayment:
-        return 'Ожидает оплаты';
-      case BookingStatus.completed:
-        return 'Завершено';
-      case BookingStatus.canceled:
-        return 'Отменено';
-    }
-  }
-
-  // ✅ статусы: active = primary, остальное — аккуратно цветом
-  Color _statusColor(BuildContext context, Booking b) {
-    final cs = Theme.of(context).colorScheme;
-    switch (b.status) {
+  Color _statusColor(BuildContext ctx, BookingStatus s) {
+    final cs = Theme.of(ctx).colorScheme;
+    switch (s) {
       case BookingStatus.active:
         return cs.primary;
       case BookingStatus.pendingPayment:
@@ -145,96 +96,127 @@ class _BookingsPageState extends State<BookingsPage> {
     }
   }
 
-  Widget _statusBadgeForTabs({required Booking b, required bool isActiveTab}) {
-    if (isActiveTab) {
-      if (b.status == BookingStatus.pendingPayment) {
-        return _badge(text: 'ОЖИДАЕТ ОПЛАТЫ', color: _statusColor(context, b));
-      }
-      if (b.status == BookingStatus.active) {
-        return _badge(text: 'ЗАБРОНИРОВАНО', color: _statusColor(context, b));
-      }
-      return const SizedBox.shrink();
+  String _statusText(BookingStatus s) {
+    switch (s) {
+      case BookingStatus.active:
+        return 'ЗАБРОНИРОВАНО';
+      case BookingStatus.pendingPayment:
+        return 'ОЖИДАЕТ ОПЛАТЫ';
+      case BookingStatus.completed:
+        return 'ЗАВЕРШЕНО';
+      case BookingStatus.canceled:
+        return 'ОТМЕНЕНО';
     }
-
-    return _badge(
-      text: _statusText(b).toUpperCase(),
-      color: _statusColor(context, b),
-    );
   }
 
-  int _compareBookings(Booking a, Booking b) => b.dateTime.compareTo(a.dateTime);
-
-  Color _lineColor(BuildContext context, int? bayId) {
+  Color _bayColor(BuildContext ctx, int? bayId) {
     if (bayId == 1) return _greenLine;
     if (bayId == 2) return _blueLine;
-    return Theme.of(context).colorScheme.outlineVariant; // любая/не задано
+    return Theme.of(ctx).colorScheme.primary;
   }
 
-  String _lineText(int? bayId) {
+  String _bayText(int? bayId) {
     if (bayId == 1) return 'Зелёная линия';
     if (bayId == 2) return 'Синяя линия';
     return 'Любая линия';
   }
 
-  // ✅ сервис-картинка (по твоей структуре ассетов)
-  String _serviceImageAsset(Service? s) {
-    final name = (s?.name ?? '').toLowerCase();
-    if (name.contains('комплекс')) return 'assets/images/services/kompleks_512.jpg';
-    if (name.contains('кузов')) return 'assets/images/services/kuzov_512.jpg';
-    if (name.contains('воск')) return 'assets/images/services/vosk_512.jpg';
-
-    // fallback (не падаем)
-    return 'assets/images/services/kuzov_512.jpg';
-  }
-
-  Widget _serviceThumb(Service? service) {
-    final path = _serviceImageAsset(service);
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(16),
-      child: Image.asset(
-        path,
-        width: 56,
-        height: 56,
-        fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) {
-          return Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.04),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: const Icon(Icons.local_car_wash),
-          );
-        },
-      ),
-    );
-  }
-
-  // ✅ (опционально) иконки постов — поменяешь пути под свои ассеты
-  String _bayIconAsset(int? bayId) {
+  String _bayIcon(int? bayId) {
     if (bayId == 1) return 'assets/images/posts/post_green.png';
     if (bayId == 2) return 'assets/images/posts/post_blue.png';
     return 'assets/images/posts/post_any.png';
   }
 
-  Widget _bayIndicator(int? bayId) {
-    final color = _lineColor(context, bayId);
-    return Image.asset(
-      _bayIconAsset(bayId),
-      width: 16,
-      height: 16,
-      fit: BoxFit.contain,
-      errorBuilder: (_, __, ___) {
-        return Container(
-          width: 10,
-          height: 10,
+  String _serviceImage(Service? s) {
+    final name = (s?.name ?? '').toLowerCase();
+    if (name.contains('комплекс')) {
+      return 'assets/images/services/kompleks_512.jpg';
+    }
+    if (name.contains('воск')) {
+      return 'assets/images/services/vosk_512.jpg';
+    }
+    return 'assets/images/services/kuzov_512.jpg';
+  }
+
+  // ================= widgets =================
+
+  Widget _statusBadge(BuildContext ctx, Booking b) {
+    final c = _statusColor(ctx, b.status);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: c.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        _statusText(b.status),
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w900,
+          color: c,
+        ),
+      ),
+    );
+  }
+
+  Widget _bayBadge(BuildContext ctx, int? bayId) {
+    final color = _bayColor(ctx, bayId);
+
+    return Row(
+      children: [
+        Container(
+          width: 4,
+          height: 24,
           decoration: BoxDecoration(
             color: color,
-            borderRadius: BorderRadius.circular(999),
+            borderRadius: BorderRadius.circular(4),
           ),
-        );
-      },
+        ),
+        const SizedBox(width: 8),
+        Image.asset(
+          _bayIcon(bayId),
+          width: 18,
+          height: 18,
+          errorBuilder: (_, __, ___) => Container(
+            width: 10,
+            height: 10,
+            decoration: BoxDecoration(
+              color: color,
+              borderRadius: BorderRadius.circular(999),
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          _bayText(bayId),
+          style: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _serviceThumb(Service? s) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: Image.asset(
+        _serviceImage(s),
+        width: 56,
+        height: 56,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => Container(
+          width: 56,
+          height: 56,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.05),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: const Icon(Icons.local_car_wash),
+        ),
+      ),
     );
   }
 
@@ -242,30 +224,9 @@ class _BookingsPageState extends State<BookingsPage> {
     required Booking b,
     required Car? car,
     required Service? service,
-    required bool isActiveTab,
     required VoidCallback onTap,
   }) {
-    final serviceTitle = service?.name ?? 'Услуга удалена';
-    final carTitle = car == null
-        ? 'Авто удалено'
-        : '${car.make} ${car.model} (${car.plateDisplay})';
-    final when = '${_dateText(b.dateTime)} • ${_timeText(b.dateTime)}';
-
-    final total = service?.priceRub;
-    final paid = b.paidTotalRub;
-    final paidLine = (total == null) ? null : 'Оплачено: $paid ₽ из $total ₽';
-
-    String? paymentLine;
-    if (b.status == BookingStatus.pendingPayment && b.paymentDueAt != null) {
-      paymentLine = 'Оплатить до: ${_timeText(b.paymentDueAt!)}';
-    } else if (b.lastPaidAt != null) {
-      paymentLine = 'Платёж: ${_dateTimeText(b.lastPaidAt!)}';
-    }
-
-    final badge = _statusBadgeForTabs(b: b, isActiveTab: isActiveTab);
-    final int? bayId = b.bayId;
-
-    final cs = Theme.of(context).colorScheme;
+    final when = '${_dateHeader(b.dateTime)} • ${_time(b.dateTime)}';
 
     return InkWell(
       borderRadius: BorderRadius.circular(18),
@@ -275,14 +236,9 @@ class _BookingsPageState extends State<BookingsPage> {
         decoration: BoxDecoration(
           color: Theme.of(context).cardColor,
           borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
-          boxShadow: [
-            BoxShadow(
-              blurRadius: 10,
-              offset: const Offset(0, 6),
-              color: Colors.black.withValues(alpha: 0.04),
-            ),
-          ],
+          border: Border.all(
+            color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.6),
+          ),
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -294,11 +250,10 @@ class _BookingsPageState extends State<BookingsPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Expanded(
                         child: Text(
-                          serviceTitle,
+                          service?.name ?? 'Услуга удалена',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
@@ -307,19 +262,19 @@ class _BookingsPageState extends State<BookingsPage> {
                           ),
                         ),
                       ),
-                      const SizedBox(width: 10),
-                      badge,
+                      const SizedBox(width: 8),
+                      _statusBadge(context, b),
                     ],
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    carTitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                    car == null
+                        ? 'Авто удалено'
+                        : '${car.make} ${car.model} (${car.plateDisplay})',
                     style: TextStyle(
                       fontSize: 12,
-                      color: Colors.black.withValues(alpha: 0.65),
                       fontWeight: FontWeight.w700,
+                      color: Colors.black.withValues(alpha: 0.65),
                     ),
                   ),
                   const SizedBox(height: 4),
@@ -327,50 +282,12 @@ class _BookingsPageState extends State<BookingsPage> {
                     when,
                     style: TextStyle(
                       fontSize: 12,
-                      color: Colors.black.withValues(alpha: 0.65),
                       fontWeight: FontWeight.w700,
+                      color: Colors.black.withValues(alpha: 0.65),
                     ),
                   ),
-
-                  // ✅ линия (без "Линия:")
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      _bayIndicator(bayId),
-                      const SizedBox(width: 8),
-                      Text(
-                        _lineText(bayId),
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.black.withValues(alpha: 0.75),
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                    ],
-                  ),
-
-                  if (paymentLine != null) ...[
-                    const SizedBox(height: 6),
-                    Text(
-                      paymentLine,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.black.withValues(alpha: 0.75),
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ],
-                  if (paidLine != null) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      paidLine,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.black.withValues(alpha: 0.65),
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ],
+                  const SizedBox(height: 8),
+                  _bayBadge(context, b.bayId),
                 ],
               ),
             ),
@@ -380,188 +297,95 @@ class _BookingsPageState extends State<BookingsPage> {
     );
   }
 
-  Widget _buildList({
-    required List<Booking> bookings,
-    required Map<String, Car> carsById,
-    required Map<String, Service> servicesById,
-    required String emptyTitle,
-    required String emptySubtitle,
-    required bool isActiveTab,
-  }) {
-    if (bookings.isEmpty) {
-      return EmptyState(
-        icon: Icons.event_busy,
-        title: emptyTitle,
-        subtitle: emptySubtitle,
-      );
-    }
-
-    final rows = <_Row>[];
-    String? currentDay;
-
-    for (final b in bookings) {
-      final day = _dateKey(b.dateTime);
-      if (day != currentDay) {
-        currentDay = day;
-        rows.add(_Row.header(_dateHeader(b.dateTime)));
-      }
-      rows.add(_Row.booking(b));
-    }
-
-    return RefreshIndicator(
-      onRefresh: _pullToRefresh,
-      child: ListView.builder(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-        itemCount: rows.length,
-        itemBuilder: (context, i) {
-          final row = rows[i];
-
-          if (row.kind == _RowKind.header) {
-            return Padding(
-              padding: const EdgeInsets.fromLTRB(4, 14, 4, 10),
-              child: Text(
-                row.headerText!,
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-            );
-          }
-
-          final b = row.booking!;
-          final car = carsById[b.carId];
-          final service = servicesById[b.serviceId];
-
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: _bookingCard(
-              b: b,
-              car: car,
-              service: service,
-              isActiveTab: isActiveTab,
-              onTap: () async {
-                await Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) =>
-                        BookingDetailsPage(repo: widget.repo, bookingId: b.id),
-                  ),
-                );
-                if (!mounted) return;
-                _refreshSync(force: true);
-              },
-            ),
-          );
-        },
-      ),
-    );
-  }
+  // ================= build =================
 
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<_BookingsBundle>(
       future: _future,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done) {
+      builder: (ctx, snap) {
+        if (snap.connectionState != ConnectionState.done) {
           return const Center(child: CircularProgressIndicator());
         }
 
-        if (snapshot.hasError) {
+        if (snap.hasError) {
           return Center(
             child: Padding(
               padding: const EdgeInsets.all(16),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text('Ошибка: ${snapshot.error}'),
-                  const SizedBox(height: 12),
-                  FilledButton(
-                    onPressed: () => _refreshSync(force: true),
-                    child: const Text('Повторить'),
-                  ),
-                ],
+              child: FilledButton(
+                onPressed: _refresh,
+                child: const Text('Повторить'),
               ),
             ),
           );
         }
 
-        final data = snapshot.data!;
-        final all = [...data.bookings];
-
+        final data = snap.data!;
         final carsById = {for (final c in data.cars) c.id: c};
         final servicesById = {for (final s in data.services) s.id: s};
 
-        final active = all
-            .where(
-              (b) =>
-                  b.status == BookingStatus.active ||
-                  b.status == BookingStatus.pendingPayment,
-            )
-            .toList();
+        final bookings = [...data.bookings]
+          ..sort((a, b) => b.dateTime.compareTo(a.dateTime));
 
-        final completed = all
-            .where((b) => b.status == BookingStatus.completed)
-            .toList();
+        if (bookings.isEmpty) {
+          return const EmptyState(
+            icon: Icons.event_busy,
+            title: 'Нет записей',
+            subtitle: 'Создай запись — она появится здесь',
+          );
+        }
 
-        final canceled = all
-            .where((b) => b.status == BookingStatus.canceled)
-            .toList();
+        final rows = <Widget>[];
+        String? lastDay;
 
-        active.sort(_compareBookings);
-        completed.sort(_compareBookings);
-        canceled.sort(_compareBookings);
-
-        return DefaultTabController(
-          length: 3,
-          child: Column(
-            children: [
-              const Material(
-                child: TabBar(
-                  tabs: [
-                    Tab(text: 'Активные'),
-                    Tab(text: 'Завершённые'),
-                    Tab(text: 'Отменённые'),
-                  ],
+        for (final b in bookings) {
+          final day = _dateKey(b.dateTime);
+          if (day != lastDay) {
+            lastDay = day;
+            rows.add(
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+                child: Text(
+                  _dateHeader(b.dateTime),
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w900,
+                  ),
                 ),
               ),
-              Expanded(
-                child: TabBarView(
-                  children: [
-                    _buildList(
-                      bookings: active,
-                      carsById: carsById,
-                      servicesById: servicesById,
-                      emptyTitle: 'Нет активных записей',
-                      emptySubtitle:
-                          'Создай запись на услугу — она появится здесь.',
-                      isActiveTab: true,
+            );
+          }
+
+          rows.add(
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: _bookingCard(
+                b: b,
+                car: carsById[b.carId],
+                service: servicesById[b.serviceId],
+                onTap: () async {
+                  await Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => BookingDetailsPage(
+                        repo: widget.repo,
+                        bookingId: b.id,
+                      ),
                     ),
-                    _buildList(
-                      bookings: completed,
-                      carsById: carsById,
-                      servicesById: servicesById,
-                      emptyTitle: 'Нет завершённых записей',
-                      emptySubtitle: 'Здесь будут прошедшие записи.',
-                      isActiveTab: false,
-                    ),
-                    _buildList(
-                      bookings: canceled,
-                      carsById: carsById,
-                      servicesById: servicesById,
-                      emptyTitle: 'Нет отменённых записей',
-                      emptySubtitle: 'Здесь будут отменённые записи.',
-                      isActiveTab: false,
-                    ),
-                  ],
-                ),
+                  );
+                  _refresh();
+                },
               ),
-            ],
-          ),
-        );
+            ),
+          );
+        }
+
+        return ListView(children: rows);
       },
     );
   }
 }
+
+// ================= models =================
 
 class _BookingsBundle {
   final List<Booking> bookings;
@@ -573,15 +397,4 @@ class _BookingsBundle {
     required this.cars,
     required this.services,
   });
-}
-
-enum _RowKind { header, booking }
-
-class _Row {
-  final _RowKind kind;
-  final String? headerText;
-  final Booking? booking;
-
-  _Row.header(this.headerText) : kind = _RowKind.header, booking = null;
-  _Row.booking(this.booking) : kind = _RowKind.booking, headerText = null;
 }
