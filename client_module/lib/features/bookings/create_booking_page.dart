@@ -482,116 +482,107 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     );
   }
 
-  // ✅ ГОРИЗОНТАЛЬНЫЙ “АККОРДЕОН”: [ANY EXPANDED] [🟢] [🔵]
-  // ✅ FIX: убрали RIGHT OVERFLOWED (5px) — точный расчёт expandedW + чуть уже collapsed
+  // ✅ НОВЫЙ АККОРДЕОН: справа вплотную, без overflow
   Widget _lineSelectorAccordion() {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        const double h = 56;
+    final cs = Theme.of(context).colorScheme;
 
-        // было: gap=8 => иногда не влезает на узких экранах
-        const double gap = 6;
+    const double h = 56;
+    const double gap = 8;
 
-        // немного компактнее, чтобы стабильно помещалось без скролла
-        const double collapsedWAny = 56;
-        const double collapsedW = 56;
+    // фикс ширины маленьких карточек справа
+    const double smallW = 54;
 
-        final totalW = constraints.maxWidth;
-
-        final expandedW =
-            (totalW - (collapsedWAny + collapsedW + collapsedW) - (gap * 2))
-                .clamp(140.0, totalW);
-
-        Widget item({
-          required _BayMode mode,
-          required bool expanded,
-          required String title,
-          required Color stripe,
-          required double collapsedWidth,
-        }) {
-          final cs = Theme.of(context).colorScheme;
-
-          return InkWell(
+    Widget item({
+      required _BayMode mode,
+      required bool expanded,
+      required String title,
+      required Color stripe,
+      double? width,
+    }) {
+      return InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () => _selectBay(mode),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+          width: width,
+          height: h,
+          padding: EdgeInsets.symmetric(horizontal: expanded ? 10 : 8),
+          decoration: BoxDecoration(
+            color: expanded
+                ? stripe.withValues(alpha: 0.10)
+                : Theme.of(context).cardColor,
             borderRadius: BorderRadius.circular(16),
-            onTap: () => _selectBay(mode),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 220),
-              curve: Curves.easeOutCubic,
-              width: expanded ? expandedW : collapsedWidth,
-              height: h,
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              decoration: BoxDecoration(
-                color: expanded
-                    ? stripe.withValues(alpha: 0.10)
-                    : Theme.of(context).cardColor,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: expanded
-                      ? stripe.withValues(alpha: 0.55)
-                      : cs.outlineVariant.withValues(alpha: 0.6),
+            border: Border.all(
+              color: expanded
+                  ? stripe.withValues(alpha: 0.55)
+                  : cs.outlineVariant.withValues(alpha: 0.6),
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 4,
+                height: 28,
+                decoration: BoxDecoration(
+                  color: stripe,
+                  borderRadius: BorderRadius.circular(999),
                 ),
               ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 4,
-                    height: 28,
-                    decoration: BoxDecoration(
-                      color: stripe,
-                      borderRadius: BorderRadius.circular(999),
+              const SizedBox(width: 8),
+              _bayIcon(mode, stripe),
+              if (expanded) ...[
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    title.toUpperCase(),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w900,
+                      color: Colors.black.withValues(alpha: 0.85),
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  _bayIcon(mode, stripe),
-                  if (expanded) ...[
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        title.toUpperCase(),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontWeight: FontWeight.w900,
-                          color: Colors.black.withValues(alpha: 0.85),
-                        ),
-                      ),
-                    ),
-                    Icon(Icons.check_circle, color: stripe, size: 18),
-                  ],
-                ],
-              ),
-            ),
-          );
-        }
+                ),
+                Icon(Icons.check_circle, color: stripe, size: 18),
+              ],
+            ],
+          ),
+        ),
+      );
+    }
 
-        return Row(
-          children: [
-            item(
+    return SizedBox(
+      width: double.infinity,
+      child: Row(
+        children: [
+          // ✅ Любая линия занимает всё свободное место
+          Expanded(
+            child: item(
               mode: _BayMode.any,
               expanded: _bayMode == _BayMode.any,
               title: 'Любая линия',
               stripe: Theme.of(context).colorScheme.primary,
-              collapsedWidth: collapsedWAny,
             ),
-            const SizedBox(width: gap),
-            item(
-              mode: _BayMode.bay1,
-              expanded: _bayMode == _BayMode.bay1,
-              title: 'Зелёная линия',
-              stripe: _greenLine,
-              collapsedWidth: collapsedW,
-            ),
-            const SizedBox(width: gap),
-            item(
-              mode: _BayMode.bay2,
-              expanded: _bayMode == _BayMode.bay2,
-              title: 'Синяя линия',
-              stripe: _blueLine,
-              collapsedWidth: collapsedW,
-            ),
-          ],
-        );
-      },
+          ),
+          const SizedBox(width: gap),
+          item(
+            mode: _BayMode.bay1,
+            expanded: _bayMode == _BayMode.bay1,
+            title: 'Зелёная линия',
+            stripe: _greenLine,
+            width: smallW,
+          ),
+          const SizedBox(width: gap),
+          item(
+            mode: _BayMode.bay2,
+            expanded: _bayMode == _BayMode.bay2,
+            title: 'Синяя линия',
+            stripe: _blueLine,
+            width: smallW,
+          ),
+        ],
+      ),
     );
   }
 
@@ -605,6 +596,8 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     for (final s in allSlots) {
       if (isSelectedDayToday && s.isBefore(minNow)) continue;
       if (_isBusySlot(s)) continue;
+
+      // ✅ показываем клиенту только свободные слоты
       visible.add(s);
     }
     return visible;
@@ -909,6 +902,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                 },
               ),
               const SizedBox(height: 12),
+
               DropdownButtonFormField<String>(
                 initialValue: safeServiceId,
                 decoration: const InputDecoration(
@@ -939,9 +933,13 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                   return null;
                 },
               ),
+
               const SizedBox(height: 12),
+
               _lineSelectorAccordion(),
+
               const SizedBox(height: 12),
+
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
@@ -959,7 +957,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                   );
                 }).toList(),
               ),
+
               const SizedBox(height: 12),
+
               if (visibleSlots.isEmpty)
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 10),
@@ -984,7 +984,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                   initiallyExpanded: true,
                 ),
               ],
+
               const SizedBox(height: 10),
+
               TextFormField(
                 controller: _commentCtrl,
                 minLines: 1,
@@ -996,7 +998,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                   border: OutlineInputBorder(),
                 ),
               ),
+
               const SizedBox(height: 10),
+
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(12),
@@ -1051,7 +1055,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                   ],
                 ),
               ),
+
               const SizedBox(height: 12),
+
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
