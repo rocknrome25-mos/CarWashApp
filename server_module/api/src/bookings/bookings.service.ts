@@ -17,7 +17,6 @@ type PayBody = {
 
 @Injectable()
 export class BookingsService {
-  // ✅ одинаковая сетка слотов на бэке и фронте
   private static readonly SLOT_STEP_MIN = 30;
 
   constructor(
@@ -39,7 +38,6 @@ export class BookingsService {
   }
 
   private _overlaps(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date) {
-    // [aStart, aEnd) intersects [bStart, bEnd)
     return aStart < bEnd && bStart < aEnd;
   }
 
@@ -127,14 +125,17 @@ export class BookingsService {
     });
     if (!loc) throw new BadRequestException('Location not found');
 
-    // базовая проверка на то, что локация “живая”
     if (!loc.baysCount || loc.baysCount <= 0) {
       throw new BadRequestException('Location has invalid baysCount');
     }
   }
 
-  // ✅ Busy slots (public): return only intervals, no clientId/carId
-  async getBusySlots(args: { locationId: string; bayId: number; from: Date; to: Date }) {
+  async getBusySlots(args: {
+    locationId: string;
+    bayId: number;
+    from: Date;
+    to: Date;
+  }) {
     await this._housekeeping();
 
     const locationId = (args.locationId ?? '').trim();
@@ -146,7 +147,6 @@ export class BookingsService {
     const from = args.from;
     const to = args.to;
 
-    // wider window because bookings can overlap into [from, to]
     const windowStart = new Date(from.getTime() - 24 * 60 * 60 * 1000);
     const windowEnd = new Date(to.getTime() + 24 * 60 * 60 * 1000);
 
@@ -177,8 +177,6 @@ export class BookingsService {
     const intervals = rows
       .filter((b) => {
         if (b.status === BookingStatus.ACTIVE) return true;
-
-        // PENDING_PAYMENT only if not expired
         if (b.status === BookingStatus.PENDING_PAYMENT) {
           if (!b.paymentDueAt) return false;
           return b.paymentDueAt.getTime() > now.getTime();
@@ -188,10 +186,7 @@ export class BookingsService {
       .map((b) => {
         const base = this._serviceDurationOrDefault(b.service?.durationMin);
         const raw = base + (b.bufferMin ?? 0);
-
-        // ✅ округляем занятость вверх к сетке слотов
         const total = this._roundUpToStepMin(raw, BookingsService.SLOT_STEP_MIN);
-
         const start = b.dateTime;
         const end = this._end(start, total);
         return { start, end };
@@ -250,21 +245,19 @@ export class BookingsService {
       throw new BadRequestException('dateTime must be ISO string');
     }
 
-    // запретим создавать в прошлом (с небольшой форой)
     const nowMs = Date.now();
     const graceMs = 30 * 1000;
     if (dt.getTime() < nowMs - graceMs) {
       throw new BadRequestException('Cannot create booking in the past');
     }
 
-    // ✅ locationId (пока: если не передали — берём дефолтную локацию, чтобы не ломать старый клиент)
+    // locationId: если не передали — берём дефолт (совместимость со старым клиентом)
     let locationId = (body.locationId ?? '').trim();
     if (!locationId) {
       locationId = await this._getDefaultLocationId();
     }
     await this._ensureLocationExists(locationId);
 
-    // sanity
     const bayId = this._clampInt(body.bayId, 1, 1, 20);
     const bufferMin = this._clampInt(body.bufferMin, 15, 0, 120);
     const depositRub = this._clampInt(body.depositRub, 500, 0, 1_000_000);
@@ -302,7 +295,6 @@ export class BookingsService {
       BookingStatus.PENDING_PAYMENT,
     ];
 
-    // ✅ 10 минут на оплату (вместо 15)
     const dueAt = new Date(Date.now() + 10 * 60 * 1000);
 
     let created: any;
@@ -313,10 +305,21 @@ export class BookingsService {
           async (tx) => {
             const now = new Date();
 
+            // ✅ 0) membership (auto) + блокировка по локации
+            const cl = await tx.clientLocation.upsert({
+              where: { clientId_locationId: { clientId, locationId } },
+              update: { lastVisitAt: now },
+              create: { clientId, locationId, lastVisitAt: now },
+            });
+
+            if (cl.isBlocked) {
+              throw new ForbiddenException('You are blocked for this location');
+            }
+
             const windowStart = new Date(newStart.getTime() - 24 * 60 * 60 * 1000);
             const windowEnd = new Date(newEnd.getTime() + 24 * 60 * 60 * 1000);
 
-            // 1) проверка конфликта по ПОСТУ в рамках ЛОКАЦИИ
+            // 1) конфликт по посту в рамках локации
             const nearby = await tx.booking.findMany({
               where: {
                 locationId,
@@ -356,7 +359,7 @@ export class BookingsService {
               throw new ConflictException('Selected time slot is already booked');
             }
 
-            // 2) проверка по МАШИНЕ — уже глобально (в любой локации/посту)
+            // 2) конфликт по машине — глобально (в любой локации)
             const carNearby = await tx.booking.findMany({
               where: {
                 carId: body.carId,
@@ -424,11 +427,9 @@ export class BookingsService {
         break;
       } catch (e: any) {
         if (e instanceof Prisma.PrismaClientKnownRequestError) {
-          // Unique constraint violation
           if (e.code === 'P2002') {
             throw new ConflictException('Selected time slot is already booked');
           }
-          // Serializable conflict
           if (e.code === 'P2034') {
             if (attempt < 2) continue;
             throw new ConflictException('Selected time slot is already booked');
@@ -438,7 +439,6 @@ export class BookingsService {
       }
     }
 
-    // ✅ push событие
     this.ws.emitBookingChanged(locationId, bayId);
 
     return created;
@@ -563,7 +563,9 @@ export class BookingsService {
         },
       });
     } catch (e) {
-      throw new ConflictException(`Payment kind ${kind} already exists for this booking`);
+      throw new ConflictException(
+        `Payment kind ${kind} already exists for this booking`,
+      );
     }
 
     const refreshed = await this.prisma.booking.findUnique({

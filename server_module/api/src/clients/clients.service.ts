@@ -5,7 +5,7 @@ import { ClientGender } from '@prisma/client';
 type RegisterBody = {
   phone: string;
   name?: string;
-  gender: 'MALE' | 'FEMALE';
+  gender?: 'MALE' | 'FEMALE';
   birthDate?: string;
 };
 
@@ -17,15 +17,10 @@ export class ClientsService {
     const s = (raw ?? '').trim();
     const digits = s.replaceAll(/[^\d]/g, '');
 
-    // допускаем:
-    // 10 digits -> +7XXXXXXXXXX
-    // 11 digits starting 8 -> +7XXXXXXXXXX
-    // 11 digits starting 7 -> +7XXXXXXXXXX
     if (digits.length === 10) return `+7${digits}`;
     if (digits.length === 11 && digits.startsWith('8'))
       return `+7${digits.substring(1)}`;
     if (digits.length === 11 && digits.startsWith('7')) return `+7${digits}`;
-    // fallback: если уже что-то типа +7..., но там могли остаться не только цифры
     if (s.startsWith('+') && digits.length >= 11) return `+${digits}`;
     throw new BadRequestException('Invalid phone');
   }
@@ -38,12 +33,9 @@ export class ClientsService {
   }
 
   async register(body: RegisterBody) {
-    if (!body || !body.phone)
-      throw new BadRequestException('phone is required');
-    if (!body.gender) throw new BadRequestException('gender is required');
+    if (!body || !body.phone) throw new BadRequestException('phone is required');
 
     const phone = this._normalizeRuPhone(body.phone);
-    const gender = this._parseGender(body.gender);
 
     const name =
       typeof body.name === 'string' && body.name.trim().length > 0
@@ -53,19 +45,23 @@ export class ClientsService {
     let birthDate: Date | null = null;
     if (body.birthDate) {
       const d = new Date(body.birthDate);
-      if (isNaN(d.getTime()))
-        throw new BadRequestException('birthDate must be ISO');
+      if (isNaN(d.getTime())) throw new BadRequestException('birthDate must be ISO');
       birthDate = d;
     }
 
-    // ✅ для демо: "register" идемпотентный — если уже есть по телефону, вернём/обновим
+    const gender =
+      typeof body.gender === 'string' && body.gender.trim().length > 0
+        ? this._parseGender(body.gender)
+        : null;
+
+    // ✅ register идемпотентный
     const client = await this.prisma.client.upsert({
       where: { phone },
-      create: { phone, name, gender, birthDate },
+      create: { phone, name, gender: gender ?? undefined, birthDate },
       update: {
-        // можно обновлять имя/пол/др при повторной регистрации (это нормально для демо)
         name,
-        gender,
+        // обновляем gender только если передали
+        ...(gender ? { gender } : {}),
         birthDate,
       },
     });

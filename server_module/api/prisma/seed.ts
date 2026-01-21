@@ -16,33 +16,23 @@ type LocationSeed = {
 };
 
 async function upsertLocation(loc: LocationSeed) {
-  const existing = await prisma.location.findUnique({ where: { name: loc.name } });
-
-  if (existing) {
-    return prisma.location.update({
-      where: { id: existing.id },
-      data: {
-        address: loc.address,
-        colorHex: loc.colorHex,
-        baysCount: loc.baysCount,
-      },
-    });
-  }
-
-  return prisma.location.create({ data: loc });
+  return prisma.location.upsert({
+    where: { name: loc.name },
+    update: {
+      address: loc.address,
+      colorHex: loc.colorHex,
+      baysCount: loc.baysCount,
+    },
+    create: loc,
+  });
 }
 
 async function upsertService(s: ServiceSeed) {
-  const existing = await prisma.service.findUnique({ where: { name: s.name } });
-
-  if (existing) {
-    return prisma.service.update({
-      where: { id: existing.id },
-      data: { priceRub: s.priceRub, durationMin: s.durationMin },
-    });
-  }
-
-  return prisma.service.create({ data: s });
+  return prisma.service.upsert({
+    where: { name: s.name },
+    update: { priceRub: s.priceRub, durationMin: s.durationMin },
+    create: s,
+  });
 }
 
 async function upsertUser(args: {
@@ -51,22 +41,15 @@ async function upsertUser(args: {
   role: UserRole;
   locationId: string;
 }) {
-  const existing = await prisma.user.findUnique({ where: { phone: args.phone } });
-
-  if (existing) {
-    return prisma.user.update({
-      where: { id: existing.id },
-      data: {
-        name: args.name,
-        role: args.role,
-        locationId: args.locationId,
-        isActive: true,
-      },
-    });
-  }
-
-  return prisma.user.create({
-    data: {
+  return prisma.user.upsert({
+    where: { phone: args.phone },
+    update: {
+      name: args.name,
+      role: args.role,
+      locationId: args.locationId,
+      isActive: true,
+    },
+    create: {
       phone: args.phone,
       name: args.name,
       role: args.role,
@@ -76,25 +59,43 @@ async function upsertUser(args: {
   });
 }
 
+async function ensureBaysForLocation(locationId: string, baysCount: number) {
+  for (let number = 1; number <= baysCount; number++) {
+    await prisma.bay.upsert({
+      where: { locationId_number: { locationId, number } },
+      update: { isActive: true },
+      create: {
+        locationId,
+        number,
+        isActive: true,
+      },
+    });
+  }
+}
+
 async function main() {
   // 1) LOCATIONS (2 шт)
   const locations: LocationSeed[] = [
     {
       name: 'Мойка #1',
       address: 'Локация 1 (заменить позже)',
-      colorHex: '#2D9CDB', // синий (можно другой)
+      colorHex: '#2D9CDB',
       baysCount: 2,
     },
     {
       name: 'Мойка #2',
       address: 'Локация 2 (заменить позже)',
-      colorHex: '#2DBD6E', // зелёный (можно другой)
+      colorHex: '#2DBD6E',
       baysCount: 2,
     },
   ];
 
   const loc1 = await upsertLocation(locations[0]);
   const loc2 = await upsertLocation(locations[1]);
+
+  // 1.1) BAYS (2 поста на локацию)
+  await ensureBaysForLocation(loc1.id, loc1.baysCount);
+  await ensureBaysForLocation(loc2.id, loc2.baysCount);
 
   // 2) SERVICES (с правильными durationMin)
   const services: ServiceSeed[] = [
@@ -108,7 +109,6 @@ async function main() {
   }
 
   // 3) DEMO USERS (потом заменим на нормальный auth)
-  // Owner привяжем к Мойка #1 (можно потом сделать “owner видит все локации” через отдельную модель)
   await upsertUser({
     phone: '+79990000001',
     name: 'Owner Demo',
@@ -130,7 +130,7 @@ async function main() {
     locationId: loc2.id,
   });
 
-  console.log('✅ Seed done: locations(2), services, users');
+  console.log('✅ Seed done: locations(2), bays, services, users');
 }
 
 main()

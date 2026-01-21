@@ -12,7 +12,7 @@ export class ClientsController {
     body: {
       phone: string;
       name?: string;
-      gender: 'MALE' | 'FEMALE';
+      gender?: 'MALE' | 'FEMALE'; // ✅ optional
       birthDate?: string; // ISO
     },
   ) {

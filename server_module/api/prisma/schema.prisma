@@ -32,21 +32,75 @@ enum UserRole {
   WASHER
 }
 
+enum ShiftStatus {
+  OPEN
+  CLOSED
+}
+
+enum AuditType {
+  BOOKING_MOVE
+  BOOKING_DELETE
+  BOOKING_CHANGE_SERVICE
+  BOOKING_CHANGE_BODYTYPE
+  BOOKING_DISCOUNT
+  BOOKING_START
+  BOOKING_FINISH
+
+  BAY_CLOSE
+  BAY_OPEN
+
+  SHIFT_OPEN
+  SHIFT_CLOSE
+
+  CLIENT_BLOCK
+  CLIENT_UNBLOCK
+}
+
 model Location {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  name     String  @unique
-  address  String
-  colorHex String  @default("#2D9CDB")
-  baysCount Int    @default(2)
+  name     String @unique
+  address  String?
+  colorHex String @default("#2D9CDB")
 
+  /// для UI/дефолтов (можно оставить, но Bays — источник правды)
+  baysCount Int @default(2)
+
+  bays     Bay[]
   bookings Booking[]
   users    User[]
   shifts   Shift[]
 
+  /// membership клиентов в этой локации
+  clientLinks ClientLocation[]
+
   @@index([createdAt])
+}
+
+model Bay {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  locationId String
+  location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  /// номер поста внутри локации (1..N)
+  number Int
+
+  /// мгновенно отключить пост (авария/ремонт)
+  isActive Boolean @default(true)
+
+  /// почему отключили (если отключили)
+  closedReason String?
+  closedAt     DateTime?
+  reopenedAt   DateTime?
+
+  @@unique([locationId, number])
+  @@index([locationId])
+  @@index([locationId, isActive])
 }
 
 model Client {
@@ -54,16 +108,55 @@ model Client {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  phone     String   @unique
-  name      String?
-  gender    ClientGender
+  phone String @unique
+  name  String?
+
+  /// для walk-in по телефону делаем optional
+  gender    ClientGender?
   birthDate DateTime?
 
-  cars      Car[]
-  bookings  Booking[]
+  /// LEGACY: глобальная блокировка (оставлено, чтобы не ломать старый код)
+  /// НОВАЯ логика блокировки должна жить в ClientLocation (по локации).
+  isBlocked       Boolean  @default(false)
+  blockReason     String?
+  blockedAt       DateTime?
+  blockedByUserId String?
+
+  cars     Car[]
+  bookings Booking[]
+
+  /// membership по локациям
+  locations ClientLocation[]
 
   @@index([phone])
   @@index([createdAt])
+  @@index([isBlocked])
+}
+
+model ClientLocation {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  clientId   String
+  locationId String
+
+  /// блокировка клиента именно в этой локации
+  isBlocked       Boolean  @default(false)
+  blockReason     String?
+  blockedAt       DateTime?
+  blockedByUserId String?
+
+  /// полезно для аналитики
+  lastVisitAt DateTime?
+
+  client   Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, locationId])
+  @@index([locationId])
+  @@index([clientId])
+  @@index([locationId, isBlocked])
 }
 
 model Car {
@@ -97,9 +190,9 @@ model Service {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  name        String   @unique
+  name        String @unique
   priceRub    Int
-  durationMin Int      @default(30)
+  durationMin Int    @default(30)
 
   bookings Booking[]
 }
@@ -113,7 +206,11 @@ model Booking {
   locationId String
   location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
 
-  /// Время начала услуги
+  /// Привязка к смене (для строгого scope админа)
+  shiftId String?
+  shift   Shift? @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+
+  /// Время начала услуги (план)
   dateTime DateTime
 
   /// Номер поста (1, 2, …) внутри локации
@@ -128,6 +225,13 @@ model Booking {
   /// Комментарий клиента
   comment String?
 
+  /// Комментарий админа (видит admin/owner)
+  adminNote String?
+
+  /// Факт начала/окончания работ
+  startedAt  DateTime?
+  finishedAt DateTime?
+
   /// Статус записи
   status BookingStatus @default(PENDING_PAYMENT)
 
@@ -141,7 +245,7 @@ model Booking {
   carId     String
   serviceId String
 
-  // ✅ прямая ссылка на клиента (пока nullable для демо)
+  /// прямая ссылка на клиента (nullable для демо)
   clientId String?
   client   Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
 
@@ -152,6 +256,8 @@ model Booking {
 
   @@index([locationId])
   @@index([locationId, bayId])
+  @@index([locationId, dateTime])
+  @@index([shiftId])
   @@index([carId])
   @@index([serviceId])
   @@index([clientId])
@@ -167,7 +273,7 @@ model Payment {
   paidAt    DateTime @default(now())
 
   bookingId String
-  booking   Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
 
   amountRub Int
   method    String
@@ -177,7 +283,7 @@ model Payment {
   @@index([paidAt])
   @@index([kind])
 
-  // 1 депозит + 1 доплата (если захочешь больше — уберём это ограничение)
+  /// 1 депозит + 1 доплата (если захочешь больше — уберём это ограничение)
   @@unique([bookingId, kind])
 }
 
@@ -186,9 +292,9 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  phone   String   @unique
-  name    String?
-  role    UserRole
+  phone    String @unique
+  name     String?
+  role     UserRole
   isActive Boolean @default(true)
 
   // scope
@@ -200,9 +306,11 @@ model User {
   shiftCloseAt DateTime?
 
   shifts Shift[]
+  audits AuditEvent[]
 
   @@index([role])
   @@index([locationId])
+  @@index([isActive])
 }
 
 model Shift {
@@ -212,12 +320,43 @@ model Shift {
   locationId String
   adminId    String
 
-  openedAt DateTime
+  status   ShiftStatus @default(OPEN)
+  openedAt DateTime    @default(now())
   closedAt DateTime?
 
   location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
   admin    User     @relation(fields: [adminId], references: [id], onDelete: Cascade)
 
+  bookings Booking[]
+
   @@index([locationId, openedAt])
   @@index([adminId, openedAt])
+  @@index([status])
+}
+
+model AuditEvent {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  type AuditType
+
+  locationId String?
+  userId     String?
+  shiftId    String?
+  bookingId  String?
+  clientId   String?
+
+  /// обязательное поле для “опасных” операций
+  reason  String?
+  payload Json?
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([type])
+  @@index([createdAt])
+  @@index([locationId])
+  @@index([userId])
+  @@index([shiftId])
+  @@index([bookingId])
+  @@index([clientId])
 }

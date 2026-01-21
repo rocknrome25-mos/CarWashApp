@@ -944,7 +944,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                       ),
                       const SizedBox(height: 8),
                       DropdownButtonFormField<String>(
-                        value: loc?.id,
+                        initialValue: loc?.id,
                         decoration: const InputDecoration(
                           border: OutlineInputBorder(),
                           isDense: true,
@@ -1027,7 +1027,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
               const SizedBox(height: 12),
 
               DropdownButtonFormField<String>(
-                value: safeCarId,
+                initialValue: safeCarId,
                 decoration: const InputDecoration(
                   labelText: 'Авто',
                   border: OutlineInputBorder(),
@@ -1050,7 +1050,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
               const SizedBox(height: 12),
 
               DropdownButtonFormField<String>(
-                value: safeServiceId,
+                initialValue: safeServiceId,
                 decoration: const InputDecoration(
                   labelText: 'Услуга',
                   border: OutlineInputBorder(),
