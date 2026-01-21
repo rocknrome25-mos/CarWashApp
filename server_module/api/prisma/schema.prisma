@@ -12,6 +12,43 @@ enum ClientGender {
   FEMALE
 }
 
+enum BookingStatus {
+  ACTIVE
+  CANCELED
+  COMPLETED
+  PENDING_PAYMENT
+}
+
+enum PaymentKind {
+  DEPOSIT
+  REMAINING
+  EXTRA
+  REFUND
+}
+
+enum UserRole {
+  ADMIN
+  OWNER
+  WASHER
+}
+
+model Location {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  name     String  @unique
+  address  String
+  colorHex String  @default("#2D9CDB")
+  baysCount Int    @default(2)
+
+  bookings Booking[]
+  users    User[]
+  shifts   Shift[]
+
+  @@index([createdAt])
+}
+
 model Client {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
@@ -60,25 +97,11 @@ model Service {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  name        String  @unique
+  name        String   @unique
   priceRub    Int
-  durationMin Int     @default(30)
+  durationMin Int      @default(30)
 
   bookings Booking[]
-}
-
-enum BookingStatus {
-  ACTIVE
-  CANCELED
-  COMPLETED
-  PENDING_PAYMENT
-}
-
-enum PaymentKind {
-  DEPOSIT
-  REMAINING
-  EXTRA
-  REFUND
 }
 
 model Booking {
@@ -86,10 +109,14 @@ model Booking {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  /// Локация (мойка)
+  locationId String
+  location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
   /// Время начала услуги
   dateTime DateTime
 
-  /// Номер поста (1, 2, …)
+  /// Номер поста (1, 2, …) внутри локации
   bayId Int @default(1)
 
   /// Буфер в минутах (обычно 15)
@@ -123,6 +150,8 @@ model Booking {
 
   payments Payment[]
 
+  @@index([locationId])
+  @@index([locationId, bayId])
   @@index([carId])
   @@index([serviceId])
   @@index([clientId])
@@ -150,4 +179,45 @@ model Payment {
 
   // 1 депозит + 1 доплата (если захочешь больше — уберём это ограничение)
   @@unique([bookingId, kind])
+}
+
+model User {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  phone   String   @unique
+  name    String?
+  role    UserRole
+  isActive Boolean @default(true)
+
+  // scope
+  locationId String
+  location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  // для admin-логики (быстро понять есть ли открытая смена)
+  shiftOpenAt  DateTime?
+  shiftCloseAt DateTime?
+
+  shifts Shift[]
+
+  @@index([role])
+  @@index([locationId])
+}
+
+model Shift {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  locationId String
+  adminId    String
+
+  openedAt DateTime
+  closedAt DateTime?
+
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  admin    User     @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@index([locationId, openedAt])
+  @@index([adminId, openedAt])
 }

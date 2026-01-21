@@ -1,5 +1,4 @@
 import 'dart:async';
-
 import 'package:flutter/material.dart';
 import '../../core/data/app_repository.dart';
 import '../../core/models/booking.dart';
@@ -43,6 +42,10 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
   static const Color _blueLine = Color(0xFF2D9CDB);
 
   final _formKey = GlobalKey<FormState>();
+
+  // ✅ locations
+  List<LocationLite> _locations = const [];
+  LocationLite? _location;
 
   List<Car> _cars = const [];
   List<Service> _services = const [];
@@ -264,7 +267,24 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     return null;
   }
 
+  Color _hexToColorSafe(
+    String hex, {
+    Color fallback = const Color(0xFF2D9CDB),
+  }) {
+    final s = hex.trim();
+    if (s.isEmpty) return fallback;
+    var h = s;
+    if (h.startsWith('#')) h = h.substring(1);
+    if (h.length == 6) h = 'FF$h';
+    final v = int.tryParse(h, radix: 16);
+    if (v == null) return fallback;
+    return Color(v);
+  }
+
   Future<void> _refreshBusy({bool force = false}) async {
+    final locId = _location?.id;
+    if (locId == null || locId.trim().isEmpty) return;
+
     final day = _selectedDate;
     final from = DateTime(day.year, day.month, day.day, _openHour, 0);
     final to = DateTime(day.year, day.month, day.day, _closeHour, 0);
@@ -272,12 +292,14 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     final List<List<DateTimeRange>> results =
         await Future.wait<List<DateTimeRange>>([
           widget.repo.getBusySlots(
+            locationId: locId,
             bayId: 1,
             from: from,
             to: to,
             forceRefresh: force,
           ),
           widget.repo.getBusySlots(
+            locationId: locId,
             bayId: 2,
             from: from,
             to: to,
@@ -305,12 +327,29 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
     try {
       final results = await Future.wait([
+        widget.repo.getLocations(forceRefresh: true),
         widget.repo.getCars(forceRefresh: true),
         widget.repo.getServices(forceRefresh: true),
       ]);
 
-      final cars = results[0] as List<Car>;
-      final services = results[1] as List<Service>;
+      final locations = results[0] as List<LocationLite>;
+      final cars = results[1] as List<Car>;
+      final services = results[2] as List<Service>;
+
+      LocationLite? selectedLoc = widget.repo.currentLocation;
+      if (selectedLoc == null || selectedLoc.id.trim().isEmpty) {
+        selectedLoc = locations.isNotEmpty ? locations.first : null;
+        if (selectedLoc != null) {
+          await widget.repo.setCurrentLocation(selectedLoc);
+        }
+      } else {
+        if (!locations.any((x) => x.id == selectedLoc!.id)) {
+          selectedLoc = locations.isNotEmpty ? locations.first : null;
+          if (selectedLoc != null) {
+            await widget.repo.setCurrentLocation(selectedLoc);
+          }
+        }
+      }
 
       final String? selectedCarId = cars.isNotEmpty ? cars.first.id : null;
 
@@ -326,6 +365,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
       if (!mounted) return;
 
       setState(() {
+        _locations = locations;
+        _location = selectedLoc;
+
         _cars = cars;
         _services = services;
 
@@ -451,7 +493,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     await _refreshBusy(force: true);
   }
 
-  // ✅ иконки постов — пути ожидаемые
   String _bayIconAsset(_BayMode mode) {
     switch (mode) {
       case _BayMode.any:
@@ -482,14 +523,11 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     );
   }
 
-  // ✅ НОВЫЙ АККОРДЕОН: справа вплотную, без overflow
   Widget _lineSelectorAccordion() {
     final cs = Theme.of(context).colorScheme;
 
     const double h = 56;
     const double gap = 8;
-
-    // фикс ширины маленьких карточек справа
     const double smallW = 54;
 
     Widget item({
@@ -556,7 +594,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
       width: double.infinity,
       child: Row(
         children: [
-          // ✅ Любая линия занимает всё свободное место
           Expanded(
             child: item(
               mode: _BayMode.any,
@@ -596,8 +633,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     for (final s in allSlots) {
       if (isSelectedDayToday && s.isBefore(minNow)) continue;
       if (_isBusySlot(s)) continue;
-
-      // ✅ показываем клиенту только свободные слоты
       visible.add(s);
     }
     return visible;
@@ -712,6 +747,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
   Future<void> _save() async {
     if (_saving) return;
     if (!_formKey.currentState!.validate()) return;
+    if (_location == null) return;
     if (carId == null || serviceId == null) return;
 
     final messenger = ScaffoldMessenger.of(context);
@@ -743,6 +779,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
     try {
       final Booking booking = await widget.repo.createBooking(
+        locationId: _location!.id,
         carId: carId!,
         serviceId: serviceId!,
         dateTime: slot,
@@ -788,6 +825,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
   bool _canProceed() {
     if (_saving) return false;
+    if (_location == null) return false;
     if (_cars.isEmpty || _services.isEmpty) return false;
     if (carId == null || serviceId == null) return false;
 
@@ -872,6 +910,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
         ? _pickedBayColor(context, _pickedBayIdForAny!)
         : _bayStripeColor(context, _bayMode);
 
+    final loc = _location;
+    final locColor = _hexToColorSafe(loc?.colorHex ?? '#2D9CDB');
+
     return Scaffold(
       appBar: AppBar(title: const Text('Создать запись')),
       body: Padding(
@@ -880,8 +921,113 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
           key: _formKey,
           child: ListView(
             children: [
+              // ✅ LOCATION SELECTOR
+              if (_locations.isNotEmpty)
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(16),
+                    color: Colors.black.withValues(alpha: 0.03),
+                    border: Border.all(
+                      color: cs.outlineVariant.withValues(alpha: 0.6),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'МОЙКА / ЛОКАЦИЯ',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 12,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      DropdownButtonFormField<String>(
+                        value: loc?.id,
+                        decoration: const InputDecoration(
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                        items: _locations.map((l) {
+                          final c = _hexToColorSafe(l.colorHex);
+                          return DropdownMenuItem<String>(
+                            value: l.id,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  width: 10,
+                                  height: 10,
+                                  decoration: BoxDecoration(
+                                    color: c,
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                // ✅ ВАЖНО: НЕ Expanded в dropdown overlay
+                                Flexible(
+                                  child: Text(
+                                    '${l.name} — ${l.address}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }).toList(),
+                        onChanged: (id) async {
+                          if (id == null) return;
+                          final picked = _locations.firstWhere(
+                            (x) => x.id == id,
+                          );
+                          await widget.repo.setCurrentLocation(picked);
+                          if (!mounted) return;
+                          setState(() {
+                            _location = picked;
+                            _selectedSlotStart = null;
+                            _pickedBayIdForAny = null;
+                          });
+                          await _refreshBusy(force: true);
+                        },
+                        validator: (_) {
+                          if (_location == null) return 'Выбери локацию';
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Container(
+                            width: 10,
+                            height: 10,
+                            decoration: BoxDecoration(
+                              color: locColor,
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Убедись, что выбрана правильная мойка перед бронированием.',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.black.withValues(alpha: 0.7),
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+
+              const SizedBox(height: 12),
+
               DropdownButtonFormField<String>(
-                initialValue: safeCarId,
+                value: safeCarId,
                 decoration: const InputDecoration(
                   labelText: 'Авто',
                   border: OutlineInputBorder(),
@@ -904,7 +1050,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
               const SizedBox(height: 12),
 
               DropdownButtonFormField<String>(
-                initialValue: safeServiceId,
+                value: safeServiceId,
                 decoration: const InputDecoration(
                   labelText: 'Услуга',
                   border: OutlineInputBorder(),

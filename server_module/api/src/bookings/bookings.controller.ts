@@ -15,13 +15,19 @@ export class BookingsController {
   constructor(private readonly bookingsService: BookingsService) {}
 
   // ✅ PUBLIC "busy slots" (no clientId, no carId)
-  // GET /bookings/busy?bayId=1&from=...&to=...
+  // GET /bookings/busy?locationId=...&bayId=1&from=...&to=...
   @Get('busy')
   getBusy(
+    @Query('locationId') locationIdRaw?: string,
     @Query('bayId') bayIdRaw?: string,
     @Query('from') fromRaw?: string,
     @Query('to') toRaw?: string,
   ) {
+    const locationId = (locationIdRaw ?? '').trim();
+    if (!locationId) {
+      throw new BadRequestException('locationId is required');
+    }
+
     const bayIdNum = Number(bayIdRaw);
     const bayId = Number.isFinite(bayIdNum) ? Math.trunc(bayIdNum) : 1;
     if (bayId < 1 || bayId > 20) {
@@ -43,7 +49,7 @@ export class BookingsController {
       throw new BadRequestException('to must be greater than from');
     }
 
-    return this.bookingsService.getBusySlots({ bayId, from, to });
+    return this.bookingsService.getBusySlots({ locationId, bayId, from, to });
   }
 
   // GET /bookings?includeCanceled=true&clientId=...
@@ -66,6 +72,7 @@ export class BookingsController {
       carId: string;
       serviceId: string;
       dateTime: string;
+      locationId?: string; // ✅ новое
       bayId?: number;
       depositRub?: number;
       bufferMin?: number;

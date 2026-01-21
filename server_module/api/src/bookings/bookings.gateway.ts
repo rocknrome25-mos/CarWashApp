@@ -4,6 +4,7 @@ import type { Server, WebSocket } from 'ws';
 
 type BookingChangedEvent = {
   type: 'booking.changed';
+  locationId: string;
   bayId: number;
   at: string; // ISO UTC
 };
@@ -16,9 +17,10 @@ export class BookingsGateway {
   @WebSocketServer()
   server!: Server;
 
-  emitBookingChanged(bayId: number) {
+  emitBookingChanged(locationId: string, bayId: number) {
     const payload: BookingChangedEvent = {
       type: 'booking.changed',
+      locationId,
       bayId,
       at: new Date().toISOString(),
     };

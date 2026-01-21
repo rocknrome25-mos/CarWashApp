@@ -1,4 +1,3 @@
-// C:\dev\carwash\client_module\lib\core\data\api_repository.dart
 import 'package:flutter/material.dart';
 
 import '../api/api_client.dart';
@@ -18,6 +17,7 @@ class ApiRepository implements AppRepository {
   final RealtimeClient realtime;
 
   static const _kClient = 'current_client';
+  static const _kLocation = 'current_location';
 
   ApiRepository({
     required this.api,
@@ -44,6 +44,7 @@ class ApiRepository implements AppRepository {
   @override
   Future<void> logout() async {
     cache.invalidate(_kClient);
+    cache.invalidate(_kLocation);
     cache.invalidate('cars');
     cache.invalidate('bookings_all');
     cache.invalidate('bookings_active');
@@ -56,6 +57,55 @@ class ApiRepository implements AppRepository {
       throw Exception('Нет активного клиента. Перезапусти и войди заново.');
     }
     return cid.trim();
+  }
+
+  // ---------------- LOCATIONS ----------------
+
+  @override
+  LocationLite? get currentLocation => cache.get<LocationLite>(_kLocation);
+
+  @override
+  Future<void> setCurrentLocation(LocationLite? loc) async {
+    if (loc == null) {
+      cache.invalidate(_kLocation);
+    } else {
+      cache.set(_kLocation, loc, ttl: const Duration(days: 365));
+    }
+    cache.invalidatePrefix('busy_slots_');
+  }
+
+  @override
+  Future<List<LocationLite>> getLocations({bool forceRefresh = false}) async {
+    const key = 'locations';
+
+    if (!forceRefresh) {
+      final cached = cache.get<List<LocationLite>>(key);
+      if (cached != null) return cached;
+    }
+
+    final data = await api.getJson('/locations') as List;
+    final list = data
+        .map((e) => LocationLite.fromJson(e as Map<String, dynamic>))
+        .toList();
+
+    cache.set(key, list, ttl: const Duration(minutes: 5));
+
+    // ✅ дефолт: если локация ещё не выбрана — ставим первую
+    if (currentLocation == null && list.isNotEmpty) {
+      await setCurrentLocation(list.first);
+    }
+
+    return list;
+  }
+
+  String _effectiveLocationIdOrThrow(String? incoming) {
+    final v = (incoming ?? '').trim();
+    if (v.isNotEmpty) return v;
+
+    final cached = currentLocation?.id;
+    if (cached != null && cached.trim().isNotEmpty) return cached.trim();
+
+    throw Exception('Не выбрана локация. Обнови список локаций и выбери мойку.');
   }
 
   // ---------------- REALTIME ----------------
@@ -91,6 +141,10 @@ class ApiRepository implements AppRepository {
 
     final c = Client.fromJson(j);
     await setCurrentClient(c);
+
+    // ✅ подгружаем локации сразу (и выставляем дефолт)
+    await getLocations(forceRefresh: true);
+
     return c;
   }
 
@@ -111,6 +165,10 @@ class ApiRepository implements AppRepository {
 
     final c = Client.fromJson(j);
     await setCurrentClient(c);
+
+    // ✅ подгружаем локации сразу (и выставляем дефолт)
+    await getLocations(forceRefresh: true);
+
     return c;
   }
 
@@ -226,16 +284,18 @@ class ApiRepository implements AppRepository {
 
   @override
   Future<List<DateTimeRange>> getBusySlots({
+    required String locationId,
     required int bayId,
     required DateTime from,
     required DateTime to,
     bool forceRefresh = false,
   }) async {
+    final locId = _effectiveLocationIdOrThrow(locationId);
+
     final fromUtc = from.toUtc().toIso8601String();
     final toUtc = to.toUtc().toIso8601String();
 
-    // ✅ ВАЖНО: скобки, иначе будет bayId_ / fromUtc_
-    final key = 'busy_slots_${bayId}_${fromUtc}_$toUtc';
+    final key = 'busy_slots_${locId}_${bayId}_${fromUtc}_$toUtc';
 
     if (!forceRefresh) {
       final cached = cache.get<List<DateTimeRange>>(key);
@@ -243,6 +303,7 @@ class ApiRepository implements AppRepository {
     }
 
     final query = <String, String>{
+      'locationId': locId,
       'bayId': bayId.toString(),
       'from': fromUtc,
       'to': toUtc,
@@ -263,6 +324,7 @@ class ApiRepository implements AppRepository {
 
   @override
   Future<Booking> createBooking({
+    required String locationId,
     required String carId,
     required String serviceId,
     required DateTime dateTime,
@@ -272,8 +334,10 @@ class ApiRepository implements AppRepository {
     String? comment,
   }) async {
     final cid = _requireClientId();
+    final locId = _effectiveLocationIdOrThrow(locationId);
 
     final payload = <String, dynamic>{
+      'locationId': locId,
       'carId': carId,
       'serviceId': serviceId,
       'dateTime': dateTime.toUtc().toIso8601String(),

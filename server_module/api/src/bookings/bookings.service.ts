@@ -57,9 +57,6 @@ export class BookingsService {
   private async _expirePendingPayments(): Promise<void> {
     const now = new Date();
 
-    // ⚠️ здесь updateMany — без деталей bayId.
-    // realtime для expire можно добавить позже (через выборку перед updateMany),
-    // но для MVP важнее create/pay/cancel.
     await this.prisma.booking.updateMany({
       where: {
         status: BookingStatus.PENDING_PAYMENT,
@@ -93,10 +90,7 @@ export class BookingsService {
       .filter((b) => {
         const base = this._serviceDurationOrDefault(b.service?.durationMin);
         const raw = base + (b.bufferMin ?? 0);
-        const total = this._roundUpToStepMin(
-          raw,
-          BookingsService.SLOT_STEP_MIN,
-        );
+        const total = this._roundUpToStepMin(raw, BookingsService.SLOT_STEP_MIN);
         const end = this._end(b.dateTime, total);
         return end.getTime() < now.getTime();
       })
@@ -115,15 +109,44 @@ export class BookingsService {
     await this._autoCompletePastActive();
   }
 
+  private async _getDefaultLocationId(): Promise<string> {
+    const loc = await this.prisma.location.findFirst({
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    });
+    if (!loc) {
+      throw new BadRequestException('No locations configured. Run prisma seed.');
+    }
+    return loc.id;
+  }
+
+  private async _ensureLocationExists(locationId: string): Promise<void> {
+    const loc = await this.prisma.location.findUnique({
+      where: { id: locationId },
+      select: { id: true, baysCount: true },
+    });
+    if (!loc) throw new BadRequestException('Location not found');
+
+    // базовая проверка на то, что локация “живая”
+    if (!loc.baysCount || loc.baysCount <= 0) {
+      throw new BadRequestException('Location has invalid baysCount');
+    }
+  }
+
   // ✅ Busy slots (public): return only intervals, no clientId/carId
-  async getBusySlots(args: { bayId: number; from: Date; to: Date }) {
+  async getBusySlots(args: { locationId: string; bayId: number; from: Date; to: Date }) {
     await this._housekeeping();
+
+    const locationId = (args.locationId ?? '').trim();
+    if (!locationId) throw new BadRequestException('locationId is required');
+
+    await this._ensureLocationExists(locationId);
 
     const bayId = args.bayId;
     const from = args.from;
     const to = args.to;
 
-    // We include a wider window because bookings can overlap into [from, to]
+    // wider window because bookings can overlap into [from, to]
     const windowStart = new Date(from.getTime() - 24 * 60 * 60 * 1000);
     const windowEnd = new Date(to.getTime() + 24 * 60 * 60 * 1000);
 
@@ -134,6 +157,7 @@ export class BookingsService {
 
     const rows = await this.prisma.booking.findMany({
       where: {
+        locationId,
         bayId,
         status: { in: busyStatuses },
         dateTime: { gte: windowStart, lte: windowEnd },
@@ -166,19 +190,14 @@ export class BookingsService {
         const raw = base + (b.bufferMin ?? 0);
 
         // ✅ округляем занятость вверх к сетке слотов
-        const total = this._roundUpToStepMin(
-          raw,
-          BookingsService.SLOT_STEP_MIN,
-        );
+        const total = this._roundUpToStepMin(raw, BookingsService.SLOT_STEP_MIN);
 
         const start = b.dateTime;
         const end = this._end(start, total);
         return { start, end };
       })
-      // keep only those that can affect [from,to)
       .filter((x) => this._overlaps(x.start, x.end, from, to));
 
-    // Return ISO strings (UTC)
     return intervals.map((x) => ({
       start: x.start.toISOString(),
       end: x.end.toISOString(),
@@ -201,6 +220,7 @@ export class BookingsService {
         car: true,
         service: true,
         payments: { orderBy: { paidAt: 'asc' } },
+        location: true,
       },
     });
   }
@@ -209,6 +229,7 @@ export class BookingsService {
     carId: string;
     serviceId: string;
     dateTime: string;
+    locationId?: string;
     bayId?: number;
     depositRub?: number;
     bufferMin?: number;
@@ -235,6 +256,13 @@ export class BookingsService {
     if (dt.getTime() < nowMs - graceMs) {
       throw new BadRequestException('Cannot create booking in the past');
     }
+
+    // ✅ locationId (пока: если не передали — берём дефолтную локацию, чтобы не ломать старый клиент)
+    let locationId = (body.locationId ?? '').trim();
+    if (!locationId) {
+      locationId = await this._getDefaultLocationId();
+    }
+    await this._ensureLocationExists(locationId);
 
     // sanity
     const bayId = this._clampInt(body.bayId, 1, 1, 20);
@@ -264,10 +292,7 @@ export class BookingsService {
 
     const baseDur = this._serviceDurationOrDefault(service.durationMin);
     const rawDur = baseDur + bufferMin;
-    const newDurTotal = this._roundUpToStepMin(
-      rawDur,
-      BookingsService.SLOT_STEP_MIN,
-    );
+    const newDurTotal = this._roundUpToStepMin(rawDur, BookingsService.SLOT_STEP_MIN);
 
     const newStart = dt;
     const newEnd = this._end(newStart, newDurTotal);
@@ -277,7 +302,8 @@ export class BookingsService {
       BookingStatus.PENDING_PAYMENT,
     ];
 
-    const dueAt = new Date(Date.now() + 15 * 60 * 1000);
+    // ✅ 10 минут на оплату (вместо 15)
+    const dueAt = new Date(Date.now() + 10 * 60 * 1000);
 
     let created: any;
 
@@ -290,8 +316,10 @@ export class BookingsService {
             const windowStart = new Date(newStart.getTime() - 24 * 60 * 60 * 1000);
             const windowEnd = new Date(newEnd.getTime() + 24 * 60 * 60 * 1000);
 
+            // 1) проверка конфликта по ПОСТУ в рамках ЛОКАЦИИ
             const nearby = await tx.booking.findMany({
               where: {
+                locationId,
                 status: { in: busyStatuses },
                 bayId,
                 dateTime: { gte: windowStart, lte: windowEnd },
@@ -318,10 +346,7 @@ export class BookingsService {
             const anyOverlap = relevant.find((b) => {
               const bBase = this._serviceDurationOrDefault(b.service?.durationMin);
               const bRaw = bBase + (b.bufferMin ?? 0);
-              const bTotal = this._roundUpToStepMin(
-                bRaw,
-                BookingsService.SLOT_STEP_MIN,
-              );
+              const bTotal = this._roundUpToStepMin(bRaw, BookingsService.SLOT_STEP_MIN);
               const bStart = b.dateTime;
               const bEnd = this._end(bStart, bTotal);
               return this._overlaps(newStart, newEnd, bStart, bEnd);
@@ -331,15 +356,35 @@ export class BookingsService {
               throw new ConflictException('Selected time slot is already booked');
             }
 
-            const carOverlap = relevant.find((b) => {
-              if (b.carId !== body.carId) return false;
+            // 2) проверка по МАШИНЕ — уже глобально (в любой локации/посту)
+            const carNearby = await tx.booking.findMany({
+              where: {
+                carId: body.carId,
+                status: { in: busyStatuses },
+                dateTime: { gte: windowStart, lte: windowEnd },
+              },
+              select: {
+                id: true,
+                dateTime: true,
+                status: true,
+                paymentDueAt: true,
+                bufferMin: true,
+                service: { select: { durationMin: true } },
+              },
+            });
 
+            const carRelevant = carNearby.filter((b) => {
+              if (b.status === BookingStatus.PENDING_PAYMENT) {
+                if (!b.paymentDueAt) return false;
+                return b.paymentDueAt.getTime() > now.getTime();
+              }
+              return true;
+            });
+
+            const carOverlap = carRelevant.find((b) => {
               const bBase = this._serviceDurationOrDefault(b.service?.durationMin);
               const bRaw = bBase + (b.bufferMin ?? 0);
-              const bTotal = this._roundUpToStepMin(
-                bRaw,
-                BookingsService.SLOT_STEP_MIN,
-              );
+              const bTotal = this._roundUpToStepMin(bRaw, BookingsService.SLOT_STEP_MIN);
               const bStart = b.dateTime;
               const bEnd = this._end(bStart, bTotal);
               return this._overlaps(newStart, newEnd, bStart, bEnd);
@@ -356,6 +401,7 @@ export class BookingsService {
                 dateTime: dt,
                 clientId,
 
+                locationId,
                 bayId,
                 bufferMin,
                 depositRub,
@@ -368,6 +414,7 @@ export class BookingsService {
                 car: true,
                 service: true,
                 payments: { orderBy: { paidAt: 'asc' } },
+                location: true,
               },
             });
           },
@@ -377,9 +424,11 @@ export class BookingsService {
         break;
       } catch (e: any) {
         if (e instanceof Prisma.PrismaClientKnownRequestError) {
+          // Unique constraint violation
           if (e.code === 'P2002') {
             throw new ConflictException('Selected time slot is already booked');
           }
+          // Serializable conflict
           if (e.code === 'P2034') {
             if (attempt < 2) continue;
             throw new ConflictException('Selected time slot is already booked');
@@ -389,8 +438,8 @@ export class BookingsService {
       }
     }
 
-    // ✅ push событие — всем клиентам обновить busy по bayId
-    this.ws.emitBookingChanged(bayId);
+    // ✅ push событие
+    this.ws.emitBookingChanged(locationId, bayId);
 
     return created;
   }
@@ -444,6 +493,7 @@ export class BookingsService {
             car: true,
             service: true,
             payments: { orderBy: { paidAt: 'asc' } },
+            location: true,
           },
         });
       }
@@ -491,11 +541,11 @@ export class BookingsService {
           car: true,
           service: true,
           payments: { orderBy: { paidAt: 'asc' } },
+          location: true,
         },
       });
 
-      // ✅ push
-      this.ws.emitBookingChanged(updated.bayId ?? 1);
+      this.ws.emitBookingChanged(updated.locationId, updated.bayId ?? 1);
 
       return updated;
     }
@@ -522,11 +572,12 @@ export class BookingsService {
         car: true,
         service: true,
         payments: { orderBy: { paidAt: 'asc' } },
+        location: true,
       },
     });
 
     if (refreshed) {
-      this.ws.emitBookingChanged(refreshed.bayId ?? 1);
+      this.ws.emitBookingChanged(refreshed.locationId, refreshed.bayId ?? 1);
     }
 
     return refreshed;
@@ -545,6 +596,7 @@ export class BookingsService {
         bufferMin: true,
         clientId: true,
         bayId: true,
+        locationId: true,
         service: { select: { durationMin: true } },
       },
     });
@@ -558,7 +610,7 @@ export class BookingsService {
     if (existing.status === BookingStatus.CANCELED) {
       return this.prisma.booking.findUnique({
         where: { id },
-        include: { car: true, service: true, payments: true },
+        include: { car: true, service: true, payments: true, location: true },
       });
     }
 
@@ -587,11 +639,10 @@ export class BookingsService {
             ? 'USER_CANCELED_PENDING'
             : 'USER_CANCELED',
       },
-      include: { car: true, service: true, payments: true },
+      include: { car: true, service: true, payments: true, location: true },
     });
 
-    // ✅ push
-    this.ws.emitBookingChanged(updated.bayId ?? (existing.bayId ?? 1));
+    this.ws.emitBookingChanged(updated.locationId, updated.bayId ?? 1);
 
     return updated;
   }
