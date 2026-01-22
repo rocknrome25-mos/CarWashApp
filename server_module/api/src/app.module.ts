@@ -9,6 +9,7 @@ import { ClientsModule } from './clients/clients.module';
 import { LocationsModule } from './locations/locations.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ServicesModule } from './services/services.module';
+import { ConfigModule } from './config/config.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { ServicesModule } from './services/services.module';
     ClientsModule,
     LocationsModule,
     AdminModule,
+    ConfigModule,
   ],
   controllers: [AppController],
   providers: [AppService],

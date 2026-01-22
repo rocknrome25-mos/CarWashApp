@@ -26,12 +26,24 @@ class _CalendarPageState extends State<CalendarPage> {
   bool loading = true;
   String? error;
   List<dynamic> bookings = [];
-  late String ymd;
+  DateTime selectedDay = DateTime.now();
+
+  bool get _cashEnabled => widget.session.featureOn('CASH_DRAWER', defaultValue: true);
+
+  String get _ymd => DateFormat('yyyy-MM-dd').format(selectedDay);
+
+  String _ruTitle() {
+    final d = selectedDay;
+    final dayName = DateFormat('EEEE', 'ru_RU').format(d);
+    final date = DateFormat('d MMMM y', 'ru_RU').format(d);
+    return '${_cap(dayName)} • $date';
+  }
+
+  String _cap(String s) => s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
 
   @override
   void initState() {
     super.initState();
-    ymd = DateFormat('yyyy-MM-dd').format(DateTime.now());
     _load();
   }
 
@@ -44,32 +56,15 @@ class _CalendarPageState extends State<CalendarPage> {
       final list = await widget.api.calendarDay(
         widget.session.userId,
         widget.session.activeShiftId!,
-        ymd,
+        _ymd,
       );
+      if (!mounted) return;
       setState(() => bookings = list);
     } catch (e) {
+      if (!mounted) return;
       setState(() => error = e.toString());
     } finally {
-      setState(() => loading = false);
-    }
-  }
-
-  Future<void> _closeShift() async {
-    try {
-      await widget.api.closeShift(
-        widget.session.userId,
-        widget.session.activeShiftId!,
-      );
-      await widget.store.clear();
-      if (!mounted) return;
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(
-          builder: (_) => LoginPage(api: widget.api, store: widget.store),
-        ),
-        (r) => false,
-      );
-    } catch (e) {
-      setState(() => error = e.toString());
+      if (mounted) setState(() => loading = false);
     }
   }
 
@@ -93,89 +88,309 @@ class _CalendarPageState extends State<CalendarPage> {
     }
   }
 
+  Future<void> _closeShiftNoCash() async {
+    final userId = widget.session.userId;
+    final shiftId = widget.session.activeShiftId!;
+    try {
+      await widget.api.closeShift(userId, shiftId);
+      await widget.store.clear();
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => LoginPage(api: widget.api, store: widget.store)),
+        (r) => false,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => error = e.toString());
+    }
+  }
+
+  Future<void> _closeShiftWithCash() async {
+    final userId = widget.session.userId;
+    final shiftId = widget.session.activeShiftId!;
+
+    try {
+      final exp = await widget.api.cashExpected(userId, shiftId);
+      if (!mounted) return;
+
+      final expectedRub = (exp['expectedRub'] as num).toInt();
+
+      final countedCtrl = TextEditingController(text: expectedRub.toString());
+      final handoverCtrl = TextEditingController(text: '0');
+      final keepCtrl = TextEditingController(text: expectedRub.toString());
+      final noteCtrl = TextEditingController(text: '');
+
+      final ok = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogCtx) {
+          return StatefulBuilder(
+            builder: (ctx, setStateDialog) {
+              final counted = int.tryParse(countedCtrl.text.trim()) ?? 0;
+              final diff = counted - expectedRub;
+
+              return AlertDialog(
+                title: const Text('Закрытие кассы'),
+                content: SingleChildScrollView(
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          const Expanded(child: Text('Ожидаемая сумма наличных')),
+                          Text('$expectedRub ₽', style: const TextStyle(fontWeight: FontWeight.w600)),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          const Expanded(child: Text('Разница (факт - ожидаемая)')),
+                          Text(
+                            '${diff >= 0 ? '+' : ''}$diff ₽',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              color: diff == 0 ? Colors.green : Colors.red,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: countedCtrl,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(labelText: 'Фактически в кассе (₽)'),
+                        onChanged: (_) => setStateDialog(() {}),
+                      ),
+                      TextField(
+                        controller: handoverCtrl,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(labelText: 'Сдать владельцу (₽)'),
+                      ),
+                      TextField(
+                        controller: keepCtrl,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(labelText: 'Оставить в кассе (₽)'),
+                      ),
+                      TextField(
+                        controller: noteCtrl,
+                        decoration: const InputDecoration(labelText: 'Комментарий (необязательно)'),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Важно: "Сдать" + "Оставить" должно равняться "Фактически в кассе".',
+                        style: TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                    ],
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(dialogCtx).pop(false),
+                    child: const Text('Отмена'),
+                  ),
+                  ElevatedButton(
+                    onPressed: () => Navigator.of(dialogCtx).pop(true),
+                    child: const Text('Закрыть кассу и смену'),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      );
+
+      if (ok != true) return;
+
+      final counted = int.tryParse(countedCtrl.text.trim()) ?? 0;
+      final handover = int.tryParse(handoverCtrl.text.trim()) ?? 0;
+      final keep = int.tryParse(keepCtrl.text.trim()) ?? 0;
+      final note = noteCtrl.text.trim().isEmpty ? null : noteCtrl.text.trim();
+
+      await widget.api.cashClose(
+        userId,
+        shiftId,
+        countedRub: counted,
+        handoverRub: handover,
+        keepRub: keep,
+        note: note,
+      );
+
+      await widget.api.closeShift(userId, shiftId);
+
+      await widget.store.clear();
+      if (!mounted) return;
+
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => LoginPage(api: widget.api, store: widget.store)),
+        (r) => false,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => error = e.toString());
+    }
+  }
+
+  Future<void> _closeShift() async {
+    if (_cashEnabled) {
+      await _closeShiftWithCash();
+    } else {
+      await _closeShiftNoCash();
+    }
+  }
+
+  Widget _paymentBadges(Map<String, dynamic> b) {
+    final badges = (b['paymentBadges'] is List)
+        ? (b['paymentBadges'] as List).map((x) => x.toString()).toList()
+        : <String>[];
+
+    final ps = (b['paymentStatus'] ?? '').toString();
+    if (badges.isEmpty && ps.isEmpty) return const SizedBox.shrink();
+
+    Color psBg;
+    if (ps == 'PAID') {
+      psBg = Colors.green.withValues(alpha: 0.15);
+    } else if (ps == 'PARTIAL') {
+      psBg = Colors.orange.withValues(alpha: 0.15);
+    } else {
+      psBg = Colors.red.withValues(alpha: 0.15);
+    }
+
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      children: [
+        for (final x in badges)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(),
+            ),
+            child: Text(x, style: const TextStyle(fontSize: 12)),
+          ),
+        if (ps.isNotEmpty)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              color: psBg,
+            ),
+            child: Text(ps, style: const TextStyle(fontSize: 12)),
+          ),
+      ],
+    );
+  }
+
+  void _shiftDay(int deltaDays) {
+    setState(() => selectedDay = selectedDay.add(Duration(days: deltaDays)));
+    _load();
+  }
+
   @override
   Widget build(BuildContext context) {
     final shiftId = widget.session.activeShiftId ?? '';
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('Calendar ($ymd)'),
+        title: Text(_ruTitle()),
         actions: [
+          IconButton(tooltip: 'Вчера', onPressed: () => _shiftDay(-1), icon: const Icon(Icons.chevron_left)),
+          IconButton(
+            tooltip: 'Сегодня',
+            onPressed: () {
+              setState(() => selectedDay = DateTime.now());
+              _load();
+            },
+            icon: const Icon(Icons.today),
+          ),
+          IconButton(tooltip: 'Завтра', onPressed: () => _shiftDay(1), icon: const Icon(Icons.chevron_right)),
           IconButton(icon: const Icon(Icons.refresh), onPressed: _load),
-          TextButton(onPressed: _closeShift, child: const Text('Close shift')),
+          TextButton(onPressed: _closeShift, child: const Text('Закрыть смену')),
           const SizedBox(width: 8),
         ],
       ),
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : error != null
-          ? Center(
-              child: Text(error!, style: const TextStyle(color: Colors.red)),
-            )
-          : bookings.isEmpty
-          ? const Center(child: Text('No bookings'))
-          : ListView.separated(
-              itemCount: bookings.length,
-              separatorBuilder: (_, __) => const Divider(height: 1),
-              itemBuilder: (context, i) {
-                final b = bookings[i] as Map<String, dynamic>;
-                final status = (b['status'] ?? '').toString();
-                final serviceName =
-                    b['service']?['name']?.toString() ?? 'Service';
-                final bayId = b['bayId']?.toString() ?? '';
-                final dateTimeIso = b['dateTime']?.toString() ?? '';
-                final startedAt = b['startedAt']?.toString();
-                final finishedAt = b['finishedAt']?.toString();
-                final clientName = b['client']?['name']?.toString();
-                final clientPhone = b['client']?['phone']?.toString();
-                final clientTitle =
-                    (clientName != null && clientName.isNotEmpty)
-                    ? clientName
-                    : (clientPhone ?? '');
+              ? Center(child: Text(error!, style: const TextStyle(color: Colors.red)))
+              : bookings.isEmpty
+                  ? const Center(child: Text('Нет записей'))
+                  : ListView.separated(
+                      itemCount: bookings.length,
+                      separatorBuilder: (context, index) => const Divider(height: 1),
+                      itemBuilder: (context, i) {
+                        final b = bookings[i] as Map<String, dynamic>;
+                        final status = (b['status'] ?? '').toString();
 
-                final time = dateTimeIso.isNotEmpty
-                    ? _fmtTime(dateTimeIso)
-                    : '--:--';
-                final badgeColor = _statusColor(status);
+                        final serviceName = b['service']?['name']?.toString() ?? 'Услуга';
+                        final bayId = b['bayId']?.toString() ?? '';
+                        final dateTimeIso = b['dateTime']?.toString() ?? '';
+                        final startedAt = b['startedAt']?.toString();
+                        final finishedAt = b['finishedAt']?.toString();
 
-                final timing = [
-                  if (startedAt != null) 'start ${_fmtTime(startedAt)}',
-                  if (finishedAt != null) 'finish ${_fmtTime(finishedAt)}',
-                ].join(' • ');
+                        final clientName = b['client']?['name']?.toString();
+                        final clientPhone = b['client']?['phone']?.toString();
+                        final clientTitle = (clientName != null && clientName.isNotEmpty)
+                            ? clientName
+                            : (clientPhone ?? '');
 
-                return ListTile(
-                  title: Text('$time • $serviceName • Bay $bayId'),
-                  subtitle: Text(
-                    '$clientTitle${timing.isEmpty ? "" : "\n$timing"}',
-                  ),
-                  isThreeLine: timing.isNotEmpty,
-                  trailing: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
+                        // ✅ авто
+                        final plate = b['car']?['plateDisplay']?.toString() ?? '';
+                        final make = b['car']?['makeDisplay']?.toString() ?? '';
+                        final model = b['car']?['modelDisplay']?.toString() ?? '';
+                        final carLine = plate.isEmpty ? '' : 'Авто: $plate • $make $model';
+
+                        final time = dateTimeIso.isNotEmpty ? _fmtTime(dateTimeIso) : '--:--';
+                        final badgeColor = _statusColor(status);
+
+                        final timingParts = <String>[];
+                        if (startedAt != null) timingParts.add('старт ${_fmtTime(startedAt)}');
+                        if (finishedAt != null) timingParts.add('финиш ${_fmtTime(finishedAt)}');
+                        final timing = timingParts.join(' • ');
+
+                        final tileBg = (b['paymentStatus'] ?? '').toString() == 'UNPAID'
+                            ? Colors.red.withValues(alpha: 0.06)
+                            : null;
+
+                        return Container(
+                          color: tileBg,
+                          child: ListTile(
+                            title: Text('$time • $serviceName • Пост $bayId'),
+                            subtitle: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(clientTitle),
+                                if (carLine.isNotEmpty) Text(carLine),
+                                if (timing.isNotEmpty) Text(timing),
+                                const SizedBox(height: 6),
+                                _paymentBadges(b),
+                              ],
+                            ),
+                            isThreeLine: true,
+                            trailing: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: badgeColor.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: badgeColor),
+                              ),
+                              child: Text(status, style: TextStyle(color: badgeColor)),
+                            ),
+                            onTap: () async {
+                              await showModalBottomSheet(
+                                context: context,
+                                isScrollControlled: true,
+                                builder: (_) => BookingActionsSheet(
+                                  api: widget.api,
+                                  session: widget.session,
+                                  booking: b,
+                                  onDone: _load,
+                                ),
+                              );
+                            },
+                          ),
+                        );
+                      },
                     ),
-                    decoration: BoxDecoration(
-                      color: badgeColor.withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: badgeColor),
-                    ),
-                    child: Text(status, style: TextStyle(color: badgeColor)),
-                  ),
-                  onTap: () async {
-                    await showModalBottomSheet(
-                      context: context,
-                      isScrollControlled: true,
-                      builder: (_) => BookingActionsSheet(
-                        api: widget.api,
-                        session: widget.session,
-                        booking: b,
-                        onDone: _load,
-                      ),
-                    );
-                  },
-                );
-              },
-            ),
       bottomNavigationBar: Padding(
         padding: const EdgeInsets.all(8),
         child: Text(

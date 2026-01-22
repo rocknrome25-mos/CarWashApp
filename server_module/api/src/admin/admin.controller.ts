@@ -14,6 +14,12 @@ import { AdminBookingStartDto } from './dto/admin-booking-start.dto';
 import { AdminBookingFinishDto } from './dto/admin-booking-finish.dto';
 import { AdminBookingMoveDto } from './dto/admin-booking-move.dto';
 
+import { OpenFloatDto } from './cash/dto/open-float.dto';
+import { CashMoveDto } from './cash/dto/cash-move.dto';
+import { CloseCashDto } from './cash/dto/close-cash.dto';
+
+import { AdminBookingPayDto } from './dto/admin-booking-pay.dto';
+
 @Controller('admin')
 export class AdminController {
   constructor(private readonly admin: AdminService) {}
@@ -45,7 +51,86 @@ export class AdminController {
     return this.admin.closeShift(uid, sid);
   }
 
-  // GET /admin/calendar/day?date=YYYY-MM-DD (headers: x-user-id, x-shift-id)
+  // ===== CASH =====
+
+  @Post('cash/open-float')
+  openFloat(
+    @Headers('x-user-id') userId?: string,
+    @Headers('x-shift-id') shiftId?: string,
+    @Body() dto: OpenFloatDto = {} as OpenFloatDto,
+  ) {
+    const uid = (userId ?? '').trim();
+    const sid = (shiftId ?? '').trim();
+    if (!uid) throw new BadRequestException('x-user-id is required');
+    if (!sid) throw new BadRequestException('x-shift-id is required');
+    return this.admin.cashOpenFloat(uid, sid, dto);
+  }
+
+  @Post('cash/in')
+  cashIn(
+    @Headers('x-user-id') userId?: string,
+    @Headers('x-shift-id') shiftId?: string,
+    @Body() dto: CashMoveDto = {} as CashMoveDto,
+  ) {
+    const uid = (userId ?? '').trim();
+    const sid = (shiftId ?? '').trim();
+    if (!uid) throw new BadRequestException('x-user-id is required');
+    if (!sid) throw new BadRequestException('x-shift-id is required');
+    return this.admin.cashIn(uid, sid, dto);
+  }
+
+  @Post('cash/out')
+  cashOut(
+    @Headers('x-user-id') userId?: string,
+    @Headers('x-shift-id') shiftId?: string,
+    @Body() dto: CashMoveDto = {} as CashMoveDto,
+  ) {
+    const uid = (userId ?? '').trim();
+    const sid = (shiftId ?? '').trim();
+    if (!uid) throw new BadRequestException('x-user-id is required');
+    if (!sid) throw new BadRequestException('x-shift-id is required');
+    return this.admin.cashOut(uid, sid, dto);
+  }
+
+  @Post('cash/close')
+  closeCash(
+    @Headers('x-user-id') userId?: string,
+    @Headers('x-shift-id') shiftId?: string,
+    @Body() dto: CloseCashDto = {} as CloseCashDto,
+  ) {
+    const uid = (userId ?? '').trim();
+    const sid = (shiftId ?? '').trim();
+    if (!uid) throw new BadRequestException('x-user-id is required');
+    if (!sid) throw new BadRequestException('x-shift-id is required');
+    return this.admin.cashClose(uid, sid, dto);
+  }
+
+  @Get('cash/summary')
+  cashSummary(
+    @Headers('x-user-id') userId?: string,
+    @Headers('x-shift-id') shiftId?: string,
+  ) {
+    const uid = (userId ?? '').trim();
+    const sid = (shiftId ?? '').trim();
+    if (!uid) throw new BadRequestException('x-user-id is required');
+    if (!sid) throw new BadRequestException('x-shift-id is required');
+    return this.admin.cashSummary(uid, sid);
+  }
+
+  @Get('cash/expected')
+  cashExpected(
+    @Headers('x-user-id') userId?: string,
+    @Headers('x-shift-id') shiftId?: string,
+  ) {
+    const uid = (userId ?? '').trim();
+    const sid = (shiftId ?? '').trim();
+    if (!uid) throw new BadRequestException('x-user-id is required');
+    if (!sid) throw new BadRequestException('x-shift-id is required');
+    return this.admin.cashExpected(uid, sid);
+  }
+
+  // ===== CALENDAR =====
+
   @Get('calendar/day')
   calendarDay(
     @Headers('x-user-id') userId?: string,
@@ -61,7 +146,8 @@ export class AdminController {
     return this.admin.getCalendarDay(uid, sid, d);
   }
 
-  // POST /admin/bookings/:id/start
+  // ===== BOOKINGS =====
+
   @Post('bookings/:id/start')
   startBooking(
     @Headers('x-user-id') userId?: string,
@@ -78,7 +164,6 @@ export class AdminController {
     return this.admin.startBooking(uid, sid, bid, dto);
   }
 
-  // POST /admin/bookings/:id/finish
   @Post('bookings/:id/finish')
   finishBooking(
     @Headers('x-user-id') userId?: string,
@@ -95,7 +180,6 @@ export class AdminController {
     return this.admin.finishBooking(uid, sid, bid, dto);
   }
 
-  // POST /admin/bookings/:id/move
   @Post('bookings/:id/move')
   moveBooking(
     @Headers('x-user-id') userId?: string,
@@ -110,5 +194,22 @@ export class AdminController {
     if (!sid) throw new BadRequestException('x-shift-id is required');
     if (!bid) throw new BadRequestException('booking id is required');
     return this.admin.moveBooking(uid, sid, bid, dto);
+  }
+
+  // ✅ NEW: admin payment marking
+  @Post('bookings/:id/pay')
+  payBooking(
+    @Headers('x-user-id') userId?: string,
+    @Headers('x-shift-id') shiftId?: string,
+    @Param('id') bookingId?: string,
+    @Body() dto: AdminBookingPayDto = {} as AdminBookingPayDto,
+  ) {
+    const uid = (userId ?? '').trim();
+    const sid = (shiftId ?? '').trim();
+    const bid = (bookingId ?? '').trim();
+    if (!uid) throw new BadRequestException('x-user-id is required');
+    if (!sid) throw new BadRequestException('x-shift-id is required');
+    if (!bid) throw new BadRequestException('booking id is required');
+    return this.admin.payBookingAdmin(uid, sid, bid, dto);
   }
 }

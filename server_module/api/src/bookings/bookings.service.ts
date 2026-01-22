@@ -6,11 +6,17 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { BookingStatus, PaymentKind, Prisma } from '@prisma/client';
+import {
+  BookingStatus,
+  PaymentKind,
+  PaymentMethodType,
+  Prisma,
+} from '@prisma/client';
 import { BookingsGateway } from './bookings.gateway';
 
 type PayBody = {
   method?: string;
+  methodType?: 'CASH' | 'CARD' | 'CONTRACT';
   kind?: 'DEPOSIT' | 'REMAINING' | 'EXTRA' | 'REFUND';
   amountRub?: number;
 };
@@ -130,12 +136,7 @@ export class BookingsService {
     }
   }
 
-  async getBusySlots(args: {
-    locationId: string;
-    bayId: number;
-    from: Date;
-    to: Date;
-  }) {
+  async getBusySlots(args: { locationId: string; bayId: number; from: Date; to: Date }) {
     await this._housekeeping();
 
     const locationId = (args.locationId ?? '').trim();
@@ -251,7 +252,6 @@ export class BookingsService {
       throw new BadRequestException('Cannot create booking in the past');
     }
 
-    // locationId: если не передали — берём дефолт (совместимость со старым клиентом)
     let locationId = (body.locationId ?? '').trim();
     if (!locationId) {
       locationId = await this._getDefaultLocationId();
@@ -266,7 +266,6 @@ export class BookingsService {
         ? body.comment.trim().slice(0, 500)
         : null;
 
-    // car должен принадлежать этому clientId
     const car = await this.prisma.car.findUnique({
       where: { id: body.carId },
       select: { id: true, clientId: true },
@@ -305,7 +304,6 @@ export class BookingsService {
           async (tx) => {
             const now = new Date();
 
-            // ✅ 0) membership (auto) + блокировка по локации
             const cl = await tx.clientLocation.upsert({
               where: { clientId_locationId: { clientId, locationId } },
               update: { lastVisitAt: now },
@@ -319,7 +317,6 @@ export class BookingsService {
             const windowStart = new Date(newStart.getTime() - 24 * 60 * 60 * 1000);
             const windowEnd = new Date(newEnd.getTime() + 24 * 60 * 60 * 1000);
 
-            // 1) конфликт по посту в рамках локации
             const nearby = await tx.booking.findMany({
               where: {
                 locationId,
@@ -359,7 +356,6 @@ export class BookingsService {
               throw new ConflictException('Selected time slot is already booked');
             }
 
-            // 2) конфликт по машине — глобально (в любой локации)
             const carNearby = await tx.booking.findMany({
               where: {
                 carId: body.carId,
@@ -460,11 +456,21 @@ export class BookingsService {
     }
   }
 
+  private _parseMethodType(raw?: string): PaymentMethodType {
+    const v = (raw ?? 'CARD').toUpperCase().trim();
+    if (v === 'CASH') return PaymentMethodType.CASH;
+    if (v === 'CARD') return PaymentMethodType.CARD;
+    if (v === 'CONTRACT') return PaymentMethodType.CONTRACT;
+    return PaymentMethodType.CARD;
+  }
+
   async pay(id: string, body?: PayBody) {
     await this._housekeeping();
 
     const kind = this._parsePayKind(body?.kind);
-    const method = (body?.method ?? 'CARD_TEST').trim() || 'CARD_TEST';
+
+    const method = (body?.method ?? 'CARD').trim() || 'CARD';
+    const methodType = this._parseMethodType(body?.methodType ?? body?.method);
 
     const booking = await this.prisma.booking.findUnique({
       where: { id },
@@ -526,6 +532,7 @@ export class BookingsService {
           bookingId: booking.id,
           amountRub,
           method,
+          methodType,
           kind: PaymentKind.DEPOSIT,
           paidAt: now,
         },
@@ -558,14 +565,13 @@ export class BookingsService {
           bookingId: booking.id,
           amountRub,
           method,
+          methodType,
           kind,
           paidAt: now,
         },
       });
     } catch (e) {
-      throw new ConflictException(
-        `Payment kind ${kind} already exists for this booking`,
-      );
+      throw new ConflictException(`Payment kind ${kind} already exists for this booking`);
     }
 
     const refreshed = await this.prisma.booking.findUnique({

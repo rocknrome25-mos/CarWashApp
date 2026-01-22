@@ -26,6 +26,12 @@ enum PaymentKind {
   REFUND
 }
 
+enum PaymentMethodType {
+  CASH
+  CARD
+  CONTRACT
+}
+
 enum UserRole {
   ADMIN
   OWNER
@@ -45,6 +51,7 @@ enum AuditType {
   BOOKING_DISCOUNT
   BOOKING_START
   BOOKING_FINISH
+  PAYMENT_MARKED
 
   BAY_CLOSE
   BAY_OPEN
@@ -56,27 +63,75 @@ enum AuditType {
   CLIENT_UNBLOCK
 }
 
+enum ShiftCashEventType {
+  OPEN_FLOAT
+  CASH_IN
+  CASH_OUT
+  CLOSE_COUNT
+  HANDOVER
+  KEEP_IN_DRAWER
+}
+
+model Tenant {
+  /// ✅ фиксированный id допустим (например "demo-tenant")
+  id        String   @id
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  name     String
+  isActive Boolean @default(true)
+
+  locations Location[]
+  features  TenantFeature[]
+
+  @@index([createdAt])
+  @@index([isActive])
+}
+
+model TenantFeature {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  key     String
+  enabled Boolean @default(true)
+  params  Json?
+
+  @@unique([tenantId, key])
+  @@index([tenantId])
+  @@index([key])
+  @@index([enabled])
+}
+
 model Location {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // ✅ tenant scope (owner of network)
+  // ✅ default нужен, чтобы миграция не падала на существующих строках
+  tenantId String @default("demo-tenant")
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
   name     String @unique
   address  String?
   colorHex String @default("#2D9CDB")
 
-  /// для UI/дефолтов (можно оставить, но Bays — источник правды)
   baysCount Int @default(2)
 
-  bays     Bay[]
-  bookings Booking[]
-  users    User[]
-  shifts   Shift[]
-
-  /// membership клиентов в этой локации
+  bays        Bay[]
+  bookings    Booking[]
+  users       User[]
+  shifts      Shift[]
   clientLinks ClientLocation[]
 
+  cashEvents ShiftCashEvent[]
+
   @@index([createdAt])
+  @@index([tenantId])
 }
 
 model Bay {
@@ -87,13 +142,9 @@ model Bay {
   locationId String
   location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
 
-  /// номер поста внутри локации (1..N)
-  number Int
-
-  /// мгновенно отключить пост (авария/ремонт)
+  number   Int
   isActive Boolean @default(true)
 
-  /// почему отключили (если отключили)
   closedReason String?
   closedAt     DateTime?
   reopenedAt   DateTime?
@@ -111,21 +162,17 @@ model Client {
   phone String @unique
   name  String?
 
-  /// для walk-in по телефону делаем optional
   gender    ClientGender?
   birthDate DateTime?
 
-  /// LEGACY: глобальная блокировка (оставлено, чтобы не ломать старый код)
-  /// НОВАЯ логика блокировки должна жить в ClientLocation (по локации).
+  // LEGACY global block
   isBlocked       Boolean  @default(false)
   blockReason     String?
   blockedAt       DateTime?
   blockedByUserId String?
 
-  cars     Car[]
-  bookings Booking[]
-
-  /// membership по локациям
+  cars      Car[]
+  bookings  Booking[]
   locations ClientLocation[]
 
   @@index([phone])
@@ -141,13 +188,11 @@ model ClientLocation {
   clientId   String
   locationId String
 
-  /// блокировка клиента именно в этой локации
   isBlocked       Boolean  @default(false)
   blockReason     String?
   blockedAt       DateTime?
   blockedByUserId String?
 
-  /// полезно для аналитики
   lastVisitAt DateTime?
 
   client   Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
@@ -176,7 +221,6 @@ model Car {
   color    String?
   bodyType String?
 
-  // ✅ связь с Client (пока nullable для демо)
   clientId String?
   client   Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
 
@@ -192,7 +236,7 @@ model Service {
 
   name        String @unique
   priceRub    Int
-  durationMin Int    @default(30)
+  durationMin Int @default(30)
 
   bookings Booking[]
 }
@@ -202,50 +246,33 @@ model Booking {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  /// Локация (мойка)
   locationId String
   location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
 
-  /// Привязка к смене (для строгого scope админа)
   shiftId String?
   shift   Shift? @relation(fields: [shiftId], references: [id], onDelete: SetNull)
 
-  /// Время начала услуги (план)
   dateTime DateTime
+  bayId    Int @default(1)
 
-  /// Номер поста (1, 2, …) внутри локации
-  bayId Int @default(1)
-
-  /// Буфер в минутах (обычно 15)
-  bufferMin Int @default(0)
-
-  /// Сумма брони (например 500 ₽)
+  bufferMin  Int @default(0)
   depositRub Int @default(0)
 
-  /// Комментарий клиента
-  comment String?
-
-  /// Комментарий админа (видит admin/owner)
+  comment   String?
   adminNote String?
 
-  /// Факт начала/окончания работ
   startedAt  DateTime?
   finishedAt DateTime?
 
-  /// Статус записи
-  status BookingStatus @default(PENDING_PAYMENT)
-
-  /// Дедлайн оплаты депозита (удобно только для PENDING_PAYMENT)
+  status       BookingStatus @default(PENDING_PAYMENT)
   paymentDueAt DateTime?
 
-  /// Отмена
   canceledAt   DateTime?
   cancelReason String?
 
   carId     String
   serviceId String
 
-  /// прямая ссылка на клиента (nullable для демо)
   clientId String?
   client   Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
 
@@ -275,15 +302,16 @@ model Payment {
   bookingId String
   booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
 
-  amountRub Int
-  method    String
-  kind      PaymentKind
+  amountRub  Int
+  method     String
+  methodType PaymentMethodType @default(CARD)
+  kind       PaymentKind
 
   @@index([bookingId])
   @@index([paidAt])
   @@index([kind])
+  @@index([methodType])
 
-  /// 1 депозит + 1 доплата (если захочешь больше — уберём это ограничение)
   @@unique([bookingId, kind])
 }
 
@@ -297,16 +325,15 @@ model User {
   role     UserRole
   isActive Boolean @default(true)
 
-  // scope
   locationId String
   location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
 
-  // для admin-логики (быстро понять есть ли открытая смена)
   shiftOpenAt  DateTime?
   shiftCloseAt DateTime?
 
-  shifts Shift[]
-  audits AuditEvent[]
+  shifts     Shift[]
+  audits     AuditEvent[]
+  cashEvents ShiftCashEvent[]
 
   @@index([role])
   @@index([locationId])
@@ -321,17 +348,40 @@ model Shift {
   adminId    String
 
   status   ShiftStatus @default(OPEN)
-  openedAt DateTime    @default(now())
+  openedAt DateTime @default(now())
   closedAt DateTime?
 
   location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
   admin    User     @relation(fields: [adminId], references: [id], onDelete: Cascade)
 
-  bookings Booking[]
+  bookings   Booking[]
+  cashEvents ShiftCashEvent[]
 
   @@index([locationId, openedAt])
   @@index([adminId, openedAt])
   @@index([status])
+}
+
+model ShiftCashEvent {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  shiftId    String
+  locationId String
+  adminId    String
+
+  type      ShiftCashEventType
+  amountRub Int
+  note      String?
+
+  shift    Shift    @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  admin    User     @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@index([shiftId, createdAt])
+  @@index([locationId, createdAt])
+  @@index([adminId, createdAt])
+  @@index([type])
 }
 
 model AuditEvent {
@@ -346,7 +396,6 @@ model AuditEvent {
   bookingId  String?
   clientId   String?
 
-  /// обязательное поле для “опасных” операций
   reason  String?
   payload Json?
 

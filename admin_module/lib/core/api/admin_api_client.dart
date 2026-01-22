@@ -31,6 +31,17 @@ class AdminApiClient {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
+  Future<Map<String, dynamic>> getConfig(String locationId) async {
+    final res = await http.get(
+      _u('/config', {'locationId': locationId}),
+      headers: _jsonHeaders(),
+    );
+    if (res.statusCode >= 400) {
+      throw Exception('config failed: ${res.statusCode} ${res.body}');
+    }
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   Future<Map<String, dynamic>> openShift(String userId) async {
     final res = await http.post(
       _u('/admin/shifts/open'),
@@ -66,7 +77,6 @@ class AdminApiClient {
       throw Exception('calendar failed: ${res.statusCode} ${res.body}');
     }
     final decoded = jsonDecode(res.body);
-    // backend возвращает массив, но PowerShell иногда показывал объект — тут ожидаем List
     if (decoded is List) return decoded;
     return [decoded];
   }
@@ -129,4 +139,83 @@ class AdminApiClient {
     }
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
-}
+
+  // ===== CASH =====
+  Future<void> cashOpenFloat(
+    String userId,
+    String shiftId,
+    int amountRub, {
+    String? note,
+  }) async {
+    final res = await http.post(
+      _u('/admin/cash/open-float'),
+      headers: _jsonHeaders(userId: userId, shiftId: shiftId),
+      body: jsonEncode({'amountRub': amountRub, 'note': note}),
+    );
+    if (res.statusCode >= 400) {
+      throw Exception('cash open-float failed: ${res.statusCode} ${res.body}');
+    }
+  }
+
+  Future<Map<String, dynamic>> cashExpected(
+    String userId,
+    String shiftId,
+  ) async {
+    final res = await http.get(
+      _u('/admin/cash/expected'),
+      headers: _jsonHeaders(userId: userId, shiftId: shiftId),
+    );
+    if (res.statusCode >= 400) {
+      throw Exception('cash expected failed: ${res.statusCode} ${res.body}');
+    }
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<void> cashClose(
+    String userId,
+    String shiftId, {
+    required int countedRub,
+    required int handoverRub,
+    required int keepRub,
+    String? note,
+  }) async {
+    final res = await http.post(
+      _u('/admin/cash/close'),
+      headers: _jsonHeaders(userId: userId, shiftId: shiftId),
+      body: jsonEncode({
+        'countedRub': countedRub,
+        'handoverRub': handoverRub,
+        'keepRub': keepRub,
+        'note': note,
+      }),
+    );
+    if (res.statusCode >= 400) {
+      throw Exception('cash close failed: ${res.statusCode} ${res.body}');
+    }
+  }
+Future<Map<String, dynamic>> adminPayBooking(
+    String userId,
+    String shiftId,
+    String bookingId, {
+    required String kind, // DEPOSIT/REMAINING/EXTRA/REFUND
+    required int amountRub,
+    required String methodType, // CASH/CARD/CONTRACT
+    String? methodLabel,
+    String? note,
+  }) async {
+    final res = await http.post(
+      _u('/admin/bookings/$bookingId/pay'),
+      headers: _jsonHeaders(userId: userId, shiftId: shiftId),
+      body: jsonEncode({
+        'kind': kind,
+        'amountRub': amountRub,
+        'methodType': methodType,
+        'methodLabel': methodLabel,
+        'note': note,
+      }),
+    );
+    if (res.statusCode >= 400) {
+      throw Exception('admin pay failed: ${res.statusCode} ${res.body}');
+    }
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }}

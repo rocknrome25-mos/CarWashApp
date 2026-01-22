@@ -19,16 +19,49 @@ class _LoginPageState extends State<LoginPage> {
   bool loading = false;
   String? error;
 
+  Map<String, bool> _parseFeatures(Map<String, dynamic> cfg) {
+    final out = <String, bool>{};
+    final f = cfg['features'];
+
+    if (f is Map) {
+      f.forEach((k, v) {
+        if (v is Map && v['enabled'] is bool) {
+          out[k.toString()] = v['enabled'] as bool;
+        } else if (v is bool) {
+          out[k.toString()] = v;
+        }
+      });
+    }
+
+    return out;
+  }
+
   Future<void> _login() async {
     setState(() {
       loading = true;
       error = null;
     });
+
     try {
-      final json = await widget.api.adminLogin(ctrl.text.trim());
-      final session = AdminSession.fromJson(json);
+      final loginJson = await widget.api.adminLogin(ctrl.text.trim());
+
+      final user = loginJson['user'] as Map<String, dynamic>;
+      final locationId = user['locationId'] as String;
+
+      final cfg = await widget.api.getConfig(locationId);
+      final features = _parseFeatures(cfg);
+
+      final session = AdminSession.fromLoginJson(
+        loginJson,
+        featuresEnabled: features,
+      );
+
       await widget.store.save(session);
-      if (!mounted) return;
+
+      if (!mounted) {
+        return;
+      }
+
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
           builder: (_) => ShiftGatePage(
@@ -39,9 +72,14 @@ class _LoginPageState extends State<LoginPage> {
         ),
       );
     } catch (e) {
+      if (!mounted) {
+        return;
+      }
       setState(() => error = e.toString());
     } finally {
-      if (mounted) setState(() => loading = false);
+      if (mounted) {
+        setState(() => loading = false);
+      }
     }
   }
 
@@ -55,7 +93,7 @@ class _LoginPageState extends State<LoginPage> {
           children: [
             TextField(
               controller: ctrl,
-              decoration: const InputDecoration(labelText: 'Phone'),
+              decoration: const InputDecoration(labelText: 'Телефон'),
             ),
             const SizedBox(height: 12),
             if (error != null)
@@ -71,7 +109,7 @@ class _LoginPageState extends State<LoginPage> {
                         width: 18,
                         child: CircularProgressIndicator(),
                       )
-                    : const Text('Login'),
+                    : const Text('Войти'),
               ),
             ),
           ],

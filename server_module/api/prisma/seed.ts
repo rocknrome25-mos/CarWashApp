@@ -15,21 +15,71 @@ type LocationSeed = {
   baysCount: number;
 };
 
-async function upsertLocation(loc: LocationSeed) {
+const TENANT_ID = 'demo-tenant';
+
+async function ensureTenantAndFeatures() {
+  // Tenant.id теперь фиксированный (без cuid), поэтому создаём/обновляем по id
+  const tenant = await prisma.tenant.upsert({
+    where: { id: TENANT_ID },
+    update: { name: 'Demo Tenant', isActive: true },
+    create: { id: TENANT_ID, name: 'Demo Tenant', isActive: true },
+  });
+
+  const keys = [
+    'CASH_DRAWER',
+    'BOOKING_MOVE',
+    'CONTRACT_PAYMENTS',
+    'DISCOUNTS',
+    'MEDIA_PHOTOS',
+  ];
+
+  for (const key of keys) {
+    await prisma.tenantFeature.upsert({
+      where: { tenantId_key: { tenantId: tenant.id, key } },
+      update: { enabled: true },
+      create: { tenantId: tenant.id, key, enabled: true },
+    });
+  }
+
+  return tenant;
+}
+
+async function upsertLocation(tenantId: string, loc: LocationSeed) {
   return prisma.location.upsert({
-    where: { name: loc.name },
+    where: { name: loc.name }, // name unique
     update: {
+      tenantId,
       address: loc.address,
       colorHex: loc.colorHex,
       baysCount: loc.baysCount,
     },
-    create: loc,
+    create: {
+      tenantId,
+      name: loc.name,
+      address: loc.address,
+      colorHex: loc.colorHex,
+      baysCount: loc.baysCount,
+    },
   });
+}
+
+async function ensureBaysForLocation(locationId: string, baysCount: number) {
+  for (let number = 1; number <= baysCount; number++) {
+    await prisma.bay.upsert({
+      where: { locationId_number: { locationId, number } },
+      update: { isActive: true },
+      create: {
+        locationId,
+        number,
+        isActive: true,
+      },
+    });
+  }
 }
 
 async function upsertService(s: ServiceSeed) {
   return prisma.service.upsert({
-    where: { name: s.name },
+    where: { name: s.name }, // name unique
     update: { priceRub: s.priceRub, durationMin: s.durationMin },
     create: s,
   });
@@ -59,22 +109,11 @@ async function upsertUser(args: {
   });
 }
 
-async function ensureBaysForLocation(locationId: string, baysCount: number) {
-  for (let number = 1; number <= baysCount; number++) {
-    await prisma.bay.upsert({
-      where: { locationId_number: { locationId, number } },
-      update: { isActive: true },
-      create: {
-        locationId,
-        number,
-        isActive: true,
-      },
-    });
-  }
-}
-
 async function main() {
-  // 1) LOCATIONS (2 шт)
+  // 0) Tenant + Feature flags
+  const tenant = await ensureTenantAndFeatures();
+
+  // 1) Locations (2)
   const locations: LocationSeed[] = [
     {
       name: 'Мойка #1',
@@ -90,14 +129,14 @@ async function main() {
     },
   ];
 
-  const loc1 = await upsertLocation(locations[0]);
-  const loc2 = await upsertLocation(locations[1]);
+  const loc1 = await upsertLocation(tenant.id, locations[0]);
+  const loc2 = await upsertLocation(tenant.id, locations[1]);
 
-  // 1.1) BAYS (2 поста на локацию)
+  // 2) Bays (по 2 поста на локацию)
   await ensureBaysForLocation(loc1.id, loc1.baysCount);
   await ensureBaysForLocation(loc2.id, loc2.baysCount);
 
-  // 2) SERVICES (с правильными durationMin)
+  // 3) Services
   const services: ServiceSeed[] = [
     { name: 'Мойка кузова', priceRub: 1200, durationMin: 30 },
     { name: 'Комплекс', priceRub: 2500, durationMin: 60 },
@@ -108,7 +147,7 @@ async function main() {
     await upsertService(s);
   }
 
-  // 3) DEMO USERS (потом заменим на нормальный auth)
+  // 4) Demo users
   await upsertUser({
     phone: '+79990000001',
     name: 'Owner Demo',
@@ -130,7 +169,7 @@ async function main() {
     locationId: loc2.id,
   });
 
-  console.log('✅ Seed done: locations(2), bays, services, users');
+  console.log('✅ Seed done: tenant + features + locations + bays + services + users');
 }
 
 main()
