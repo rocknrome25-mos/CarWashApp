@@ -28,7 +28,8 @@ class _CalendarPageState extends State<CalendarPage> {
   List<dynamic> bookings = [];
   DateTime selectedDay = DateTime.now();
 
-  bool get _cashEnabled => widget.session.featureOn('CASH_DRAWER', defaultValue: true);
+  bool get _cashEnabled =>
+      widget.session.featureOn('CASH_DRAWER', defaultValue: true);
 
   String get _ymd => DateFormat('yyyy-MM-dd').format(selectedDay);
 
@@ -96,7 +97,9 @@ class _CalendarPageState extends State<CalendarPage> {
       await widget.store.clear();
       if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => LoginPage(api: widget.api, store: widget.store)),
+        MaterialPageRoute(
+          builder: (_) => LoginPage(api: widget.api, store: widget.store),
+        ),
         (r) => false,
       );
     } catch (e) {
@@ -136,14 +139,21 @@ class _CalendarPageState extends State<CalendarPage> {
                     children: [
                       Row(
                         children: [
-                          const Expanded(child: Text('Ожидаемая сумма наличных')),
-                          Text('$expectedRub ₽', style: const TextStyle(fontWeight: FontWeight.w600)),
+                          const Expanded(
+                            child: Text('Ожидаемая сумма наличных'),
+                          ),
+                          Text(
+                            '$expectedRub ₽',
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
                         ],
                       ),
                       const SizedBox(height: 8),
                       Row(
                         children: [
-                          const Expanded(child: Text('Разница (факт - ожидаемая)')),
+                          const Expanded(
+                            child: Text('Разница (факт - ожидаемая)'),
+                          ),
                           Text(
                             '${diff >= 0 ? '+' : ''}$diff ₽',
                             style: TextStyle(
@@ -157,22 +167,30 @@ class _CalendarPageState extends State<CalendarPage> {
                       TextField(
                         controller: countedCtrl,
                         keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(labelText: 'Фактически в кассе (₽)'),
+                        decoration: const InputDecoration(
+                          labelText: 'Фактически в кассе (₽)',
+                        ),
                         onChanged: (_) => setStateDialog(() {}),
                       ),
                       TextField(
                         controller: handoverCtrl,
                         keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(labelText: 'Сдать владельцу (₽)'),
+                        decoration: const InputDecoration(
+                          labelText: 'Сдать владельцу (₽)',
+                        ),
                       ),
                       TextField(
                         controller: keepCtrl,
                         keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(labelText: 'Оставить в кассе (₽)'),
+                        decoration: const InputDecoration(
+                          labelText: 'Оставить в кассе (₽)',
+                        ),
                       ),
                       TextField(
                         controller: noteCtrl,
-                        decoration: const InputDecoration(labelText: 'Комментарий (необязательно)'),
+                        decoration: const InputDecoration(
+                          labelText: 'Комментарий (необязательно)',
+                        ),
                       ),
                       const SizedBox(height: 8),
                       const Text(
@@ -220,7 +238,9 @@ class _CalendarPageState extends State<CalendarPage> {
       if (!mounted) return;
 
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => LoginPage(api: widget.api, store: widget.store)),
+        MaterialPageRoute(
+          builder: (_) => LoginPage(api: widget.api, store: widget.store),
+        ),
         (r) => false,
       );
     } catch (e) {
@@ -237,7 +257,7 @@ class _CalendarPageState extends State<CalendarPage> {
     }
   }
 
-  Widget _paymentBadges(Map<String, dynamic> b) {
+  Widget _paymentBadgesWidget(Map<String, dynamic> b) {
     final badges = (b['paymentBadges'] is List)
         ? (b['paymentBadges'] as List).map((x) => x.toString()).toList()
         : <String>[];
@@ -293,7 +313,11 @@ class _CalendarPageState extends State<CalendarPage> {
       appBar: AppBar(
         title: Text(_ruTitle()),
         actions: [
-          IconButton(tooltip: 'Вчера', onPressed: () => _shiftDay(-1), icon: const Icon(Icons.chevron_left)),
+          IconButton(
+            tooltip: 'Вчера',
+            onPressed: () => _shiftDay(-1),
+            icon: const Icon(Icons.chevron_left),
+          ),
           IconButton(
             tooltip: 'Сегодня',
             onPressed: () {
@@ -302,95 +326,140 @@ class _CalendarPageState extends State<CalendarPage> {
             },
             icon: const Icon(Icons.today),
           ),
-          IconButton(tooltip: 'Завтра', onPressed: () => _shiftDay(1), icon: const Icon(Icons.chevron_right)),
+          IconButton(
+            tooltip: 'Завтра',
+            onPressed: () => _shiftDay(1),
+            icon: const Icon(Icons.chevron_right),
+          ),
           IconButton(icon: const Icon(Icons.refresh), onPressed: _load),
-          TextButton(onPressed: _closeShift, child: const Text('Закрыть смену')),
+          TextButton(
+            onPressed: _closeShift,
+            child: const Text('Закрыть смену'),
+          ),
           const SizedBox(width: 8),
         ],
       ),
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : error != null
-              ? Center(child: Text(error!, style: const TextStyle(color: Colors.red)))
-              : bookings.isEmpty
-                  ? const Center(child: Text('Нет записей'))
-                  : ListView.separated(
-                      itemCount: bookings.length,
-                      separatorBuilder: (context, index) => const Divider(height: 1),
-                      itemBuilder: (context, i) {
-                        final b = bookings[i] as Map<String, dynamic>;
-                        final status = (b['status'] ?? '').toString();
+          ? Center(
+              child: Text(error!, style: const TextStyle(color: Colors.red)),
+            )
+          : bookings.isEmpty
+          ? const Center(child: Text('Нет записей'))
+          : ListView.separated(
+              itemCount: bookings.length,
+              separatorBuilder: (context, index) => const Divider(height: 1),
+              itemBuilder: (context, i) {
+                final b = bookings[i] as Map<String, dynamic>;
+                final status = (b['status'] ?? '').toString();
 
-                        final serviceName = b['service']?['name']?.toString() ?? 'Услуга';
-                        final bayId = b['bayId']?.toString() ?? '';
-                        final dateTimeIso = b['dateTime']?.toString() ?? '';
-                        final startedAt = b['startedAt']?.toString();
-                        final finishedAt = b['finishedAt']?.toString();
+                final serviceName =
+                    b['service']?['name']?.toString() ?? 'Услуга';
+                final bayId = b['bayId']?.toString() ?? '';
+                final dateTimeIso = b['dateTime']?.toString() ?? '';
+                final startedAt = b['startedAt']?.toString();
+                final finishedAt = b['finishedAt']?.toString();
 
-                        final clientName = b['client']?['name']?.toString();
-                        final clientPhone = b['client']?['phone']?.toString();
-                        final clientTitle = (clientName != null && clientName.isNotEmpty)
-                            ? clientName
-                            : (clientPhone ?? '');
+                final clientName = b['client']?['name']?.toString();
+                final clientPhone = b['client']?['phone']?.toString();
+                final clientTitle =
+                    (clientName != null && clientName.isNotEmpty)
+                    ? clientName
+                    : (clientPhone ?? '');
 
-                        // ✅ авто
-                        final plate = b['car']?['plateDisplay']?.toString() ?? '';
-                        final make = b['car']?['makeDisplay']?.toString() ?? '';
-                        final model = b['car']?['modelDisplay']?.toString() ?? '';
-                        final carLine = plate.isEmpty ? '' : 'Авто: $plate • $make $model';
+                final plate = b['car']?['plateDisplay']?.toString() ?? '';
+                final make = b['car']?['makeDisplay']?.toString() ?? '';
+                final model = b['car']?['modelDisplay']?.toString() ?? '';
+                final color = b['car']?['color']?.toString();
+                final body = b['car']?['bodyType']?.toString();
 
-                        final time = dateTimeIso.isNotEmpty ? _fmtTime(dateTimeIso) : '--:--';
-                        final badgeColor = _statusColor(status);
+                final carParts = <String>[];
+                if (plate.isNotEmpty) {
+                  carParts.add(plate);
+                }
+                final mm = ('$make $model').trim();
+                if (mm.isNotEmpty) {
+                  carParts.add(mm);
+                }
+                if (body != null && body.trim().isNotEmpty) {
+                  carParts.add(body.trim());
+                }
+                if (color != null && color.trim().isNotEmpty) {
+                  carParts.add(color.trim());
+                }
+                final carLine = carParts.isEmpty
+                    ? ''
+                    : 'Авто: ${carParts.join(' • ')}';
 
-                        final timingParts = <String>[];
-                        if (startedAt != null) timingParts.add('старт ${_fmtTime(startedAt)}');
-                        if (finishedAt != null) timingParts.add('финиш ${_fmtTime(finishedAt)}');
-                        final timing = timingParts.join(' • ');
+                final time = dateTimeIso.isNotEmpty
+                    ? _fmtTime(dateTimeIso)
+                    : '--:--';
+                final badgeColor = _statusColor(status);
 
-                        final tileBg = (b['paymentStatus'] ?? '').toString() == 'UNPAID'
-                            ? Colors.red.withValues(alpha: 0.06)
-                            : null;
+                final timingParts = <String>[];
+                if (startedAt != null) {
+                  timingParts.add('старт ${_fmtTime(startedAt)}');
+                }
+                if (finishedAt != null) {
+                  timingParts.add('финиш ${_fmtTime(finishedAt)}');
+                }
+                final timing = timingParts.join(' • ');
 
-                        return Container(
-                          color: tileBg,
-                          child: ListTile(
-                            title: Text('$time • $serviceName • Пост $bayId'),
-                            subtitle: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(clientTitle),
-                                if (carLine.isNotEmpty) Text(carLine),
-                                if (timing.isNotEmpty) Text(timing),
-                                const SizedBox(height: 6),
-                                _paymentBadges(b),
-                              ],
-                            ),
-                            isThreeLine: true,
-                            trailing: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                              decoration: BoxDecoration(
-                                color: badgeColor.withValues(alpha: 0.12),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: badgeColor),
-                              ),
-                              child: Text(status, style: TextStyle(color: badgeColor)),
-                            ),
-                            onTap: () async {
-                              await showModalBottomSheet(
-                                context: context,
-                                isScrollControlled: true,
-                                builder: (_) => BookingActionsSheet(
-                                  api: widget.api,
-                                  session: widget.session,
-                                  booking: b,
-                                  onDone: _load,
-                                ),
-                              );
-                            },
-                          ),
-                        );
-                      },
+                final tileBg = (b['paymentStatus'] ?? '').toString() == 'UNPAID'
+                    ? Colors.red.withValues(alpha: 0.06)
+                    : null;
+
+                final subtitleLines = <String>[
+                  clientTitle,
+                  if (carLine.isNotEmpty) carLine,
+                  if (timing.isNotEmpty) timing,
+                ];
+
+                return Container(
+                  color: tileBg,
+                  child: ListTile(
+                    title: Text('$time • $serviceName • Пост $bayId'),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          subtitleLines.join('\n'),
+                          maxLines: 4,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 6),
+                        _paymentBadgesWidget(b),
+                      ],
                     ),
+                    trailing: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: badgeColor.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: badgeColor),
+                      ),
+                      child: Text(status, style: TextStyle(color: badgeColor)),
+                    ),
+                    onTap: () async {
+                      await showModalBottomSheet(
+                        context: context,
+                        isScrollControlled: true,
+                        builder: (_) => BookingActionsSheet(
+                          api: widget.api,
+                          session: widget.session,
+                          booking: b,
+                          onDone: _load,
+                        ),
+                      );
+                    },
+                  ),
+                );
+              },
+            ),
       bottomNavigationBar: Padding(
         padding: const EdgeInsets.all(8),
         child: Text(

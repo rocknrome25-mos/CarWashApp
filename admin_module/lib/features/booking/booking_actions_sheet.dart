@@ -35,12 +35,9 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
   // Оплата админом
   String paymentMethod = 'CARD'; // CARD / CASH / CONTRACT
 
-  bool get _moveEnabled =>
-      widget.session.featureOn('BOOKING_MOVE', defaultValue: true);
-  bool get _cashEnabled =>
-      widget.session.featureOn('CASH_DRAWER', defaultValue: true);
-  bool get _contractEnabled =>
-      widget.session.featureOn('CONTRACT_PAYMENTS', defaultValue: true);
+  bool get _moveEnabled => widget.session.featureOn('BOOKING_MOVE', defaultValue: true);
+  bool get _cashEnabled => widget.session.featureOn('CASH_DRAWER', defaultValue: true);
+  bool get _contractEnabled => widget.session.featureOn('CONTRACT_PAYMENTS', defaultValue: true);
 
   @override
   void initState() {
@@ -59,7 +56,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
       selectedDateTimeLocal = DateTime.parse(dtIso).toLocal();
     }
 
-    // по умолчанию карта
     paymentMethod = 'CARD';
   }
 
@@ -141,7 +137,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
   Future<void> _finish() async {
     if (!_canFinish) return;
 
-    // Мягкое правило: если осталась оплата — спросить подтверждение
     final remaining = _remainingRub();
     if (remaining > 0) {
       final ok = await showDialog<bool>(
@@ -149,9 +144,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
         barrierDismissible: false,
         builder: (_) => AlertDialog(
           title: const Text('Оплата не завершена'),
-          content: Text(
-            'Осталось оплатить: $remaining ₽.\nЗакончить услугу всё равно?',
-          ),
+          content: Text('Осталось оплатить: $remaining ₽.\nЗакончить услугу всё равно?'),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
@@ -245,7 +238,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     final remaining = _remainingRub();
     if (remaining <= 0) return;
 
-    // защита от выбора запрещённого метода (на всякий случай)
     if (paymentMethod == 'CASH' && !_cashEnabled) {
       setState(() => error = 'Наличные отключены для этого заказчика');
       return;
@@ -263,7 +255,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
         kind: 'REMAINING',
         amountRub: remaining,
         methodType: paymentMethod,
-        methodLabel: paymentMethod, // можно позже сделать поле “детали”
+        methodLabel: paymentMethod,
         note: noteCtrl.text.trim().isEmpty ? null : noteCtrl.text.trim(),
       );
     });
@@ -287,7 +279,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
       }
     }
 
-    // если текущий выбранный метод внезапно стал недоступен — откатимся на CARD
     if (!choices.contains(paymentMethod)) {
       paymentMethod = 'CARD';
     }
@@ -300,9 +291,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
           ChoiceChip(
             label: Text(label(v)),
             selected: paymentMethod == v,
-            onSelected: loading
-                ? null
-                : (_) => setState(() => paymentMethod = v),
+            onSelected: loading ? null : (_) => setState(() => paymentMethod = v),
           ),
       ],
     );
@@ -315,11 +304,24 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     final serviceName = b['service']?['name']?.toString() ?? 'Услуга';
     final status = _status();
     final bayIdStr = b['bayId']?.toString() ?? '';
+
     final clientName = b['client']?['name']?.toString();
     final clientPhone = b['client']?['phone']?.toString();
-    final titleClient = (clientName != null && clientName.isNotEmpty)
-        ? clientName
-        : (clientPhone ?? '');
+    final titleClient = (clientName != null && clientName.isNotEmpty) ? clientName : (clientPhone ?? '');
+
+    // ✅ авто в карточке
+    final plate = b['car']?['plateDisplay']?.toString() ?? '';
+    final make = b['car']?['makeDisplay']?.toString() ?? '';
+    final model = b['car']?['modelDisplay']?.toString() ?? '';
+    final color = b['car']?['color']?.toString();
+    final body = b['car']?['bodyType']?.toString();
+
+    final carParts = <String>[];
+    if (plate.isNotEmpty) carParts.add(plate);
+    if ('$make $model'.trim().isNotEmpty) carParts.add('$make $model'.trim());
+    if (body != null && body.trim().isNotEmpty) carParts.add(body.trim());
+    if (color != null && color.trim().isNotEmpty) carParts.add(color.trim());
+    final carLine = carParts.isEmpty ? 'Авто: —' : 'Авто: ${carParts.join(' • ')}';
 
     final dateTimeIso = b['dateTime']?.toString() ?? '';
     final startedAt = b['startedAt']?.toString();
@@ -346,13 +348,11 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
             children: [
               Text(
                 '$dtLine • $serviceName • Пост $bayIdStr',
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                ),
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
               ),
               const SizedBox(height: 6),
               Text('Клиент: $titleClient'),
+              Text(carLine, style: const TextStyle(fontWeight: FontWeight.w600)),
               Text('Статус: $status'),
               const SizedBox(height: 8),
 
@@ -362,15 +362,9 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                   runSpacing: 6,
                   children: [
                     for (final x in payBadges)
-                      Chip(
-                        label: Text(x),
-                        visualDensity: VisualDensity.compact,
-                      ),
+                      Chip(label: Text(x), visualDensity: VisualDensity.compact),
                     if (payStatus.isNotEmpty)
-                      Chip(
-                        label: Text(payStatus),
-                        visualDensity: VisualDensity.compact,
-                      ),
+                      Chip(label: Text(payStatus), visualDensity: VisualDensity.compact),
                   ],
                 ),
                 const SizedBox(height: 6),
@@ -378,9 +372,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                 const SizedBox(height: 8),
               ],
 
-              Text(
-                'План: ${dateTimeIso.isEmpty ? '--:--' : _fmtTimeIso(dateTimeIso)}',
-              ),
+              Text('План: ${dateTimeIso.isEmpty ? '--:--' : _fmtTimeIso(dateTimeIso)}'),
               Text('Старт: ${_fmtTimeIso(startedAt)}'),
               Text('Финиш: ${_fmtTimeIso(finishedAt)}'),
 
@@ -398,10 +390,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                 const SizedBox(height: 14),
                 const Divider(),
                 const SizedBox(height: 10),
-                Text(
-                  'Оплата перед завершением',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
+                Text('Оплата перед завершением', style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 8),
                 Text('Осталось оплатить: $remaining ₽'),
                 const SizedBox(height: 8),
@@ -419,19 +408,14 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                 const SizedBox(height: 14),
                 const Divider(),
                 const SizedBox(height: 10),
-                Text(
-                  'Перенос записи',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
+                Text('Перенос записи', style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 8),
 
                 Row(
                   children: [
                     Expanded(
                       child: OutlinedButton(
-                        onPressed: loading || !_canMove
-                            ? null
-                            : _pickMoveDateTime,
+                        onPressed: loading || !_canMove ? null : _pickMoveDateTime,
                         child: Text(
                           selectedDateTimeLocal == null
                               ? 'Выбрать дату/время'
@@ -499,11 +483,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                     child: ElevatedButton(
                       onPressed: loading || !_canStart ? null : _start,
                       child: loading
-                          ? const SizedBox(
-                              height: 18,
-                              width: 18,
-                              child: CircularProgressIndicator(),
-                            )
+                          ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator())
                           : const Text('Начать'),
                     ),
                   ),
