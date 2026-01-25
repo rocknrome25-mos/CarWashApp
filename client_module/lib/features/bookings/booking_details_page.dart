@@ -130,10 +130,12 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
     if (url != null && url.isNotEmpty) return NetworkImage(url);
 
     final name = (s?.name ?? '').toLowerCase();
-    if (name.contains('воск'))
+    if (name.contains('воск')) {
       return const AssetImage('assets/images/services/vosk_1080.jpg');
-    if (name.contains('комплекс'))
+    }
+    if (name.contains('комплекс')) {
       return const AssetImage('assets/images/services/kompleks_1080.jpg');
+    }
     return const AssetImage('assets/images/services/kuzov_1080.jpg');
   }
 
@@ -457,6 +459,9 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
           final paidTotal = booking.paidTotalRub;
           final toPay = _toPayRub(service, booking);
 
+          final discountReason =
+              (booking.discountNote ?? '').trim().isEmpty ? null : booking.discountNote!.trim();
+
           return ListView(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
             children: [
@@ -518,6 +523,17 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                           fontWeight: FontWeight.w900,
                         ),
                       ),
+                      if (discountReason != null) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          'Причина скидки: $discountReason',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.black.withValues(alpha: 0.70),
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ],
                     ],
 
                     const SizedBox(height: 10),
@@ -594,10 +610,7 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      'Авто',
-                      style: TextStyle(fontWeight: FontWeight.w900),
-                    ),
+                    const Text('Авто', style: TextStyle(fontWeight: FontWeight.w900)),
                     const SizedBox(height: 8),
                     Text(
                       car == null ? 'Авто удалено' : _carTitleForUi(car),

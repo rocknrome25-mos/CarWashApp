@@ -13,6 +13,9 @@ class LoginPage extends StatefulWidget {
 class _LoginPageState extends State<LoginPage> {
   final _phoneCtrl = TextEditingController(text: '+7 999 123-45-67');
   final _passCtrl = TextEditingController(text: '1234');
+  final _nameCtrl = TextEditingController(text: 'Роман');
+
+  String _gender = 'MALE'; // MALE / FEMALE
   bool _loading = false;
 
   String _normalizePhone(String raw) {
@@ -45,12 +48,22 @@ class _LoginPageState extends State<LoginPage> {
 
     final phoneRaw = _phoneCtrl.text;
     final pass = _passCtrl.text.trim();
+    final name = _nameCtrl.text.trim();
 
     final phone = _normalizePhone(phoneRaw);
 
     if (!_looksLikeRuPhone(phone)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Проверь телефон. Нужно минимум 10 цифр.')),
+        const SnackBar(
+          content: Text('Проверь телефон. Нужно минимум 10 цифр.'),
+        ),
+      );
+      return;
+    }
+
+    if (name.isEmpty || name.length < 2) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Введите имя (минимум 2 символа).')),
       );
       return;
     }
@@ -59,21 +72,32 @@ class _LoginPageState extends State<LoginPage> {
 
     try {
       // прототип: пароль только 1234
-      if (pass == '1234') {
-        await widget.repo.loginDemo(phone: phone);
+      if (pass != '1234') {
         if (!mounted) return;
-        Navigator.of(context).pop(true);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Неверный пароль (для прототипа: 1234)'),
+          ),
+        );
         return;
       }
 
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Неверный пароль (для демо: 1234)')),
+      // ✅ “правильный” прототипный вход:
+      // используем idempotent register (создаст/обновит клиента по телефону),
+      // и имя будет реальным, не “Demo”
+      await widget.repo.registerClient(
+        phone: phone,
+        name: name,
+        gender: _gender,
       );
+
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Ошибка: $e')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -85,7 +109,7 @@ class _LoginPageState extends State<LoginPage> {
       builder: (ctx) => AlertDialog(
         title: const Text('Восстановление доступа'),
         content: const Text(
-          'Скоро добавим восстановление по телефону/SMS.\n\nПока демо: телефон + пароль 1234',
+          'Скоро добавим восстановление по телефону/SMS.\n\nПока прототип: телефон + пароль 1234',
         ),
         actions: [
           TextButton(
@@ -101,6 +125,7 @@ class _LoginPageState extends State<LoginPage> {
   void dispose() {
     _phoneCtrl.dispose();
     _passCtrl.dispose();
+    _nameCtrl.dispose();
     super.dispose();
   }
 
@@ -127,7 +152,7 @@ class _LoginPageState extends State<LoginPage> {
                   SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      'Прототипный вход\nТелефон + пароль 1234',
+                      'Прототипный вход\nТелефон + имя + пароль 1234',
                       style: TextStyle(
                         fontWeight: FontWeight.w800,
                         height: 1.2,
@@ -138,6 +163,7 @@ class _LoginPageState extends State<LoginPage> {
               ),
             ),
             const SizedBox(height: 14),
+
             TextField(
               controller: _phoneCtrl,
               keyboardType: TextInputType.phone,
@@ -149,6 +175,34 @@ class _LoginPageState extends State<LoginPage> {
               ),
             ),
             const SizedBox(height: 12),
+
+            TextField(
+              controller: _nameCtrl,
+              textInputAction: TextInputAction.next,
+              decoration: const InputDecoration(
+                labelText: 'Имя',
+                hintText: 'Например: Роман',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            DropdownButtonFormField<String>(
+              initialValue: _gender,
+              decoration: const InputDecoration(
+                labelText: 'Пол',
+                border: OutlineInputBorder(),
+              ),
+              items: const [
+                DropdownMenuItem(value: 'MALE', child: Text('Мужской')),
+                DropdownMenuItem(value: 'FEMALE', child: Text('Женский')),
+              ],
+              onChanged: _loading
+                  ? null
+                  : (v) => setState(() => _gender = v ?? 'MALE'),
+            ),
+            const SizedBox(height: 12),
+
             TextField(
               controller: _passCtrl,
               obscureText: true,
@@ -159,6 +213,7 @@ class _LoginPageState extends State<LoginPage> {
               ),
             ),
             const SizedBox(height: 10),
+
             Align(
               alignment: Alignment.centerRight,
               child: TextButton(
@@ -166,7 +221,9 @@ class _LoginPageState extends State<LoginPage> {
                 child: const Text('Забыл логин/пароль'),
               ),
             ),
+
             const Spacer(),
+
             SizedBox(
               width: double.infinity,
               height: 52,
