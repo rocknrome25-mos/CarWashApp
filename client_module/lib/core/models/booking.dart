@@ -35,8 +35,13 @@ class Booking {
   final DateTime createdAt;
   final DateTime updatedAt;
 
+  final String locationId;
+
   final DateTime dateTime;
   final BookingStatus status;
+
+  final DateTime? startedAt;
+  final DateTime? finishedAt;
 
   final DateTime? canceledAt;
   final String? cancelReason;
@@ -54,31 +59,42 @@ class Booking {
   final int depositRub;
   final int bufferMin;
 
-  // ✅ новое: список платежей
+  // ✅ скидка (из admin)
+  final int discountRub;
+  final String? discountNote;
+
+  // ✅ платежи
   final List<Payment> payments;
 
   Booking({
     required this.id,
     required this.createdAt,
     required this.updatedAt,
+    required this.locationId,
     required this.dateTime,
     required this.status,
     required this.carId,
     required this.serviceId,
     required this.depositRub,
     required this.bufferMin,
+    this.startedAt,
+    this.finishedAt,
     this.canceledAt,
     this.cancelReason,
     this.paymentDueAt,
     this.bayId,
     this.comment,
+    this.discountRub = 0,
+    this.discountNote,
     this.payments = const [],
   });
+
+  bool get isWashing =>
+      status == BookingStatus.active && startedAt != null && finishedAt == null;
 
   int get paidTotalRub {
     var sum = 0;
     for (final p in payments) {
-      // refund уменьшаем сумму
       if (p.kind == PaymentKind.refund) {
         sum -= p.amountRub;
       } else {
@@ -99,9 +115,8 @@ class Booking {
 
   factory Booking.fromJson(Map<String, dynamic> json) {
     final cancelReasonRaw = (json['cancelReason'] as String?)?.trim();
-    final cancelReason = (cancelReasonRaw?.isEmpty ?? true)
-        ? null
-        : cancelReasonRaw;
+    final cancelReason =
+        (cancelReasonRaw?.isEmpty ?? true) ? null : cancelReasonRaw;
 
     String? comment =
         (json['comment'] as String?) ??
@@ -117,12 +132,27 @@ class Booking {
         .map((e) => Payment.fromJson(e))
         .toList();
 
+    final discountRub = json['discountRub'] is int
+        ? json['discountRub'] as int
+        : int.tryParse('${json['discountRub']}') ?? 0;
+
+    final discountNoteRaw = (json['discountNote'] as String?)?.trim();
+    final discountNote =
+        (discountNoteRaw?.isEmpty ?? true) ? null : discountNoteRaw;
+
     return Booking(
       id: json['id'] as String,
       createdAt: DateTime.parse(json['createdAt'] as String),
       updatedAt: DateTime.parse(json['updatedAt'] as String),
+      locationId: (json['locationId'] ?? '').toString(),
       dateTime: DateTime.parse(json['dateTime'] as String),
       status: bookingStatusFromJson((json['status'] ?? 'ACTIVE') as String),
+      startedAt: json['startedAt'] == null
+          ? null
+          : DateTime.parse(json['startedAt'] as String),
+      finishedAt: json['finishedAt'] == null
+          ? null
+          : DateTime.parse(json['finishedAt'] as String),
       canceledAt: json['canceledAt'] == null
           ? null
           : DateTime.parse(json['canceledAt'] as String),
@@ -142,25 +172,32 @@ class Booking {
       bufferMin: json['bufferMin'] is int
           ? json['bufferMin'] as int
           : int.tryParse('${json['bufferMin']}') ?? 0,
+      discountRub: discountRub,
+      discountNote: discountNote,
       payments: payments,
     );
   }
 
   Map<String, dynamic> toJson() => {
-    'id': id,
-    'createdAt': createdAt.toIso8601String(),
-    'updatedAt': updatedAt.toIso8601String(),
-    'dateTime': dateTime.toIso8601String(),
-    'status': bookingStatusToJson(status),
-    'canceledAt': canceledAt?.toIso8601String(),
-    'cancelReason': cancelReason,
-    'paymentDueAt': paymentDueAt?.toIso8601String(),
-    'carId': carId,
-    'serviceId': serviceId,
-    'bayId': bayId,
-    'comment': comment,
-    'depositRub': depositRub,
-    'bufferMin': bufferMin,
-    'payments': payments.map((p) => p.toJson()).toList(),
-  };
+        'id': id,
+        'createdAt': createdAt.toIso8601String(),
+        'updatedAt': updatedAt.toIso8601String(),
+        'locationId': locationId,
+        'dateTime': dateTime.toIso8601String(),
+        'status': bookingStatusToJson(status),
+        'startedAt': startedAt?.toIso8601String(),
+        'finishedAt': finishedAt?.toIso8601String(),
+        'canceledAt': canceledAt?.toIso8601String(),
+        'cancelReason': cancelReason,
+        'paymentDueAt': paymentDueAt?.toIso8601String(),
+        'carId': carId,
+        'serviceId': serviceId,
+        'bayId': bayId,
+        'comment': comment,
+        'depositRub': depositRub,
+        'bufferMin': bufferMin,
+        'discountRub': discountRub,
+        'discountNote': discountNote,
+        'payments': payments.map((p) => p.toJson()).toList(),
+      };
 }

@@ -73,7 +73,6 @@ enum ShiftCashEventType {
 }
 
 model Tenant {
-  /// ✅ фиксированный id допустим (например "demo-tenant")
   id        String   @id
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -111,8 +110,6 @@ model Location {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // ✅ tenant scope (owner of network)
-  // ✅ default нужен, чтобы миграция не падала на существующих строках
   tenantId String @default("demo-tenant")
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
@@ -165,7 +162,6 @@ model Client {
   gender    ClientGender?
   birthDate DateTime?
 
-  // LEGACY global block
   isBlocked       Boolean  @default(false)
   blockReason     String?
   blockedAt       DateTime?
@@ -257,6 +253,10 @@ model Booking {
 
   bufferMin  Int @default(0)
   depositRub Int @default(0)
+
+  /// ✅ скидка (рубли) и комментарий
+  discountRub  Int    @default(0)
+  discountNote String?
 
   comment   String?
   adminNote String?

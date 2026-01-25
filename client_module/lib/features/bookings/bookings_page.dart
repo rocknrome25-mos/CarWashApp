@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import '../../core/data/app_repository.dart';
 import '../../core/models/booking.dart';
@@ -26,10 +29,35 @@ class _BookingsPageState extends State<BookingsPage> {
 
   late Future<_BookingsBundle> _future;
 
+  StreamSubscription? _rtSub;
+  Timer? _rtDebounce;
+
   @override
   void initState() {
     super.initState();
     _future = _load();
+    _subscribeRealtime();
+  }
+
+  @override
+  void dispose() {
+    _rtDebounce?.cancel();
+    _rtDebounce = null;
+    _rtSub?.cancel();
+    _rtSub = null;
+    super.dispose();
+  }
+
+  void _subscribeRealtime() {
+    _rtSub?.cancel();
+    _rtSub = widget.repo.bookingEvents.listen((_) {
+      // Любое booking.changed → обновляем список (это история по сети)
+      _rtDebounce?.cancel();
+      _rtDebounce = Timer(const Duration(milliseconds: 250), () {
+        if (!mounted) return;
+        _refresh();
+      });
+    });
   }
 
   @override
@@ -82,9 +110,10 @@ class _BookingsPageState extends State<BookingsPage> {
         '${x.minute.toString().padLeft(2, '0')}';
   }
 
-  Color _statusColor(BuildContext ctx, BookingStatus s) {
+  Color _statusColor(BuildContext ctx, Booking b) {
+    if (b.isWashing) return Colors.blue;
     final cs = Theme.of(ctx).colorScheme;
-    switch (s) {
+    switch (b.status) {
       case BookingStatus.active:
         return cs.primary;
       case BookingStatus.pendingPayment:
@@ -96,8 +125,9 @@ class _BookingsPageState extends State<BookingsPage> {
     }
   }
 
-  String _statusText(BookingStatus s) {
-    switch (s) {
+  String _statusText(Booking b) {
+    if (b.isWashing) return 'МОЕТСЯ';
+    switch (b.status) {
       case BookingStatus.active:
         return 'ЗАБРОНИРОВАНО';
       case BookingStatus.pendingPayment:
@@ -138,10 +168,20 @@ class _BookingsPageState extends State<BookingsPage> {
     return 'assets/images/services/kuzov_512.jpg';
   }
 
+  int _effectivePriceRub(Service? s, Booking b) {
+    final price = s?.priceRub ?? 0;
+    return max(price - b.discountRub, 0);
+  }
+
+  int _toPayRub(Service? s, Booking b) {
+    final total = _effectivePriceRub(s, b);
+    return max(total - b.paidTotalRub, 0);
+  }
+
   // ================= widgets =================
 
   Widget _statusBadge(BuildContext ctx, Booking b) {
-    final c = _statusColor(ctx, b.status);
+    final c = _statusColor(ctx, b);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
@@ -149,7 +189,7 @@ class _BookingsPageState extends State<BookingsPage> {
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
-        _statusText(b.status),
+        _statusText(b),
         style: TextStyle(
           fontSize: 12,
           fontWeight: FontWeight.w900,
@@ -228,6 +268,9 @@ class _BookingsPageState extends State<BookingsPage> {
   }) {
     final when = '${_dateHeader(b.dateTime)} • ${_time(b.dateTime)}';
 
+    final total = _effectivePriceRub(service, b);
+    final toPay = _toPayRub(service, b);
+
     return InkWell(
       borderRadius: BorderRadius.circular(18),
       onTap: onTap,
@@ -237,7 +280,10 @@ class _BookingsPageState extends State<BookingsPage> {
           color: Theme.of(context).cardColor,
           borderRadius: BorderRadius.circular(18),
           border: Border.all(
-            color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.6),
+            color: Theme.of(context)
+                .colorScheme
+                .outlineVariant
+                .withValues(alpha: 0.6),
           ),
         ),
         child: Row(
@@ -284,6 +330,26 @@ class _BookingsPageState extends State<BookingsPage> {
                       fontSize: 12,
                       fontWeight: FontWeight.w700,
                       color: Colors.black.withValues(alpha: 0.65),
+                    ),
+                  ),
+                  if (b.discountRub > 0) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      'Скидка: ${b.discountRub} ₽',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w900,
+                        color: Colors.black.withValues(alpha: 0.75),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 4),
+                  Text(
+                    'Стоимость: $total ₽   К оплате: $toPay ₽',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w900,
+                      color: Colors.black.withValues(alpha: 0.75),
                     ),
                   ),
                   const SizedBox(height: 8),

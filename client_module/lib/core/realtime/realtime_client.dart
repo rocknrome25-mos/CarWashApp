@@ -5,11 +5,13 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 class BookingRealtimeEvent {
   final String type; // 'booking.changed'
+  final String locationId;
   final int bayId;
   final DateTime at;
 
   BookingRealtimeEvent({
     required this.type,
+    required this.locationId,
     required this.bayId,
     required this.at,
   });
@@ -17,6 +19,7 @@ class BookingRealtimeEvent {
   factory BookingRealtimeEvent.fromJson(Map<String, dynamic> j) {
     return BookingRealtimeEvent(
       type: (j['type'] ?? '').toString(),
+      locationId: (j['locationId'] ?? '').toString(),
       bayId: (j['bayId'] as num?)?.toInt() ?? 1,
       at:
           DateTime.tryParse((j['at'] ?? '').toString()) ??

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../api/api_client.dart';
@@ -7,6 +8,7 @@ import '../models/booking.dart';
 import '../models/car.dart';
 import '../models/service.dart';
 import '../models/client.dart';
+import '../models/location.dart';
 import '../realtime/realtime_client.dart';
 
 class ApiRepository implements AppRepository {
@@ -19,12 +21,36 @@ class ApiRepository implements AppRepository {
   static const _kClient = 'current_client';
   static const _kLocation = 'current_location';
 
+  StreamSubscription<BookingRealtimeEvent>? _rtSub;
+  Timer? _rtDebounce;
+
   ApiRepository({
     required this.api,
     required this.cache,
     required this.realtime,
   }) {
     realtime.connect();
+    _subscribeRealtime();
+  }
+
+  void _subscribeRealtime() {
+    _rtSub?.cancel();
+    _rtSub = realtime.events.listen((ev) {
+      if (ev.type != 'booking.changed') return;
+
+      final curLocId = currentLocation?.id;
+      if (curLocId == null || curLocId.trim().isEmpty) return;
+
+      // ✅ only invalidate if event belongs to current location
+      if (ev.locationId.trim().isEmpty) return;
+      if (ev.locationId.trim() != curLocId.trim()) return;
+
+      // debounce invalidations (burst of events)
+      _rtDebounce?.cancel();
+      _rtDebounce = Timer(const Duration(milliseconds: 250), () {
+        _invalidateBookingCaches();
+      });
+    });
   }
 
   // ---------------- SESSION ----------------
@@ -71,7 +97,11 @@ class ApiRepository implements AppRepository {
     } else {
       cache.set(_kLocation, loc, ttl: const Duration(days: 365));
     }
+
+    // When location changes, invalidate availability + bookings caches
     cache.invalidatePrefix('busy_slots_');
+    cache.invalidate('bookings_all');
+    cache.invalidate('bookings_active');
   }
 
   @override
@@ -90,7 +120,7 @@ class ApiRepository implements AppRepository {
 
     cache.set(key, list, ttl: const Duration(minutes: 5));
 
-    // ✅ дефолт: если локация ещё не выбрана — ставим первую
+    // ✅ default location if not chosen yet
     if (currentLocation == null && list.isNotEmpty) {
       await setCurrentLocation(list.first);
     }
@@ -105,7 +135,9 @@ class ApiRepository implements AppRepository {
     final cached = currentLocation?.id;
     if (cached != null && cached.trim().isNotEmpty) return cached.trim();
 
-    throw Exception('Не выбрана локация. Обнови список локаций и выбери мойку.');
+    throw Exception(
+      'Не выбрана локация. Обнови список локаций и выбери мойку.',
+    );
   }
 
   // ---------------- REALTIME ----------------
@@ -142,7 +174,6 @@ class ApiRepository implements AppRepository {
     final c = Client.fromJson(j);
     await setCurrentClient(c);
 
-    // ✅ подгружаем локации сразу (и выставляем дефолт)
     await getLocations(forceRefresh: true);
 
     return c;
@@ -166,7 +197,6 @@ class ApiRepository implements AppRepository {
     final c = Client.fromJson(j);
     await setCurrentClient(c);
 
-    // ✅ подгружаем локации сразу (и выставляем дефолт)
     await getLocations(forceRefresh: true);
 
     return c;
@@ -388,6 +418,10 @@ class ApiRepository implements AppRepository {
 
   @override
   Future<void> dispose() async {
+    _rtDebounce?.cancel();
+    _rtDebounce = null;
+    await _rtSub?.cancel();
+    _rtSub = null;
     await realtime.close();
   }
 }

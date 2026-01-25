@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import '../../core/data/app_repository.dart';
 import '../../core/models/booking.dart';
@@ -22,12 +25,10 @@ class BookingDetailsPage extends StatefulWidget {
 class _BookingDetailsPageState extends State<BookingDetailsPage> {
   static const int _depositRubFallback = 500;
 
-  // ✅ Иконки постов (пути как договорились)
   static const String _bayAnyIcon = 'assets/images/posts/post_any.png';
   static const String _bayGreenIcon = 'assets/images/posts/post_green.png';
   static const String _bayBlueIcon = 'assets/images/posts/post_blue.png';
 
-  // ✅ Цвета линий/постов — идентификация
   static const Color _greenLine = Color(0xFF2DBD6E);
   static const Color _blueLine = Color(0xFF2D9CDB);
 
@@ -36,10 +37,34 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
   bool _canceling = false;
   bool _paying = false;
 
+  StreamSubscription? _rtSub;
+  Timer? _rtDebounce;
+
   @override
   void initState() {
     super.initState();
     _future = _load();
+    _subscribeRealtime();
+  }
+
+  @override
+  void dispose() {
+    _rtDebounce?.cancel();
+    _rtDebounce = null;
+    _rtSub?.cancel();
+    _rtSub = null;
+    super.dispose();
+  }
+
+  void _subscribeRealtime() {
+    _rtSub?.cancel();
+    _rtSub = widget.repo.bookingEvents.listen((_) {
+      _rtDebounce?.cancel();
+      _rtDebounce = Timer(const Duration(milliseconds: 250), () {
+        if (!mounted) return;
+        setState(() => _future = _load(forceRefresh: true));
+      });
+    });
   }
 
   Future<_Details> _load({bool forceRefresh = false}) async {
@@ -78,7 +103,6 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
     return '$make $model (${c.plateDisplay})';
   }
 
-  // ✅ Цвет линии: Любая линия = primary, остальное = green/blue
   Color _bayColor(BuildContext context, int? bayId) {
     final primary = Theme.of(context).colorScheme.primary;
     if (bayId == null) return primary;
@@ -101,29 +125,22 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
     return _bayAnyIcon;
   }
 
-  // ✅ Картинка услуги: из assets по названию
   ImageProvider _serviceHero(Service? s) {
     final url = s?.imageUrl;
     if (url != null && url.isNotEmpty) return NetworkImage(url);
 
     final name = (s?.name ?? '').toLowerCase();
-    if (name.contains('воск')) {
+    if (name.contains('воск'))
       return const AssetImage('assets/images/services/vosk_1080.jpg');
-    }
-    if (name.contains('комплекс')) {
+    if (name.contains('комплекс'))
       return const AssetImage('assets/images/services/kompleks_1080.jpg');
-    }
-    if (name.contains('кузов')) {
-      return const AssetImage('assets/images/services/kuzov_1080.jpg');
-    }
-
     return const AssetImage('assets/images/services/kuzov_1080.jpg');
   }
 
-  // ✅ Цвета статусов: active = primary (дефолт), остальное — стандартно
-  Color _statusColor(BuildContext context, BookingStatus s) {
+  Color _statusColor(BuildContext context, Booking b) {
+    if (b.isWashing) return Colors.blue;
     final cs = Theme.of(context).colorScheme;
-    switch (s) {
+    switch (b.status) {
       case BookingStatus.active:
         return cs.primary;
       case BookingStatus.pendingPayment:
@@ -135,8 +152,9 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
     }
   }
 
-  String _statusText(BookingStatus s) {
-    switch (s) {
+  String _statusText(Booking b) {
+    if (b.isWashing) return 'Моется';
+    switch (b.status) {
       case BookingStatus.active:
         return 'Забронировано';
       case BookingStatus.pendingPayment:
@@ -167,16 +185,25 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
   }
 
   Widget _statusBadge(Booking b) {
-    final c = _statusColor(context, b.status);
-    return _badge(text: _statusText(b.status).toUpperCase(), color: c);
+    final c = _statusColor(context, b);
+    return _badge(text: _statusText(b).toUpperCase(), color: c);
   }
 
   bool _canPayDeposit(Booking b) {
     if (b.status != BookingStatus.pendingPayment) return false;
-
     final due = b.paymentDueAt;
     if (due == null) return true;
     return due.isAfter(DateTime.now());
+  }
+
+  int _effectivePriceRub(Service? service, Booking b) {
+    final price = service?.priceRub ?? 0;
+    return max(price - b.discountRub, 0);
+  }
+
+  int _toPayRub(Service? service, Booking b) {
+    final total = _effectivePriceRub(service, b);
+    return max(total - b.paidTotalRub, 0);
   }
 
   Future<void> _payNow({
@@ -316,7 +343,6 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
     );
   }
 
-  // ✅ ЕДИНЫЙ ПАТТЕРН как в bookings_page: полоса слева + иконка + текст
   Widget _bayPill(int? bayId) {
     final cs = Theme.of(context).colorScheme;
     final stripe = _bayColor(context, bayId);
@@ -423,18 +449,13 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
           final showPayButton = _canPayDeposit(booking);
           final badge = _statusBadge(booking);
 
-          final total = service?.priceRub;
           final depositRub = booking.depositRub > 0
               ? booking.depositRub
               : _depositRubFallback;
-          final remaining = (total == null)
-              ? null
-              : ((total - depositRub) > 0 ? (total - depositRub) : 0);
 
+          final total = _effectivePriceRub(service, booking);
           final paidTotal = booking.paidTotalRub;
-          final paidLine = (total == null)
-              ? null
-              : 'Оплачено: $paidTotal ₽ из $total ₽';
+          final toPay = _toPayRub(service, booking);
 
           return ListView(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
@@ -474,44 +495,40 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                     ),
 
                     const SizedBox(height: 12),
-
-                    // ✅ Линия / пост — тот же вид, что в списке
                     _bayPill(booking.bayId),
 
                     const SizedBox(height: 14),
 
                     Text(
-                      'Оплата брони: $depositRub ₽',
+                      'Стоимость: $total ₽',
                       style: TextStyle(
                         fontSize: 12,
-                        color: Colors.black.withValues(alpha: 0.80),
+                        color: Colors.black.withValues(alpha: 0.85),
                         fontWeight: FontWeight.w900,
                       ),
                     ),
 
-                    if (remaining != null) ...[
-                      const SizedBox(height: 4),
+                    if (booking.discountRub > 0) ...[
+                      const SizedBox(height: 6),
                       Text(
-                        'Остаток к оплате на месте: $remaining ₽',
+                        'Скидка: ${booking.discountRub} ₽',
                         style: TextStyle(
                           fontSize: 12,
-                          color: Colors.black.withValues(alpha: 0.65),
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ],
-
-                    if (paidLine != null) ...[
-                      const SizedBox(height: 10),
-                      Text(
-                        paidLine,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.black.withValues(alpha: 0.65),
+                          color: Colors.black.withValues(alpha: 0.70),
                           fontWeight: FontWeight.w900,
                         ),
                       ),
                     ],
+
+                    const SizedBox(height: 10),
+                    Text(
+                      'Оплачено: $paidTotal ₽   К оплате: $toPay ₽',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.black.withValues(alpha: 0.75),
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
 
                     if (booking.lastPaidAt != null) ...[
                       const SizedBox(height: 6),
@@ -537,6 +554,16 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                         ),
                       ),
                     ],
+
+                    const SizedBox(height: 12),
+                    Text(
+                      'Оплата брони: $depositRub ₽',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.black.withValues(alpha: 0.80),
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -587,16 +614,6 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                         ),
                       ),
                     ],
-                    const SizedBox(height: 14),
-                    const Text(
-                      'Стоимость',
-                      style: TextStyle(fontWeight: FontWeight.w900),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      service == null ? '—' : '${service.priceRub} ₽',
-                      style: const TextStyle(fontWeight: FontWeight.w900),
-                    ),
                   ],
                 ),
               ),

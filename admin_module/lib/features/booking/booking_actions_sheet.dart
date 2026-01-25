@@ -26,7 +26,16 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
   String? error;
 
   final noteCtrl = TextEditingController();
-  final moveReasonCtrl = TextEditingController(text: 'Сдвиг из-за задержки');
+
+  // Перенос: причина (dropdown) + комментарий (обязательный)
+  static const _moveReasons = <String>[
+    'Задержка',
+    'Сбой',
+    'Передумал',
+    'Другое',
+  ];
+  String moveReasonKind = _moveReasons.first;
+  final moveCommentCtrl = TextEditingController();
   bool clientAgreed = true;
 
   int selectedBay = 1;
@@ -35,9 +44,18 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
   // Оплата админом
   String paymentMethod = 'CARD'; // CARD / CASH / CONTRACT
 
-  bool get _moveEnabled => widget.session.featureOn('BOOKING_MOVE', defaultValue: true);
-  bool get _cashEnabled => widget.session.featureOn('CASH_DRAWER', defaultValue: true);
-  bool get _contractEnabled => widget.session.featureOn('CONTRACT_PAYMENTS', defaultValue: true);
+  // Скидка
+  final discountCtrl = TextEditingController(text: '0');
+  final discountReasonCtrl = TextEditingController(text: '');
+
+  bool get _moveEnabled =>
+      widget.session.featureOn('BOOKING_MOVE', defaultValue: true);
+  bool get _cashEnabled =>
+      widget.session.featureOn('CASH_DRAWER', defaultValue: true);
+  bool get _contractEnabled =>
+      widget.session.featureOn('CONTRACT_PAYMENTS', defaultValue: true);
+  bool get _discountEnabled =>
+      widget.session.featureOn('DISCOUNTS', defaultValue: true);
 
   @override
   void initState() {
@@ -57,12 +75,24 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     }
 
     paymentMethod = 'CARD';
+
+    // текущая скидка
+    final dr = widget.booking['discountRub'];
+    if (dr is num) {
+      discountCtrl.text = dr.toInt().toString();
+    }
+    final dn = widget.booking['discountNote'];
+    if (dn is String && dn.trim().isNotEmpty) {
+      discountReasonCtrl.text = dn;
+    }
   }
 
   @override
   void dispose() {
     noteCtrl.dispose();
-    moveReasonCtrl.dispose();
+    moveCommentCtrl.dispose();
+    discountCtrl.dispose();
+    discountReasonCtrl.dispose();
     super.dispose();
   }
 
@@ -80,20 +110,50 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     return DateFormat('yyyy-MM-dd HH:mm').format(dt);
   }
 
-  String _status() => (widget.booking['status'] ?? '').toString();
-  bool get _isCompleted => _status() == 'COMPLETED';
-  bool get _isCanceled => _status() == 'CANCELED';
-
-  bool get _canStart => !_isCanceled && !_isCompleted;
-  bool get _canMove => _moveEnabled && !_isCanceled && !_isCompleted;
-  bool get _canFinish => !_isCanceled && !_isCompleted;
-
   int _intOr0(dynamic v) {
     if (v is int) return v;
     if (v is num) return v.toInt();
     return 0;
   }
 
+  // ===== статус на русском + МОЕТСЯ =====
+  String _rawStatus() => (widget.booking['status'] ?? '').toString();
+  String? _startedAtIso() => widget.booking['startedAt']?.toString();
+  String? _finishedAtIso() => widget.booking['finishedAt']?.toString();
+
+  bool get _isCanceled => _rawStatus() == 'CANCELED';
+
+  String get _statusRu {
+    final startedAt = _startedAtIso();
+    final finishedAt = _finishedAtIso();
+
+    if (_isCanceled) return 'ОТМЕНЕНО';
+    if (startedAt != null &&
+        startedAt.isNotEmpty &&
+        (finishedAt == null || finishedAt.isEmpty)) {
+      return 'МОЕТСЯ';
+    }
+
+    switch (_rawStatus()) {
+      case 'COMPLETED':
+        return 'ЗАВЕРШЕНО';
+      case 'ACTIVE':
+        return 'ОЖИДАЕТ';
+      case 'PENDING_PAYMENT':
+        return 'ОЖИДАЕТ';
+      default:
+        return _rawStatus();
+    }
+  }
+
+  bool get _isCompletedRu => _statusRu == 'ЗАВЕРШЕНО';
+
+  bool get _canStart =>
+      !_isCanceled && !_isCompletedRu && _statusRu != 'МОЕТСЯ';
+  bool get _canFinish => !_isCanceled && !_isCompletedRu;
+  bool get _canMove => _moveEnabled && !_isCanceled && !_isCompletedRu;
+
+  // ===== оплаты =====
   List<String> _paymentBadges() {
     final b = widget.booking['paymentBadges'];
     if (b is List) return b.map((x) => x.toString()).toList();
@@ -101,8 +161,38 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
   }
 
   String _paymentStatus() => (widget.booking['paymentStatus'] ?? '').toString();
+  String get _paymentStatusRu {
+    final ps = _paymentStatus();
+    if (ps == 'PAID') return 'ОПЛАЧЕНО';
+    if (ps == 'PARTIAL') return 'ЧАСТИЧНО';
+    if (ps == 'UNPAID') return 'НЕ ОПЛАЧЕНО';
+    return ps;
+  }
+
   int _paidTotalRub() => _intOr0(widget.booking['paidTotalRub']);
-  int _remainingRub() => _intOr0(widget.booking['remainingRub']);
+  int _toPayRub() => _intOr0(widget.booking['remainingRub']); // к оплате
+  int _discountRub() => _intOr0(widget.booking['discountRub']);
+  int _effectivePriceRub() => _intOr0(widget.booking['effectivePriceRub']);
+
+  IconData _payIcon(String x) {
+    switch (x) {
+      case 'CARD':
+        return Icons.credit_card;
+      case 'CASH':
+        return Icons.payments;
+      case 'CONTRACT':
+        return Icons.business_center;
+      default:
+        return Icons.receipt_long;
+    }
+  }
+
+  Color _statusColor() {
+    if (_statusRu == 'МОЕТСЯ') return Colors.blue;
+    if (_statusRu == 'ЗАВЕРШЕНО') return Colors.green;
+    if (_statusRu == 'ОТМЕНЕНО') return Colors.red;
+    return Colors.orange;
+  }
 
   Future<void> _run(Future<void> Function() fn) async {
     setState(() {
@@ -137,14 +227,14 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
   Future<void> _finish() async {
     if (!_canFinish) return;
 
-    final remaining = _remainingRub();
-    if (remaining > 0) {
+    final toPay = _toPayRub();
+    if (toPay > 0) {
       final ok = await showDialog<bool>(
         context: context,
         barrierDismissible: false,
         builder: (_) => AlertDialog(
           title: const Text('Оплата не завершена'),
-          content: Text('Осталось оплатить: $remaining ₽.\nЗакончить услугу всё равно?'),
+          content: Text('К оплате: $toPay ₽.\nЗавершить услугу всё равно?'),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
@@ -152,7 +242,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
             ),
             ElevatedButton(
               onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Закончить'),
+              child: const Text('Завершить'),
             ),
           ],
         ),
@@ -209,9 +299,9 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
       return;
     }
 
-    final reason = moveReasonCtrl.text.trim();
-    if (reason.isEmpty) {
-      setState(() => error = 'Причина переноса обязательна');
+    final comment = moveCommentCtrl.text.trim();
+    if (comment.isEmpty) {
+      setState(() => error = 'Комментарий к переносу обязателен');
       return;
     }
     if (!clientAgreed) {
@@ -220,6 +310,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     }
 
     final newIsoUtc = dt.toUtc().toIso8601String();
+    final reason = '$moveReasonKind: $comment';
 
     await _run(() async {
       await widget.api.moveBooking(
@@ -235,8 +326,8 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
   }
 
   Future<void> _payFully() async {
-    final remaining = _remainingRub();
-    if (remaining <= 0) return;
+    final toPay = _toPayRub();
+    if (toPay <= 0) return;
 
     if (paymentMethod == 'CASH' && !_cashEnabled) {
       setState(() => error = 'Наличные отключены для этого заказчика');
@@ -253,10 +344,36 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
         _shiftId,
         _bookingId,
         kind: 'REMAINING',
-        amountRub: remaining,
+        amountRub: toPay,
         methodType: paymentMethod,
         methodLabel: paymentMethod,
         note: noteCtrl.text.trim().isEmpty ? null : noteCtrl.text.trim(),
+      );
+    });
+  }
+
+  Future<void> _applyDiscount() async {
+    if (!_discountEnabled) return;
+
+    final v = int.tryParse(discountCtrl.text.trim()) ?? 0;
+    if (v < 0) {
+      setState(() => error = 'Скидка не может быть отрицательной');
+      return;
+    }
+
+    final reason = discountReasonCtrl.text.trim();
+    if (reason.isEmpty) {
+      setState(() => error = 'Причина скидки обязательна');
+      return;
+    }
+
+    await _run(() async {
+      await widget.api.adminApplyDiscount(
+        _userId,
+        _shiftId,
+        _bookingId,
+        discountRub: v,
+        reason: reason,
       );
     });
   }
@@ -291,7 +408,9 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
           ChoiceChip(
             label: Text(label(v)),
             selected: paymentMethod == v,
-            onSelected: loading ? null : (_) => setState(() => paymentMethod = v),
+            onSelected: loading
+                ? null
+                : (_) => setState(() => paymentMethod = v),
           ),
       ],
     );
@@ -302,14 +421,15 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     final b = widget.booking;
 
     final serviceName = b['service']?['name']?.toString() ?? 'Услуга';
-    final status = _status();
     final bayIdStr = b['bayId']?.toString() ?? '';
 
     final clientName = b['client']?['name']?.toString();
     final clientPhone = b['client']?['phone']?.toString();
-    final titleClient = (clientName != null && clientName.isNotEmpty) ? clientName : (clientPhone ?? '');
+    final titleClient = (clientName != null && clientName.isNotEmpty)
+        ? clientName
+        : (clientPhone ?? '');
 
-    // ✅ авто в карточке
+    // авто
     final plate = b['car']?['plateDisplay']?.toString() ?? '';
     final make = b['car']?['makeDisplay']?.toString() ?? '';
     final model = b['car']?['modelDisplay']?.toString() ?? '';
@@ -318,65 +438,150 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
 
     final carParts = <String>[];
     if (plate.isNotEmpty) carParts.add(plate);
-    if ('$make $model'.trim().isNotEmpty) carParts.add('$make $model'.trim());
+    final mm = ('$make $model').trim();
+    if (mm.isNotEmpty) carParts.add(mm);
     if (body != null && body.trim().isNotEmpty) carParts.add(body.trim());
     if (color != null && color.trim().isNotEmpty) carParts.add(color.trim());
-    final carLine = carParts.isEmpty ? 'Авто: —' : 'Авто: ${carParts.join(' • ')}';
+    final carLine = carParts.isEmpty
+        ? 'Авто: —'
+        : 'Авто: ${carParts.join(' • ')}';
+
+    final clientComment = b['comment']?.toString();
+    final hasClientComment =
+        clientComment != null && clientComment.trim().isNotEmpty;
 
     final dateTimeIso = b['dateTime']?.toString() ?? '';
-    final startedAt = b['startedAt']?.toString();
-    final finishedAt = b['finishedAt']?.toString();
+    final startedAt = _startedAtIso();
+    final finishedAt = _finishedAtIso();
 
     final payBadges = _paymentBadges();
-    final payStatus = _paymentStatus();
     final paid = _paidTotalRub();
-    final remaining = _remainingRub();
+    final toPay = _toPayRub();
+
+    final discountRub = _discountRub();
+    final effectivePriceRub = _effectivePriceRub();
 
     final dtLine = dateTimeIso.isNotEmpty ? _fmtTimeIso(dateTimeIso) : '--:--';
 
     return SafeArea(
       child: Padding(
         padding: EdgeInsets.only(
-          left: 16,
-          right: 16,
-          top: 16,
+          left: 12,
+          right: 12,
+          top: 8,
           bottom: 16 + MediaQuery.of(context).viewInsets.bottom,
         ),
         child: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(
-                '$dtLine • $serviceName • Пост $bayIdStr',
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+              // ✅ TOP BACK BAR
+              Row(
+                children: [
+                  IconButton(
+                    tooltip: 'Назад',
+                    icon: const Icon(Icons.arrow_back),
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                  const SizedBox(width: 4),
+                  const Text(
+                    'Запись',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                  ),
+                ],
               ),
-              const SizedBox(height: 6),
-              Text('Клиент: $titleClient'),
-              Text(carLine, style: const TextStyle(fontWeight: FontWeight.w600)),
-              Text('Статус: $status'),
+              const Divider(),
+
+              // header
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '$dtLine • $serviceName • Пост $bayIdStr',
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: _statusColor().withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: _statusColor()),
+                    ),
+                    child: Text(
+                      _statusRu,
+                      style: TextStyle(color: _statusColor()),
+                    ),
+                  ),
+                ],
+              ),
               const SizedBox(height: 8),
 
-              if (payBadges.isNotEmpty || payStatus.isNotEmpty) ...[
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: [
-                    for (final x in payBadges)
-                      Chip(label: Text(x), visualDensity: VisualDensity.compact),
-                    if (payStatus.isNotEmpty)
-                      Chip(label: Text(payStatus), visualDensity: VisualDensity.compact),
-                  ],
-                ),
+              Text('Клиент: $titleClient'),
+              Text(
+                carLine,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+
+              if (hasClientComment) ...[
                 const SizedBox(height: 6),
-                Text('Оплачено: $paid ₽   Осталось: $remaining ₽'),
-                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(),
+                  ),
+                  child: Text('Комментарий клиента: ${clientComment.trim()}'),
+                ),
               ],
 
-              Text('План: ${dateTimeIso.isEmpty ? '--:--' : _fmtTimeIso(dateTimeIso)}'),
-              Text('Старт: ${_fmtTimeIso(startedAt)}'),
-              Text('Финиш: ${_fmtTimeIso(finishedAt)}'),
+              const SizedBox(height: 10),
+
+              Text('Начато: ${_fmtTimeIso(startedAt)}'),
+              Text('Завершено: ${_fmtTimeIso(finishedAt)}'),
 
               const SizedBox(height: 12),
+
+              Text('Оплачено: $paid ₽   К оплате: $toPay ₽'),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final x in payBadges)
+                    Chip(
+                      avatar: Icon(_payIcon(x), size: 18),
+                      label: Text(
+                        x == 'CARD'
+                            ? 'Карта'
+                            : x == 'CASH'
+                            ? 'Наличные'
+                            : 'Контракт',
+                      ),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  Chip(
+                    label: Text(_paymentStatusRu),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 10),
+
+              if (effectivePriceRub > 0) ...[
+                Text(
+                  'Стоимость: $effectivePriceRub ₽ (скидка: $discountRub ₽)',
+                ),
+                const SizedBox(height: 6),
+              ],
+
               TextField(
                 controller: noteCtrl,
                 decoration: const InputDecoration(
@@ -385,14 +590,44 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                 ),
               ),
 
-              // ===== PAYMENT BLOCK =====
-              if (remaining > 0) ...[
+              // ===== DISCOUNT =====
+              if (_discountEnabled) ...[
                 const SizedBox(height: 14),
                 const Divider(),
                 const SizedBox(height: 10),
-                Text('Оплата перед завершением', style: Theme.of(context).textTheme.titleMedium),
+                Text('Скидка', style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 8),
-                Text('Осталось оплатить: $remaining ₽'),
+                TextField(
+                  controller: discountCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Скидка (₽)',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: discountReasonCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Причина скидки (обязательно)',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                ElevatedButton(
+                  onPressed: loading ? null : _applyDiscount,
+                  child: const Text('Применить скидку'),
+                ),
+              ],
+
+              // ===== PAYMENT =====
+              if (toPay > 0) ...[
+                const SizedBox(height: 14),
+                const Divider(),
+                const SizedBox(height: 10),
+                Text('Оплата', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 8),
+                Text('К оплате: $toPay ₽'),
                 const SizedBox(height: 8),
                 _paymentMethodChips(),
                 const SizedBox(height: 8),
@@ -403,19 +638,55 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                 ),
               ],
 
-              // ===== MOVE BLOCK =====
+              const SizedBox(height: 14),
+              if (error != null) ...[
+                Text(error!, style: const TextStyle(color: Colors.red)),
+                const SizedBox(height: 8),
+              ],
+
+              // ===== ACTIONS =====
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: loading || !_canStart ? null : _start,
+                      child: loading
+                          ? const SizedBox(
+                              height: 18,
+                              width: 18,
+                              child: CircularProgressIndicator(),
+                            )
+                          : const Text('Начато'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: loading || !_canFinish ? null : _finish,
+                      child: const Text('Завершено'),
+                    ),
+                  ),
+                ],
+              ),
+
+              // ===== MOVE =====
               if (_moveEnabled) ...[
-                const SizedBox(height: 14),
+                const SizedBox(height: 16),
                 const Divider(),
                 const SizedBox(height: 10),
-                Text('Перенос записи', style: Theme.of(context).textTheme.titleMedium),
+                Text(
+                  'Перенос записи',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
                 const SizedBox(height: 8),
 
                 Row(
                   children: [
                     Expanded(
                       child: OutlinedButton(
-                        onPressed: loading || !_canMove ? null : _pickMoveDateTime,
+                        onPressed: loading || !_canMove
+                            ? null
+                            : _pickMoveDateTime,
                         child: Text(
                           selectedDateTimeLocal == null
                               ? 'Выбрать дату/время'
@@ -457,10 +728,26 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                   ],
                 ),
 
-                TextField(
-                  controller: moveReasonCtrl,
+                DropdownButtonFormField<String>(
+                  initialValue: moveReasonKind,
+                  items: _moveReasons
+                      .map((x) => DropdownMenuItem(value: x, child: Text(x)))
+                      .toList(),
+                  onChanged: loading || !_canMove
+                      ? null
+                      : (v) => setState(
+                          () => moveReasonKind = v ?? _moveReasons.first,
+                        ),
                   decoration: const InputDecoration(
-                    labelText: 'Причина переноса (обязательно)',
+                    labelText: 'Причина',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: moveCommentCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Комментарий к переносу (обязательно)',
                     border: OutlineInputBorder(),
                   ),
                 ),
@@ -470,32 +757,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                   child: const Text('Перенести'),
                 ),
               ],
-
-              const SizedBox(height: 12),
-              if (error != null) ...[
-                Text(error!, style: const TextStyle(color: Colors.red)),
-                const SizedBox(height: 8),
-              ],
-
-              Row(
-                children: [
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: loading || !_canStart ? null : _start,
-                      child: loading
-                          ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator())
-                          : const Text('Начать'),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: loading || !_canFinish ? null : _finish,
-                      child: const Text('Закончить'),
-                    ),
-                  ),
-                ],
-              ),
 
               const SizedBox(height: 8),
               TextButton(

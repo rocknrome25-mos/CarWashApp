@@ -19,18 +19,17 @@ import { CashMoveDto } from './cash/dto/cash-move.dto';
 import { CloseCashDto } from './cash/dto/close-cash.dto';
 
 import { AdminBookingPayDto } from './dto/admin-booking-pay.dto';
+import { AdminBookingDiscountDto } from './dto/admin-booking-discount.dto';
 
 @Controller('admin')
 export class AdminController {
   constructor(private readonly admin: AdminService) {}
 
-  // POST /admin/login { phone }
   @Post('login')
   login(@Body() dto: AdminLoginDto) {
     return this.admin.login(dto);
   }
 
-  // POST /admin/shifts/open  (headers: x-user-id)
   @Post('shifts/open')
   openShift(@Headers('x-user-id') userId?: string) {
     const uid = (userId ?? '').trim();
@@ -38,7 +37,6 @@ export class AdminController {
     return this.admin.openShift(uid);
   }
 
-  // POST /admin/shifts/close (headers: x-user-id, x-shift-id)
   @Post('shifts/close')
   closeShift(
     @Headers('x-user-id') userId?: string,
@@ -196,7 +194,6 @@ export class AdminController {
     return this.admin.moveBooking(uid, sid, bid, dto);
   }
 
-  // ✅ NEW: admin payment marking
   @Post('bookings/:id/pay')
   payBooking(
     @Headers('x-user-id') userId?: string,
@@ -211,5 +208,22 @@ export class AdminController {
     if (!sid) throw new BadRequestException('x-shift-id is required');
     if (!bid) throw new BadRequestException('booking id is required');
     return this.admin.payBookingAdmin(uid, sid, bid, dto);
+  }
+
+  // ✅ NEW: discount
+  @Post('bookings/:id/discount')
+  discountBooking(
+    @Headers('x-user-id') userId?: string,
+    @Headers('x-shift-id') shiftId?: string,
+    @Param('id') bookingId?: string,
+    @Body() dto: AdminBookingDiscountDto = {} as AdminBookingDiscountDto,
+  ) {
+    const uid = (userId ?? '').trim();
+    const sid = (shiftId ?? '').trim();
+    const bid = (bookingId ?? '').trim();
+    if (!uid) throw new BadRequestException('x-user-id is required');
+    if (!sid) throw new BadRequestException('x-shift-id is required');
+    if (!bid) throw new BadRequestException('booking id is required');
+    return this.admin.applyDiscount(uid, sid, bid, dto);
   }
 }

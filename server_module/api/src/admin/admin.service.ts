@@ -1,4 +1,3 @@
-import { AdminBookingPayDto } from './dto/admin-booking-pay.dto';
 import {
   BadRequestException,
   ConflictException,
@@ -24,6 +23,8 @@ import { AdminLoginDto } from './dto/admin-login.dto';
 import { AdminBookingStartDto } from './dto/admin-booking-start.dto';
 import { AdminBookingFinishDto } from './dto/admin-booking-finish.dto';
 import { AdminBookingMoveDto } from './dto/admin-booking-move.dto';
+import { AdminBookingPayDto } from './dto/admin-booking-pay.dto';
+import { AdminBookingDiscountDto } from './dto/admin-booking-discount.dto';
 
 import { OpenFloatDto } from './cash/dto/open-float.dto';
 import { CashMoveDto } from './cash/dto/cash-move.dto';
@@ -232,7 +233,6 @@ export class AdminService {
   async closeShift(userId: string, shiftId: string) {
     const { user, shift } = await this._requireActiveShift(userId, shiftId);
 
-    // ✅ закрывать смену без кассы запрещаем ТОЛЬКО если включена CASH_DRAWER
     const cashEnabled = await this.cfg.isEnabledByLocationId(shift.locationId, F_CASH);
     if (cashEnabled) {
       const cashClosed = await this.prisma.shiftCashEvent.findFirst({
@@ -295,9 +295,15 @@ export class AdminService {
     });
 
     return rows.map((b) => {
-      const paidTotal = (b.payments ?? []).reduce((s, p) => s + (p.amountRub ?? 0), 0);
+      const paidTotal = (b.payments ?? []).reduce(
+        (s, p) => s + (p.amountRub ?? 0),
+        0,
+      );
+
       const price = b.service?.priceRub ?? 0;
-      const remaining = Math.max(price - paidTotal, 0);
+      const discount = b.discountRub ?? 0;
+      const effectivePrice = Math.max(price - discount, 0);
+      const remaining = Math.max(effectivePrice - paidTotal, 0);
 
       const badgeSet = new Set<string>();
       for (const p of (b.payments ?? [])) {
@@ -306,7 +312,7 @@ export class AdminService {
       const paymentBadges = Array.from(badgeSet);
 
       let paymentStatus = 'UNPAID';
-      if (price > 0 && paidTotal >= price) paymentStatus = 'PAID';
+      if (effectivePrice > 0 && paidTotal >= effectivePrice) paymentStatus = 'PAID';
       else if (paidTotal > 0) paymentStatus = 'PARTIAL';
 
       return {
@@ -322,6 +328,7 @@ export class AdminService {
         canceledAt: b.canceledAt,
         cancelReason: b.cancelReason,
         clientId: b.clientId,
+
         car: {
           id: b.car.id,
           plateDisplay: b.car.plateDisplay,
@@ -332,6 +339,13 @@ export class AdminService {
         },
         client: b.client,
         service: b.service,
+
+        // скидка
+        discountRub: b.discountRub ?? 0,
+        discountNote: b.discountNote ?? null,
+        effectivePriceRub: effectivePrice,
+
+        // оплата
         paymentBadges,
         paymentStatus,
         paidTotalRub: paidTotal,
@@ -342,7 +356,12 @@ export class AdminService {
 
   /* ===================== bookings: start/move/finish ===================== */
 
-  async startBooking(userId: string, shiftId: string, bookingId: string, dto?: AdminBookingStartDto) {
+  async startBooking(
+    userId: string,
+    shiftId: string,
+    bookingId: string,
+    dto?: AdminBookingStartDto,
+  ) {
     const { user, shift } = await this._requireActiveShift(userId, shiftId);
 
     const startedAt = this._parseIsoOrNow(dto?.startedAt);
@@ -406,10 +425,12 @@ export class AdminService {
     const windowStart = new Date(newStart.getTime() - 24 * 60 * 60 * 1000);
     const windowEnd = new Date(newEnd.getTime() + 24 * 60 * 60 * 1000);
 
-    const busyStatuses: BookingStatus[] = [BookingStatus.ACTIVE, BookingStatus.PENDING_PAYMENT];
+    const busyStatuses: BookingStatus[] = [
+      BookingStatus.ACTIVE,
+      BookingStatus.PENDING_PAYMENT,
+    ];
     const now = new Date();
 
-    // conflict in same location+bay
     const nearby = await tx.booking.findMany({
       where: {
         id: { not: bookingId },
@@ -446,7 +467,6 @@ export class AdminService {
     });
     if (anyOverlap) throw new ConflictException('Selected time slot is already booked');
 
-    // car conflict globally
     const carNearby = await tx.booking.findMany({
       where: {
         id: { not: bookingId },
@@ -483,10 +503,14 @@ export class AdminService {
     if (carOverlap) throw new ConflictException('This car already has a booking at this time');
   }
 
-  async moveBooking(userId: string, shiftId: string, bookingId: string, dto?: AdminBookingMoveDto) {
+  async moveBooking(
+    userId: string,
+    shiftId: string,
+    bookingId: string,
+    dto?: AdminBookingMoveDto,
+  ) {
     const { user, shift } = await this._requireActiveShift(userId, shiftId);
 
-    // ✅ feature flag
     await this._requireFeature(shift.locationId, F_MOVE);
 
     const newDateTimeRaw = (dto?.newDateTime ?? '').trim();
@@ -582,7 +606,12 @@ export class AdminService {
     return updated;
   }
 
-  async finishBooking(userId: string, shiftId: string, bookingId: string, dto?: AdminBookingFinishDto) {
+  async finishBooking(
+    userId: string,
+    shiftId: string,
+    bookingId: string,
+    dto?: AdminBookingFinishDto,
+  ) {
     const { user, shift } = await this._requireActiveShift(userId, shiftId);
 
     const finishedAt = this._parseIsoOrNow(dto?.finishedAt);
@@ -812,7 +841,8 @@ export class AdminService {
       breakdown: { openFloat, cashIn, cashOut, cashPaid, cashRefund },
     };
   }
-  // ===== ADMIN PAY =====
+
+  /* ===================== ADMIN PAY ===================== */
 
   private _parseMethodType(raw: string): PaymentMethodType {
     const v = (raw ?? 'CARD').toUpperCase().trim();
@@ -830,7 +860,6 @@ export class AdminService {
   ) {
     const { user, shift } = await this._requireActiveShift(userId, shiftId);
 
-    // feature gating for method types
     const methodType = this._parseMethodType(dto.methodType);
 
     if (methodType === PaymentMethodType.CASH) {
@@ -840,7 +869,6 @@ export class AdminService {
       await this._requireFeature(shift.locationId, 'CONTRACT_PAYMENTS');
     }
 
-    // booking must be in same location
     const booking = await this.prisma.booking.findUnique({
       where: { id: bookingId },
       include: {
@@ -862,7 +890,7 @@ export class AdminService {
     }
 
     const kind = (dto.kind ?? 'REMAINING').toUpperCase().trim() as PaymentKind;
-    const methodLabel = (dto.methodLabel ?? '').trim() || methodType; // fallback
+    const methodLabel = (dto.methodLabel ?? '').trim() || String(methodType);
     const note = this._normNote(dto.note);
 
     try {
@@ -877,7 +905,6 @@ export class AdminService {
         },
       });
     } catch (e: any) {
-      // unique(bookingId, kind) -> prevent duplicates for same kind
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
         throw new ConflictException(`Payment kind ${kind} already exists for this booking`);
       }
@@ -902,10 +929,8 @@ export class AdminService {
       },
     });
 
-    // WS notify clients
     this.ws.emitBookingChanged(booking.locationId, booking.bayId ?? 1);
 
-    // return refreshed payment summary
     const refreshed = await this.prisma.booking.findUnique({
       where: { id: booking.id },
       include: {
@@ -916,12 +941,91 @@ export class AdminService {
 
     const paidTotal = (refreshed?.payments ?? []).reduce((s, p) => s + (p.amountRub ?? 0), 0);
     const price = refreshed?.service?.priceRub ?? 0;
+    const discount = (refreshed as any)?.discountRub ?? 0;
+    const effectivePrice = Math.max(price - discount, 0);
 
     return {
       bookingId: booking.id,
       paidTotalRub: paidTotal,
-      remainingRub: Math.max(price - paidTotal, 0),
+      discountRub: discount,
+      effectivePriceRub: effectivePrice,
+      remainingRub: Math.max(effectivePrice - paidTotal, 0),
       payments: refreshed?.payments ?? [],
     };
+  }
+
+  /* ===================== ADMIN DISCOUNT ===================== */
+
+  async applyDiscount(
+    userId: string,
+    shiftId: string,
+    bookingId: string,
+    dto: AdminBookingDiscountDto,
+  ) {
+    const { user, shift } = await this._requireActiveShift(userId, shiftId);
+
+    await this._requireFeature(shift.locationId, 'DISCOUNTS');
+
+    const discountRub = Math.trunc(Number(dto.discountRub));
+    if (!Number.isFinite(discountRub) || discountRub < 0) {
+      throw new BadRequestException('discountRub must be >= 0');
+    }
+
+    // ✅ причина обязательна (серверная гарантия)
+    const reason = this._normNote((dto as any).reason, 200);
+    if (!reason) {
+      throw new BadRequestException('reason is required');
+    }
+
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: bookingId },
+      include: { service: { select: { priceRub: true } } },
+    });
+    if (!booking) throw new NotFoundException('Booking not found');
+    if (booking.locationId !== shift.locationId) {
+      throw new ForbiddenException('Not your location booking');
+    }
+    if (booking.status === BookingStatus.CANCELED) {
+      throw new ConflictException('Booking is canceled');
+    }
+
+    const price = booking.service?.priceRub ?? 0;
+    if (discountRub > price) {
+      throw new BadRequestException('discountRub cannot exceed service price');
+    }
+
+    const oldDiscount = booking.discountRub ?? 0;
+
+    const updated = await this.prisma.booking.update({
+      where: { id: booking.id },
+      data: {
+        discountRub,
+        discountNote: reason, // ✅ сохраняем всегда
+      },
+      select: {
+        id: true,
+        locationId: true,
+        bayId: true,
+        discountRub: true,
+        discountNote: true,
+      },
+    });
+
+    await this.prisma.auditEvent.create({
+      data: {
+        type: AuditType.BOOKING_DISCOUNT,
+        locationId: shift.locationId,
+        userId: user.id,
+        shiftId: shift.id,
+        bookingId: booking.id,
+        clientId: booking.clientId ?? undefined,
+        reason, // ✅ причина всегда в audit
+        payload: { oldDiscountRub: oldDiscount, newDiscountRub: discountRub },
+      },
+    });
+
+    this.ws.emitBookingChanged(updated.locationId, updated.bayId ?? 1);
+
+    return updated;
   }
 }
