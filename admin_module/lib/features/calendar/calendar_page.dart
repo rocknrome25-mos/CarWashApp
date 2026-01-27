@@ -29,7 +29,7 @@ class _CalendarPageState extends State<CalendarPage> {
   List<dynamic> bookings = [];
   List<dynamic> waitlist = [];
 
-  // bays state
+  // bays state (show 1/2)
   final Map<int, bool> bayIsActive = {1: true, 2: true};
 
   DateTime selectedDay = DateTime.now();
@@ -39,14 +39,14 @@ class _CalendarPageState extends State<CalendarPage> {
 
   String get _ymd => DateFormat('yyyy-MM-dd').format(selectedDay);
 
+  String _cap(String s) => s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
+
   String _ruTitle() {
     final d = selectedDay;
     final dayName = DateFormat('EEEE', 'ru_RU').format(d);
     final date = DateFormat('d MMMM y', 'ru_RU').format(d);
     return '${_cap(dayName)} • $date';
   }
-
-  String _cap(String s) => s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
 
   @override
   void initState() {
@@ -62,11 +62,15 @@ class _CalendarPageState extends State<CalendarPage> {
 
     try {
       final uid = widget.session.userId;
-      final sid = widget.session.activeShiftId!;
+      final sid = widget.session.activeShiftId ?? '';
+      if (sid.isEmpty) {
+        throw Exception('Нет активной смены. Перезайди.');
+      }
 
       final list = await widget.api.calendarDay(uid, sid, _ymd);
       final wl = await widget.api.waitlistDay(uid, sid, _ymd);
 
+      // bay states from backend
       final bays = await widget.api.listBays(uid, sid);
       final map = <int, bool>{};
 
@@ -84,10 +88,10 @@ class _CalendarPageState extends State<CalendarPage> {
       setState(() {
         bookings = list;
         waitlist = wl;
+
         if (map.isNotEmpty) {
-          // we only show 1/2 in UI now
-          bayIsActive[1] = map[1] ?? bayIsActive[1] ?? true;
-          bayIsActive[2] = map[2] ?? bayIsActive[2] ?? true;
+          bayIsActive[1] = map[1] ?? (bayIsActive[1] ?? true);
+          bayIsActive[2] = map[2] ?? (bayIsActive[2] ?? true);
         }
       });
     } catch (e) {
@@ -154,7 +158,9 @@ class _CalendarPageState extends State<CalendarPage> {
 
   Future<void> _closeShiftNoCash() async {
     final userId = widget.session.userId;
-    final shiftId = widget.session.activeShiftId!;
+    final shiftId = widget.session.activeShiftId ?? '';
+    if (shiftId.isEmpty) return;
+
     try {
       await widget.api.closeShift(userId, shiftId);
       await widget.store.clear();
@@ -173,7 +179,9 @@ class _CalendarPageState extends State<CalendarPage> {
 
   Future<void> _closeShiftWithCash() async {
     final userId = widget.session.userId;
-    final shiftId = widget.session.activeShiftId!;
+    final shiftId = widget.session.activeShiftId ?? '';
+    if (shiftId.isEmpty) return;
+
     try {
       final exp = await widget.api.cashExpected(userId, shiftId);
       if (!mounted) return;
@@ -322,7 +330,8 @@ class _CalendarPageState extends State<CalendarPage> {
   Future<void> _toggleBayCard(int bayNumber) async {
     final isOpen = bayIsActive[bayNumber] ?? true;
     final uid = widget.session.userId;
-    final sid = widget.session.activeShiftId!;
+    final sid = widget.session.activeShiftId ?? '';
+    if (sid.isEmpty) return;
 
     try {
       if (isOpen) {
@@ -367,7 +376,6 @@ class _CalendarPageState extends State<CalendarPage> {
           reason: reason,
         );
       } else {
-        // open -> DO NOT SEND reason
         await widget.api.setBayActive(
           uid,
           sid,
@@ -445,6 +453,224 @@ class _CalendarPageState extends State<CalendarPage> {
     return Row(children: [_bayCard(1), const SizedBox(width: 10), _bayCard(2)]);
   }
 
+  // ===== PROPOSED: 3-column header row (sticky-like, inside list) =====
+
+  Widget _bookingHeaderRow() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.03),
+        border: Border(
+          bottom: BorderSide(color: Colors.black.withValues(alpha: 0.06)),
+        ),
+      ),
+      child: const Row(
+        children: [
+          Expanded(
+            flex: 5,
+            child: Text(
+              'Время / Услуга / Клиент / Авто',
+              style: TextStyle(fontWeight: FontWeight.w900, fontSize: 12),
+            ),
+          ),
+          Expanded(
+            flex: 3,
+            child: Center(
+              child: Text(
+                'Пост / Статус',
+                style: TextStyle(fontWeight: FontWeight.w900, fontSize: 12),
+              ),
+            ),
+          ),
+          Expanded(
+            flex: 6,
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: Text(
+                'Оплата',
+                style: TextStyle(fontWeight: FontWeight.w900, fontSize: 12),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ===== PROPOSED: 3-column booking row =====
+
+  Widget _bookingRow(Map<String, dynamic> b) {
+    final statusRu = _statusRu(b);
+    final statusColor = _statusColor(statusRu);
+
+    final serviceName = b['service']?['name']?.toString() ?? 'Услуга';
+    final bayId = b['bayId']?.toString() ?? '';
+    final dateTimeIso = b['dateTime']?.toString() ?? '';
+    final time = dateTimeIso.isNotEmpty ? _fmtTime(dateTimeIso) : '--:--';
+
+    final clientName = b['client']?['name']?.toString();
+    final clientPhone = b['client']?['phone']?.toString();
+    final clientTitle = (clientName != null && clientName.isNotEmpty)
+        ? clientName
+        : (clientPhone ?? '');
+
+    final make = b['car']?['makeDisplay']?.toString() ?? '';
+    final model = b['car']?['modelDisplay']?.toString() ?? '';
+    final plate = b['car']?['plateDisplay']?.toString() ?? '';
+    final carTitle = [
+      if ('$make $model'.trim().isNotEmpty) '$make $model'.trim(),
+      if (plate.isNotEmpty) plate,
+    ].join(' • ');
+
+    final paid = (b['paidTotalRub'] as num?)?.toInt() ?? 0;
+    final toPay = (b['remainingRub'] as num?)?.toInt() ?? 0;
+
+    final ps = (b['paymentStatus'] ?? '').toString();
+    final psRu = _paymentStatusRu(ps);
+
+    final badges = (b['paymentBadges'] is List)
+        ? (b['paymentBadges'] as List).map((x) => x.toString()).toList()
+        : <String>[];
+
+    return InkWell(
+      onTap: () async {
+        await showModalBottomSheet(
+          context: context,
+          isScrollControlled: true,
+          builder: (_) => BookingActionsSheet(
+            api: widget.api,
+            session: widget.session,
+            booking: b,
+            onDone: _loadAll,
+          ),
+        );
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(color: Colors.black.withValues(alpha: 0.06)),
+          ),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // LEFT
+            Expanded(
+              flex: 5,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    time,
+                    style: const TextStyle(fontWeight: FontWeight.w900),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    serviceName,
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    clientTitle,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  if (carTitle.isNotEmpty)
+                    Text(
+                      carTitle,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.black.withValues(alpha: 0.70),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+
+            // MIDDLE
+            Expanded(
+              flex: 3,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Text(
+                    'Пост $bayId',
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: statusColor.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: statusColor),
+                    ),
+                    child: Text(
+                      statusRu,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w900,
+                        color: statusColor,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // RIGHT
+            Expanded(
+              flex: 6,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    psRu,
+                    style: const TextStyle(fontWeight: FontWeight.w900),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Оплачено: $paid ₽ К оплате: $toPay ₽',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.black.withValues(alpha: 0.75),
+                    ),
+                    textAlign: TextAlign.right,
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    alignment: WrapAlignment.end,
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      for (final x in badges)
+                        Chip(
+                          avatar: Icon(_payIcon(x), size: 18),
+                          label: Text(
+                            x == 'CARD'
+                                ? 'Карта'
+                                : x == 'CASH'
+                                ? 'Наличные'
+                                : 'Контракт',
+                          ),
+                          visualDensity: VisualDensity.compact,
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _waitlistSection() {
     if (waitlist.isEmpty) return const SizedBox.shrink();
 
@@ -458,10 +684,7 @@ class _CalendarPageState extends State<CalendarPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Очередь (waitlist)',
-            style: TextStyle(fontWeight: FontWeight.w900),
-          ),
+          const Text('Waitlist', style: TextStyle(fontWeight: FontWeight.w900)),
           const SizedBox(height: 8),
           ...waitlist.map((x) {
             final w = x as Map<String, dynamic>;
@@ -471,7 +694,6 @@ class _CalendarPageState extends State<CalendarPage> {
             final time = dtIso.isNotEmpty ? _fmtTime(dtIso) : '--:--';
 
             final bay = (w['desiredBayId'] ?? w['bayId'] ?? '').toString();
-
             final serviceName = w['service']?['name']?.toString() ?? 'Услуга';
 
             final clientName = w['client']?['name']?.toString();
@@ -550,125 +772,17 @@ class _CalendarPageState extends State<CalendarPage> {
                 ),
                 _waitlistSection(),
                 const SizedBox(height: 6),
+
+                // bookings list (3-column rows)
                 Expanded(
                   child: bookings.isEmpty
                       ? const Center(child: Text('Нет записей'))
-                      : ListView.separated(
-                          itemCount: bookings.length,
-                          separatorBuilder: (context, index) =>
-                              const Divider(height: 1),
+                      : ListView.builder(
+                          itemCount: bookings.length + 1,
                           itemBuilder: (context, i) {
-                            final b = bookings[i] as Map<String, dynamic>;
-
-                            final statusRu = _statusRu(b);
-                            final statusColor = _statusColor(statusRu);
-
-                            final serviceName =
-                                b['service']?['name']?.toString() ?? 'Услуга';
-                            final bayId = b['bayId']?.toString() ?? '';
-                            final dateTimeIso = b['dateTime']?.toString() ?? '';
-
-                            final clientName = b['client']?['name']?.toString();
-                            final clientPhone = b['client']?['phone']
-                                ?.toString();
-                            final clientTitle =
-                                (clientName != null && clientName.isNotEmpty)
-                                ? clientName
-                                : (clientPhone ?? '');
-
-                            final plate =
-                                b['car']?['plateDisplay']?.toString() ?? '';
-                            final make =
-                                b['car']?['makeDisplay']?.toString() ?? '';
-                            final model =
-                                b['car']?['modelDisplay']?.toString() ?? '';
-                            final carLine = plate.isEmpty
-                                ? ''
-                                : 'Авто: $plate • $make $model';
-
-                            final clientComment = b['comment']?.toString();
-                            final hasComment =
-                                clientComment != null &&
-                                clientComment.trim().isNotEmpty;
-
-                            final time = dateTimeIso.isNotEmpty
-                                ? _fmtTime(dateTimeIso)
-                                : '--:--';
-
-                            final paid =
-                                (b['paidTotalRub'] as num?)?.toInt() ?? 0;
-                            final toPay =
-                                (b['remainingRub'] as num?)?.toInt() ?? 0;
-
-                            final ps = (b['paymentStatus'] ?? '').toString();
-                            final psRu = _paymentStatusRu(ps);
-
-                            final badges = (b['paymentBadges'] is List)
-                                ? (b['paymentBadges'] as List)
-                                      .map((x) => x.toString())
-                                      .toList()
-                                : <String>[];
-
-                            return ListTile(
-                              title: Text('$time • $serviceName • Пост $bayId'),
-                              subtitle: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(clientTitle),
-                                  if (carLine.isNotEmpty) Text(carLine),
-                                  if (hasComment)
-                                    Text(
-                                      'Комментарий: ${clientComment.trim()}',
-                                    ),
-                                  const SizedBox(height: 6),
-                                  Row(
-                                    children: [
-                                      Chip(
-                                        label: Text(statusRu),
-                                        visualDensity: VisualDensity.compact,
-                                        side: BorderSide(color: statusColor),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Text(psRu),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    'Оплачено: $paid ₽   К оплате: $toPay ₽',
-                                  ),
-                                  const SizedBox(height: 6),
-                                  Wrap(
-                                    spacing: 8,
-                                    children: [
-                                      for (final x in badges)
-                                        Chip(
-                                          avatar: Icon(_payIcon(x), size: 18),
-                                          label: Text(
-                                            x == 'CARD'
-                                                ? 'Карта'
-                                                : x == 'CASH'
-                                                ? 'Наличные'
-                                                : 'Контракт',
-                                          ),
-                                          visualDensity: VisualDensity.compact,
-                                        ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                              onTap: () async {
-                                await showModalBottomSheet(
-                                  context: context,
-                                  isScrollControlled: true,
-                                  builder: (_) => BookingActionsSheet(
-                                    api: widget.api,
-                                    session: widget.session,
-                                    booking: b,
-                                    onDone: _loadAll,
-                                  ),
-                                );
-                              },
-                            );
+                            if (i == 0) return _bookingHeaderRow();
+                            final b = bookings[i - 1] as Map<String, dynamic>;
+                            return _bookingRow(b);
                           },
                         ),
                 ),

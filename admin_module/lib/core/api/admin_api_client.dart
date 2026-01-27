@@ -126,8 +126,8 @@ class AdminApiClient {
   }
 
   /// ✅ IMPORTANT:
-  /// - При OPEN: reason НЕ отправляем вообще
-  /// - При CLOSE: reason ОБЯЗАТЕЛЕН и отправляем
+  /// - OPEN: reason НЕ отправляем
+  /// - CLOSE: reason ОБЯЗАТЕЛЕН
   Future<Map<String, dynamic>> setBayActive(
     String userId,
     String shiftId, {
@@ -139,7 +139,7 @@ class AdminApiClient {
         ? '/admin/bays/$bayNumber/open'
         : '/admin/bays/$bayNumber/close';
 
-    Object? body;
+    String? body;
     if (!isActive) {
       final r = (reason ?? '').trim();
       if (r.isEmpty) {
@@ -147,8 +147,7 @@ class AdminApiClient {
       }
       body = jsonEncode({'reason': r});
     } else {
-      // OPEN: no body
-      body = null;
+      body = null; // OPEN: без body
     }
 
     final res = await http

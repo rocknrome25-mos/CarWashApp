@@ -54,7 +54,10 @@ export class AdminService {
 
   private _roundUpToStepMin(totalMin: number) {
     if (totalMin <= 0) return 0;
-    return Math.ceil(totalMin / AdminService.SLOT_STEP_MIN) * AdminService.SLOT_STEP_MIN;
+    return (
+      Math.ceil(totalMin / AdminService.SLOT_STEP_MIN) *
+      AdminService.SLOT_STEP_MIN
+    );
   }
 
   private _end(start: Date, durationMin: number) {
@@ -66,7 +69,9 @@ export class AdminService {
   }
 
   private _serviceDurationOrDefault(durationMin?: number | null) {
-    return typeof durationMin === 'number' && durationMin > 0 ? durationMin : 30;
+    return typeof durationMin === 'number' && durationMin > 0
+      ? durationMin
+      : 30;
   }
 
   private _parseIsoOrNow(raw?: string): Date {
@@ -83,7 +88,8 @@ export class AdminService {
 
   private _requireAdmin(user: { role: UserRole; isActive: boolean }) {
     if (!user.isActive) throw new ForbiddenException('User is inactive');
-    if (user.role !== UserRole.ADMIN) throw new ForbiddenException('Not an admin');
+    if (user.role !== UserRole.ADMIN)
+      throw new ForbiddenException('Not an admin');
   }
 
   private async _getUserOrThrow(userId: string) {
@@ -233,14 +239,19 @@ export class AdminService {
   async closeShift(userId: string, shiftId: string) {
     const { user, shift } = await this._requireActiveShift(userId, shiftId);
 
-    const cashEnabled = await this.cfg.isEnabledByLocationId(shift.locationId, F_CASH);
+    const cashEnabled = await this.cfg.isEnabledByLocationId(
+      shift.locationId,
+      F_CASH,
+    );
     if (cashEnabled) {
       const cashClosed = await this.prisma.shiftCashEvent.findFirst({
         where: { shiftId: shift.id, type: ShiftCashEventType.CLOSE_COUNT },
         select: { id: true },
       });
       if (!cashClosed) {
-        throw new ConflictException('Cash close is required before closing shift');
+        throw new ConflictException(
+          'Cash close is required before closing shift',
+        );
       }
     }
 
@@ -289,13 +300,18 @@ export class AdminService {
       include: {
         car: true,
         client: { select: { id: true, phone: true, name: true } },
-        service: { select: { id: true, name: true, durationMin: true, priceRub: true } },
+        service: {
+          select: { id: true, name: true, durationMin: true, priceRub: true },
+        },
         payments: { orderBy: { paidAt: 'asc' } },
       },
     });
 
     return rows.map((b) => {
-      const paidTotal = (b.payments ?? []).reduce((s, p) => s + (p.amountRub ?? 0), 0);
+      const paidTotal = (b.payments ?? []).reduce(
+        (s, p) => s + (p.amountRub ?? 0),
+        0,
+      );
 
       const price = b.service?.priceRub ?? 0;
       const discount = b.discountRub ?? 0;
@@ -303,13 +319,14 @@ export class AdminService {
       const remaining = Math.max(effectivePrice - paidTotal, 0);
 
       const badgeSet = new Set<string>();
-      for (const p of (b.payments ?? [])) {
+      for (const p of b.payments ?? []) {
         badgeSet.add(String(p.methodType ?? 'CARD'));
       }
       const paymentBadges = Array.from(badgeSet);
 
       let paymentStatus = 'UNPAID';
-      if (effectivePrice > 0 && paidTotal >= effectivePrice) paymentStatus = 'PAID';
+      if (effectivePrice > 0 && paidTotal >= effectivePrice)
+        paymentStatus = 'PAID';
       else if (paidTotal > 0) paymentStatus = 'PARTIAL';
 
       return {
@@ -351,7 +368,12 @@ export class AdminService {
 
   /* ===================== bookings: start/move/finish ===================== */
 
-  async startBooking(userId: string, shiftId: string, bookingId: string, dto?: AdminBookingStartDto) {
+  async startBooking(
+    userId: string,
+    shiftId: string,
+    bookingId: string,
+    dto?: AdminBookingStartDto,
+  ) {
     const { user, shift } = await this._requireActiveShift(userId, shiftId);
 
     const startedAt = this._parseIsoOrNow(dto?.startedAt);
@@ -359,11 +381,35 @@ export class AdminService {
 
     const booking = await this.prisma.booking.findUnique({
       where: { id: bookingId },
-      select: { id: true, locationId: true, status: true, startedAt: true, bayId: true },
+      select: {
+        id: true,
+        locationId: true,
+        status: true,
+        startedAt: true,
+        bayId: true,
+      },
     });
     if (!booking) throw new NotFoundException('Booking not found');
-    if (booking.locationId !== shift.locationId) throw new ForbiddenException('Not your location booking');
-    if (booking.status === BookingStatus.CANCELED) throw new ConflictException('Booking is canceled');
+    if (booking.locationId !== shift.locationId) {
+      throw new ForbiddenException('Not your location booking');
+    }
+    if (booking.status === BookingStatus.CANCELED) {
+      throw new ConflictException('Booking is canceled');
+    }
+
+    // ✅ BLOCK START IF BAY IS CLOSED
+    const bayNumber = booking.bayId ?? 1;
+    const bay = await this.prisma.bay.findUnique({
+      where: {
+        locationId_number: { locationId: shift.locationId, number: bayNumber },
+      },
+      select: { isActive: true },
+    });
+    if (!bay) throw new NotFoundException('Bay not found');
+    if (bay.isActive !== true) {
+      // 409 -> UI покажет "Нужно открыть пост"
+      throw new ConflictException('Bay is closed');
+    }
 
     const updated = await this.prisma.booking.update({
       where: { id: bookingId },
@@ -371,7 +417,10 @@ export class AdminService {
         shiftId: shift.id,
         startedAt: booking.startedAt ?? startedAt,
         adminNote: note ?? undefined,
-        status: booking.status === BookingStatus.PENDING_PAYMENT ? BookingStatus.ACTIVE : booking.status,
+        status:
+          booking.status === BookingStatus.PENDING_PAYMENT
+            ? BookingStatus.ACTIVE
+            : booking.status,
       },
       select: {
         id: true,
@@ -409,13 +458,24 @@ export class AdminService {
     newStart: Date;
     durationTotalMin: number;
   }) {
-    const { tx, bookingId, locationId, bayId, carId, newStart, durationTotalMin } = args;
+    const {
+      tx,
+      bookingId,
+      locationId,
+      bayId,
+      carId,
+      newStart,
+      durationTotalMin,
+    } = args;
 
     const newEnd = this._end(newStart, durationTotalMin);
     const windowStart = new Date(newStart.getTime() - 24 * 60 * 60 * 1000);
     const windowEnd = new Date(newEnd.getTime() + 24 * 60 * 60 * 1000);
 
-    const busyStatuses: BookingStatus[] = [BookingStatus.ACTIVE, BookingStatus.PENDING_PAYMENT];
+    const busyStatuses: BookingStatus[] = [
+      BookingStatus.ACTIVE,
+      BookingStatus.PENDING_PAYMENT,
+    ];
     const now = new Date();
 
     const nearby = await tx.booking.findMany({
@@ -452,8 +512,9 @@ export class AdminService {
       const bEnd = this._end(bStart, total);
       return this._overlaps(newStart, newEnd, bStart, bEnd);
     });
-
-    if (anyOverlap) throw new ConflictException('Selected time slot is already booked');
+    if (anyOverlap) {
+      throw new ConflictException('Selected time slot is already booked');
+    }
 
     const carNearby = await tx.booking.findMany({
       where: {
@@ -488,24 +549,33 @@ export class AdminService {
       const bEnd = this._end(bStart, total);
       return this._overlaps(newStart, newEnd, bStart, bEnd);
     });
-
-    if (carOverlap) throw new ConflictException('This car already has a booking at this time');
+    if (carOverlap) {
+      throw new ConflictException('This car already has a booking at this time');
+    }
   }
 
-  async moveBooking(userId: string, shiftId: string, bookingId: string, dto?: AdminBookingMoveDto) {
+  async moveBooking(
+    userId: string,
+    shiftId: string,
+    bookingId: string,
+    dto?: AdminBookingMoveDto,
+  ) {
     const { user, shift } = await this._requireActiveShift(userId, shiftId);
 
     await this._requireFeature(shift.locationId, F_MOVE);
 
     const newDateTimeRaw = (dto?.newDateTime ?? '').trim();
-    if (!newDateTimeRaw) throw new BadRequestException('newDateTime is required');
+    if (!newDateTimeRaw)
+      throw new BadRequestException('newDateTime is required');
     const newDateTime = new Date(newDateTimeRaw);
-    if (isNaN(newDateTime.getTime())) throw new BadRequestException('newDateTime must be ISO');
+    if (isNaN(newDateTime.getTime()))
+      throw new BadRequestException('newDateTime must be ISO');
 
     const reason = (dto?.reason ?? '').trim();
     if (!reason) throw new BadRequestException('reason is required');
 
-    if (dto?.clientAgreed !== true) throw new BadRequestException('clientAgreed must be true');
+    if (dto?.clientAgreed !== true)
+      throw new BadRequestException('clientAgreed must be true');
 
     const newBayId =
       typeof dto?.newBayId === 'number' && Number.isFinite(dto.newBayId)
@@ -527,14 +597,25 @@ export class AdminService {
       },
     });
     if (!existing) throw new NotFoundException('Booking not found');
-    if (existing.locationId !== shift.locationId) throw new ForbiddenException('Not your location booking');
-    if (existing.status === BookingStatus.CANCELED) throw new ConflictException('Booking is canceled');
-    if (existing.status === BookingStatus.COMPLETED) throw new ConflictException('Cannot move a completed booking');
+    if (existing.locationId !== shift.locationId) {
+      throw new ForbiddenException('Not your location booking');
+    }
+    if (existing.status === BookingStatus.CANCELED) {
+      throw new ConflictException('Booking is canceled');
+    }
+    if (existing.status === BookingStatus.COMPLETED) {
+      throw new ConflictException('Cannot move a completed booking');
+    }
 
-    const oldValue = { dateTime: existing.dateTime.toISOString(), bayId: existing.bayId };
+    const oldValue = {
+      dateTime: existing.dateTime.toISOString(),
+      bayId: existing.bayId,
+    };
     const nextBayId = newBayId ?? existing.bayId;
 
-    const baseDur = this._serviceDurationOrDefault(existing.service?.durationMin);
+    const baseDur = this._serviceDurationOrDefault(
+      existing.service?.durationMin,
+    );
     const rawDur = baseDur + (existing.bufferMin ?? 0);
     const durTotal = this._roundUpToStepMin(rawDur);
 
@@ -552,7 +633,14 @@ export class AdminService {
       const u = await tx.booking.update({
         where: { id: existing.id },
         data: { shiftId: shift.id, dateTime: newDateTime, bayId: nextBayId },
-        select: { id: true, dateTime: true, bayId: true, locationId: true, shiftId: true, status: true },
+        select: {
+          id: true,
+          dateTime: true,
+          bayId: true,
+          locationId: true,
+          shiftId: true,
+          status: true,
+        },
       });
 
       await tx.auditEvent.create({
@@ -564,7 +652,11 @@ export class AdminService {
           bookingId: existing.id,
           clientId: existing.clientId ?? undefined,
           reason,
-          payload: { clientAgreed: true, oldValue, newValue: { dateTime: u.dateTime.toISOString(), bayId: u.bayId } },
+          payload: {
+            clientAgreed: true,
+            oldValue,
+            newValue: { dateTime: u.dateTime.toISOString(), bayId: u.bayId },
+          },
         },
       });
 
@@ -572,12 +664,19 @@ export class AdminService {
     });
 
     this.ws.emitBookingChanged(updated.locationId, oldValue.bayId);
-    if (updated.bayId !== oldValue.bayId) this.ws.emitBookingChanged(updated.locationId, updated.bayId);
+    if (updated.bayId !== oldValue.bayId) {
+      this.ws.emitBookingChanged(updated.locationId, updated.bayId);
+    }
 
     return updated;
   }
 
-  async finishBooking(userId: string, shiftId: string, bookingId: string, dto?: AdminBookingFinishDto) {
+  async finishBooking(
+    userId: string,
+    shiftId: string,
+    bookingId: string,
+    dto?: AdminBookingFinishDto,
+  ) {
     const { user, shift } = await this._requireActiveShift(userId, shiftId);
 
     const finishedAt = this._parseIsoOrNow(dto?.finishedAt);
@@ -585,11 +684,22 @@ export class AdminService {
 
     const booking = await this.prisma.booking.findUnique({
       where: { id: bookingId },
-      select: { id: true, locationId: true, status: true, startedAt: true, finishedAt: true, bayId: true },
+      select: {
+        id: true,
+        locationId: true,
+        status: true,
+        startedAt: true,
+        finishedAt: true,
+        bayId: true,
+      },
     });
     if (!booking) throw new NotFoundException('Booking not found');
-    if (booking.locationId !== shift.locationId) throw new ForbiddenException('Not your location booking');
-    if (booking.status === BookingStatus.CANCELED) throw new ConflictException('Booking is canceled');
+    if (booking.locationId !== shift.locationId) {
+      throw new ForbiddenException('Not your location booking');
+    }
+    if (booking.status === BookingStatus.CANCELED) {
+      throw new ConflictException('Booking is canceled');
+    }
 
     const updated = await this.prisma.booking.update({
       where: { id: bookingId },
@@ -600,7 +710,16 @@ export class AdminService {
         adminNote: note ?? undefined,
         status: BookingStatus.COMPLETED,
       },
-      select: { id: true, status: true, startedAt: true, finishedAt: true, adminNote: true, shiftId: true, locationId: true, bayId: true },
+      select: {
+        id: true,
+        status: true,
+        startedAt: true,
+        finishedAt: true,
+        adminNote: true,
+        shiftId: true,
+        locationId: true,
+        bayId: true,
+      },
     });
 
     await this.prisma.auditEvent.create({
@@ -620,12 +739,20 @@ export class AdminService {
 
   /* ===================== CASH ===================== */
 
-  private async _cashCreate(userId: string, shiftId: string, type: ShiftCashEventType, amountRub: number, note?: string | null) {
+  private async _cashCreate(
+    userId: string,
+    shiftId: string,
+    type: ShiftCashEventType,
+    amountRub: number,
+    note?: string | null,
+  ) {
     const { user, shift } = await this._requireActiveShift(userId, shiftId);
     await this._requireFeature(shift.locationId, F_CASH);
 
     const amount = Number(amountRub);
-    if (!Number.isFinite(amount) || amount < 0) throw new BadRequestException('amountRub must be non-negative');
+    if (!Number.isFinite(amount) || amount < 0) {
+      throw new BadRequestException('amountRub must be non-negative');
+    }
 
     return this.prisma.shiftCashEvent.create({
       data: {
@@ -636,7 +763,13 @@ export class AdminService {
         amountRub: Math.trunc(amount),
         note: this._normNote(note),
       },
-      select: { id: true, createdAt: true, type: true, amountRub: true, note: true },
+      select: {
+        id: true,
+        createdAt: true,
+        type: true,
+        amountRub: true,
+        note: true,
+      },
     });
   }
 
@@ -648,19 +781,40 @@ export class AdminService {
       where: { shiftId: shift.id, type: ShiftCashEventType.OPEN_FLOAT },
       select: { id: true },
     });
-    if (exists) throw new ConflictException('OPEN_FLOAT already exists for this shift');
+    if (exists)
+      throw new ConflictException('OPEN_FLOAT already exists for this shift');
 
-    return this._cashCreate(userId, shiftId, ShiftCashEventType.OPEN_FLOAT, dto.amountRub, dto.note);
+    return this._cashCreate(
+      userId,
+      shiftId,
+      ShiftCashEventType.OPEN_FLOAT,
+      dto.amountRub,
+      dto.note,
+    );
   }
 
   async cashIn(userId: string, shiftId: string, dto: CashMoveDto) {
-    if (!dto.note || !dto.note.trim()) throw new BadRequestException('note is required');
-    return this._cashCreate(userId, shiftId, ShiftCashEventType.CASH_IN, dto.amountRub, dto.note);
+    if (!dto.note || !dto.note.trim())
+      throw new BadRequestException('note is required');
+    return this._cashCreate(
+      userId,
+      shiftId,
+      ShiftCashEventType.CASH_IN,
+      dto.amountRub,
+      dto.note,
+    );
   }
 
   async cashOut(userId: string, shiftId: string, dto: CashMoveDto) {
-    if (!dto.note || !dto.note.trim()) throw new BadRequestException('note is required');
-    return this._cashCreate(userId, shiftId, ShiftCashEventType.CASH_OUT, dto.amountRub, dto.note);
+    if (!dto.note || !dto.note.trim())
+      throw new BadRequestException('note is required');
+    return this._cashCreate(
+      userId,
+      shiftId,
+      ShiftCashEventType.CASH_OUT,
+      dto.amountRub,
+      dto.note,
+    );
   }
 
   async cashClose(userId: string, shiftId: string, dto: CloseCashDto) {
@@ -668,26 +822,50 @@ export class AdminService {
     await this._requireFeature(shift.locationId, F_CASH);
 
     if (dto.handoverRub + dto.keepRub !== dto.countedRub) {
-      throw new BadRequestException('handoverRub + keepRub must equal countedRub');
+      throw new BadRequestException(
+        'handoverRub + keepRub must equal countedRub',
+      );
     }
 
     const exists = await this.prisma.shiftCashEvent.findFirst({
       where: { shiftId: shift.id, type: ShiftCashEventType.CLOSE_COUNT },
       select: { id: true },
     });
-    if (exists) throw new ConflictException('CLOSE_COUNT already exists for this shift');
+    if (exists)
+      throw new ConflictException('CLOSE_COUNT already exists for this shift');
 
     const note = this._normNote(dto.note);
 
     await this.prisma.$transaction(async (tx) => {
       await tx.shiftCashEvent.create({
-        data: { shiftId: shift.id, locationId: shift.locationId, adminId: shift.adminId, type: ShiftCashEventType.CLOSE_COUNT, amountRub: Math.trunc(dto.countedRub), note },
+        data: {
+          shiftId: shift.id,
+          locationId: shift.locationId,
+          adminId: shift.adminId,
+          type: ShiftCashEventType.CLOSE_COUNT,
+          amountRub: Math.trunc(dto.countedRub),
+          note,
+        },
       });
       await tx.shiftCashEvent.create({
-        data: { shiftId: shift.id, locationId: shift.locationId, adminId: shift.adminId, type: ShiftCashEventType.HANDOVER, amountRub: Math.trunc(dto.handoverRub), note },
+        data: {
+          shiftId: shift.id,
+          locationId: shift.locationId,
+          adminId: shift.adminId,
+          type: ShiftCashEventType.HANDOVER,
+          amountRub: Math.trunc(dto.handoverRub),
+          note,
+        },
       });
       await tx.shiftCashEvent.create({
-        data: { shiftId: shift.id, locationId: shift.locationId, adminId: shift.adminId, type: ShiftCashEventType.KEEP_IN_DRAWER, amountRub: Math.trunc(dto.keepRub), note },
+        data: {
+          shiftId: shift.id,
+          locationId: shift.locationId,
+          adminId: shift.adminId,
+          type: ShiftCashEventType.KEEP_IN_DRAWER,
+          amountRub: Math.trunc(dto.keepRub),
+          note,
+        },
       });
     });
 
@@ -715,7 +893,9 @@ export class AdminService {
       where: {
         booking: { shiftId: shift.id },
         methodType: PaymentMethodType.CASH,
-        kind: { in: [PaymentKind.DEPOSIT, PaymentKind.REMAINING, PaymentKind.EXTRA] },
+        kind: {
+          in: [PaymentKind.DEPOSIT, PaymentKind.REMAINING, PaymentKind.EXTRA],
+        },
       },
       _sum: { amountRub: true },
     });
@@ -737,7 +917,11 @@ export class AdminService {
 
     const expectedRub = openFloat + cashIn - cashOut + cashPaid - cashRefund;
 
-    return { shiftId: shift.id, expectedRub, breakdown: { openFloat, cashIn, cashOut, cashPaid, cashRefund } };
+    return {
+      shiftId: shift.id,
+      expectedRub,
+      breakdown: { openFloat, cashIn, cashOut, cashPaid, cashRefund },
+    };
   }
 
   /* ===================== ADMIN PAY ===================== */
@@ -750,24 +934,42 @@ export class AdminService {
     return PaymentMethodType.CARD;
   }
 
-  async payBookingAdmin(userId: string, shiftId: string, bookingId: string, dto: AdminBookingPayDto) {
+  async payBookingAdmin(
+    userId: string,
+    shiftId: string,
+    bookingId: string,
+    dto: AdminBookingPayDto,
+  ) {
     const { user, shift } = await this._requireActiveShift(userId, shiftId);
 
     const methodType = this._parseMethodType(dto.methodType);
 
-    if (methodType === PaymentMethodType.CASH) await this._requireFeature(shift.locationId, 'CASH_DRAWER');
-    if (methodType === PaymentMethodType.CONTRACT) await this._requireFeature(shift.locationId, 'CONTRACT_PAYMENTS');
+    if (methodType === PaymentMethodType.CASH) {
+      await this._requireFeature(shift.locationId, 'CASH_DRAWER');
+    }
+    if (methodType === PaymentMethodType.CONTRACT) {
+      await this._requireFeature(shift.locationId, 'CONTRACT_PAYMENTS');
+    }
 
     const booking = await this.prisma.booking.findUnique({
       where: { id: bookingId },
-      include: { service: { select: { priceRub: true } }, payments: true },
+      include: {
+        service: { select: { priceRub: true } },
+        payments: true,
+      },
     });
     if (!booking) throw new NotFoundException('Booking not found');
-    if (booking.locationId !== shift.locationId) throw new ForbiddenException('Not your location booking');
-    if (booking.status === BookingStatus.CANCELED) throw new ConflictException('Booking is canceled');
+    if (booking.locationId !== shift.locationId) {
+      throw new ForbiddenException('Not your location booking');
+    }
+    if (booking.status === BookingStatus.CANCELED) {
+      throw new ConflictException('Booking is canceled');
+    }
 
     const amountRub = Math.trunc(Number(dto.amountRub));
-    if (!Number.isFinite(amountRub) || amountRub < 0) throw new BadRequestException('amountRub must be non-negative number');
+    if (!Number.isFinite(amountRub) || amountRub < 0) {
+      throw new BadRequestException('amountRub must be non-negative number');
+    }
 
     const kind = (dto.kind ?? 'REMAINING').toUpperCase().trim() as PaymentKind;
     const methodLabel = (dto.methodLabel ?? '').trim() || String(methodType);
@@ -775,11 +977,23 @@ export class AdminService {
 
     try {
       await this.prisma.payment.create({
-        data: { bookingId: booking.id, amountRub, method: methodLabel, methodType, kind, paidAt: new Date() },
+        data: {
+          bookingId: booking.id,
+          amountRub,
+          method: methodLabel,
+          methodType,
+          kind,
+          paidAt: new Date(),
+        },
       });
     } catch (e: any) {
-      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
-        throw new ConflictException(`Payment kind ${kind} already exists for this booking`);
+      if (
+        e instanceof Prisma.PrismaClientKnownRequestError &&
+        e.code === 'P2002'
+      ) {
+        throw new ConflictException(
+          `Payment kind ${kind} already exists for this booking`,
+        );
       }
       throw e;
     }
@@ -801,10 +1015,16 @@ export class AdminService {
 
     const refreshed = await this.prisma.booking.findUnique({
       where: { id: booking.id },
-      include: { service: { select: { priceRub: true } }, payments: { orderBy: { paidAt: 'asc' } } },
+      include: {
+        service: { select: { priceRub: true } },
+        payments: { orderBy: { paidAt: 'asc' } },
+      },
     });
 
-    const paidTotal = (refreshed?.payments ?? []).reduce((s, p) => s + (p.amountRub ?? 0), 0);
+    const paidTotal = (refreshed?.payments ?? []).reduce(
+      (s, p) => s + (p.amountRub ?? 0),
+      0,
+    );
     const price = refreshed?.service?.priceRub ?? 0;
     const discount = refreshed?.discountRub ?? 0;
     const effectivePrice = Math.max(price - discount, 0);
@@ -821,13 +1041,20 @@ export class AdminService {
 
   /* ===================== ADMIN DISCOUNT ===================== */
 
-  async applyDiscount(userId: string, shiftId: string, bookingId: string, dto: AdminBookingDiscountDto) {
+  async applyDiscount(
+    userId: string,
+    shiftId: string,
+    bookingId: string,
+    dto: AdminBookingDiscountDto,
+  ) {
     const { user, shift } = await this._requireActiveShift(userId, shiftId);
 
     await this._requireFeature(shift.locationId, 'DISCOUNTS');
 
     const discountRub = Math.trunc(Number(dto.discountRub));
-    if (!Number.isFinite(discountRub) || discountRub < 0) throw new BadRequestException('discountRub must be >= 0');
+    if (!Number.isFinite(discountRub) || discountRub < 0) {
+      throw new BadRequestException('discountRub must be >= 0');
+    }
 
     const reason = this._normNote((dto as any).reason, 200);
     if (!reason) throw new BadRequestException('reason is required');
@@ -837,18 +1064,30 @@ export class AdminService {
       include: { service: { select: { priceRub: true } } },
     });
     if (!booking) throw new NotFoundException('Booking not found');
-    if (booking.locationId !== shift.locationId) throw new ForbiddenException('Not your location booking');
-    if (booking.status === BookingStatus.CANCELED) throw new ConflictException('Booking is canceled');
+    if (booking.locationId !== shift.locationId) {
+      throw new ForbiddenException('Not your location booking');
+    }
+    if (booking.status === BookingStatus.CANCELED) {
+      throw new ConflictException('Booking is canceled');
+    }
 
     const price = booking.service?.priceRub ?? 0;
-    if (discountRub > price) throw new BadRequestException('discountRub cannot exceed service price');
+    if (discountRub > price) {
+      throw new BadRequestException('discountRub cannot exceed service price');
+    }
 
     const oldDiscount = booking.discountRub ?? 0;
 
     const updated = await this.prisma.booking.update({
       where: { id: booking.id },
       data: { discountRub, discountNote: reason },
-      select: { id: true, locationId: true, bayId: true, discountRub: true, discountNote: true },
+      select: {
+        id: true,
+        locationId: true,
+        bayId: true,
+        discountRub: true,
+        discountNote: true,
+      },
     });
 
     await this.prisma.auditEvent.create({
@@ -887,11 +1126,19 @@ export class AdminService {
     });
   }
 
-  async setBayActive(userId: string, shiftId: string, bayNumber: number, isActive: boolean, reason?: string) {
+  async setBayActive(
+    userId: string,
+    shiftId: string,
+    bayNumber: number,
+    isActive: boolean,
+    reason?: string,
+  ) {
     const { user, shift } = await this._requireActiveShift(userId, shiftId);
 
     const n = Math.trunc(Number(bayNumber));
-    if (!Number.isFinite(n) || n < 1 || n > 20) throw new BadRequestException('bayNumber must be 1..20');
+    if (!Number.isFinite(n) || n < 1 || n > 20) {
+      throw new BadRequestException('bayNumber must be 1..20');
+    }
 
     if (!isActive) {
       const r = (reason ?? '').trim();
@@ -910,7 +1157,12 @@ export class AdminService {
       where: { id: bay.id },
       data: isActive
         ? { isActive: true, reopenedAt: now, closedReason: null, closedAt: null }
-        : { isActive: false, closedAt: now, closedReason: (reason ?? '').trim(), reopenedAt: null },
+        : {
+            isActive: false,
+            closedAt: now,
+            closedReason: (reason ?? '').trim(),
+            reopenedAt: null,
+          },
       select: {
         id: true,
         number: true,
@@ -937,13 +1189,29 @@ export class AdminService {
     return updated;
   }
 
-  // ✅ wrappers под controller.ts (чтобы не менять контроллер)
-  async closeBay(userId: string, shiftId: string, bayNumber: number, dto: AdminBayCloseDto) {
+  // wrappers for controller
+  async closeBay(
+    userId: string,
+    shiftId: string,
+    bayNumber: number,
+    dto: AdminBayCloseDto,
+  ) {
     const reason = (dto as any)?.reason ?? (dto as any)?.closedReason ?? '';
-    return this.setBayActive(userId, shiftId, bayNumber, false, String(reason ?? '').trim());
+    return this.setBayActive(
+      userId,
+      shiftId,
+      bayNumber,
+      false,
+      String(reason ?? '').trim(),
+    );
   }
 
-  async openBay(userId: string, shiftId: string, bayNumber: number, dto: AdminBayOpenDto) {
+  async openBay(
+    userId: string,
+    shiftId: string,
+    bayNumber: number,
+    _dto: AdminBayOpenDto,
+  ) {
     return this.setBayActive(userId, shiftId, bayNumber, true);
   }
 
@@ -954,20 +1222,18 @@ export class AdminService {
     const { from, to } = this._parseDayRangeUTC(dateYmd);
 
     return this.prisma.waitlistRequest.findMany({
-      where: {
-        locationId: shift.locationId,
-        createdAt: { gte: from, lt: to },
-      },
+      where: { locationId: shift.locationId, createdAt: { gte: from, lt: to } },
       orderBy: { createdAt: 'asc' },
       include: {
         client: { select: { id: true, phone: true, name: true } },
         car: true,
-        service: { select: { id: true, name: true, durationMin: true, priceRub: true } },
+        service: {
+          select: { id: true, name: true, durationMin: true, priceRub: true },
+        },
       },
     });
   }
 
-  // ✅ alias под controller.ts (он зовёт getWaitlistDay)
   async getWaitlistDay(userId: string, shiftId: string, dateYmd: string) {
     return this.waitlistDay(userId, shiftId, dateYmd);
   }

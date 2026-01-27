@@ -32,7 +32,9 @@ class _ShiftGatePageState extends State<ShiftGatePage> {
     await widget.store.clear();
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => LoginPage(api: widget.api, store: widget.store)),
+      MaterialPageRoute(
+        builder: (_) => LoginPage(api: widget.api, store: widget.store),
+      ),
     );
   }
 
@@ -54,7 +56,9 @@ class _ShiftGatePageState extends State<ShiftGatePage> {
             child: const Text('Отмена'),
           ),
           ElevatedButton(
-            onPressed: () => Navigator.of(context).pop(int.tryParse(ctrl.text.trim())),
+            onPressed: () => Navigator.of(context).pop(
+              int.tryParse(ctrl.text.trim()),
+            ),
             child: const Text('Сохранить'),
           ),
         ],
@@ -70,7 +74,7 @@ class _ShiftGatePageState extends State<ShiftGatePage> {
 
     try {
       final shift = await widget.api.openShift(session.userId);
-      final shiftId = shift['id'] as String;
+      final shiftId = (shift['id'] ?? '').toString();
 
       session = session.copyWith(activeShiftId: shiftId);
       await widget.store.save(session);
@@ -110,6 +114,9 @@ class _ShiftGatePageState extends State<ShiftGatePage> {
       return ShellPage(api: widget.api, store: widget.store, session: session);
     }
 
+    final locationTitle =
+        (session.locationName ?? '').trim().isNotEmpty ? session.locationName!.trim() : session.locationId;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Смена'),
@@ -123,7 +130,7 @@ class _ShiftGatePageState extends State<ShiftGatePage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Админ: ${session.phone}'),
-            Text('Локация: ${session.locationId}'),
+            Text('Локация: $locationTitle'),
             const SizedBox(height: 12),
             if (error != null) Text(error!, style: const TextStyle(color: Colors.red)),
             const SizedBox(height: 12),

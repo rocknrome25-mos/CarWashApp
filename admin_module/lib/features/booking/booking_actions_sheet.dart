@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../core/api/admin_api_client.dart';
@@ -194,6 +196,64 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     return Colors.orange;
   }
 
+  // ===== HUMAN ERRORS =====
+
+  /// Try to extract JSON body from strings like:
+  /// "start failed: 409 {\"message\":\"Bay is closed\",\"error\":\"Conflict\",\"statusCode\":409}"
+  Map<String, dynamic>? _extractJsonFromException(Object e) {
+    final s = e.toString();
+    final i = s.indexOf('{');
+    final j = s.lastIndexOf('}');
+    if (i < 0 || j <= i) return null;
+
+    final chunk = s.substring(i, j + 1);
+    try {
+      final decoded = jsonDecode(chunk);
+      if (decoded is Map<String, dynamic>) return decoded;
+    } catch (_) {
+      return null;
+    }
+    return null;
+  }
+
+  bool _isBayClosedError(Object e) {
+    final j = _extractJsonFromException(e);
+    final msg = (j?['message'] ?? '').toString().toLowerCase();
+
+    if (msg.contains('bay is closed') ||
+        msg.contains('post is closed') ||
+        msg.contains('пост закрыт') ||
+        msg.contains('bay closed')) {
+      return true;
+    }
+
+    final s = e.toString().toLowerCase();
+    return s.contains('409') &&
+        (s.contains('bay is closed') ||
+            s.contains('post is closed') ||
+            s.contains('пост закрыт'));
+  }
+
+  Future<void> _showBayClosedDialog() async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (_) => AlertDialog(
+        title: const Text('Пост закрыт'),
+        content: const Text(
+          'Чтобы начать обслуживание, откройте пост во вкладке «Посты».',
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Ок'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _run(Future<void> Function() fn) async {
     setState(() {
       loading = true;
@@ -206,7 +266,13 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
       Navigator.of(context).pop();
     } catch (e) {
       if (!mounted) return;
-      setState(() => error = e.toString());
+
+      if (_isBayClosedError(e)) {
+        await _showBayClosedDialog();
+        setState(() => error = null);
+      } else {
+        setState(() => error = e.toString());
+      }
     } finally {
       if (mounted) setState(() => loading = false);
     }
@@ -475,7 +541,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // ✅ TOP BACK BAR
+              // TOP BAR
               Row(
                 children: [
                   IconButton(
@@ -492,7 +558,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
               ),
               const Divider(),
 
-              // header
               Row(
                 children: [
                   Expanded(
@@ -548,7 +613,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
 
               const SizedBox(height: 12),
 
-              Text('Оплачено: $paid ₽   К оплате: $toPay ₽'),
+              Text('Оплачено: $paid ₽ К оплате: $toPay ₽'),
               const SizedBox(height: 6),
               Wrap(
                 spacing: 8,
@@ -590,7 +655,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                 ),
               ),
 
-              // ===== DISCOUNT =====
+              // DISCOUNT
               if (_discountEnabled) ...[
                 const SizedBox(height: 14),
                 const Divider(),
@@ -620,7 +685,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                 ),
               ],
 
-              // ===== PAYMENT =====
+              // PAYMENT
               if (toPay > 0) ...[
                 const SizedBox(height: 14),
                 const Divider(),
@@ -644,7 +709,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                 const SizedBox(height: 8),
               ],
 
-              // ===== ACTIONS =====
+              // ACTIONS
               Row(
                 children: [
                   Expanded(
@@ -669,7 +734,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                 ],
               ),
 
-              // ===== MOVE =====
+              // MOVE
               if (_moveEnabled) ...[
                 const SizedBox(height: 16),
                 const Divider(),
@@ -679,7 +744,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 const SizedBox(height: 8),
-
                 Row(
                   children: [
                     Expanded(
@@ -715,7 +779,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                   ],
                 ),
                 const SizedBox(height: 10),
-
                 Row(
                   children: [
                     Checkbox(
@@ -727,7 +790,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                     const Expanded(child: Text('Согласовано с клиентом')),
                   ],
                 ),
-
                 DropdownButtonFormField<String>(
                   initialValue: moveReasonKind,
                   items: _moveReasons

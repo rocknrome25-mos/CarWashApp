@@ -11,6 +11,7 @@ import {
   PaymentKind,
   PaymentMethodType,
   Prisma,
+  WaitlistStatus,
 } from '@prisma/client';
 import { BookingsGateway } from './bookings.gateway';
 
@@ -134,6 +135,15 @@ export class BookingsService {
     if (!loc.baysCount || loc.baysCount <= 0) {
       throw new BadRequestException('Location has invalid baysCount');
     }
+  }
+
+  private async _getBayOrThrow(locationId: string, bayNumber: number) {
+    const bay = await this.prisma.bay.findUnique({
+      where: { locationId_number: { locationId, number: bayNumber } },
+      select: { id: true, isActive: true, closedReason: true },
+    });
+    if (!bay) throw new BadRequestException('Bay not found');
+    return bay;
   }
 
   async getBusySlots(args: { locationId: string; bayId: number; from: Date; to: Date }) {
@@ -282,9 +292,36 @@ export class BookingsService {
     });
     if (!service) throw new BadRequestException('Service not found');
 
+    // ✅ NEW: если пост закрыт — создаём waitlist вместо booking
+    const bay = await this._getBayOrThrow(locationId, bayId);
+    if (bay.isActive !== true) {
+      await this.prisma.waitlistRequest.create({
+        data: {
+          status: WaitlistStatus.WAITING,
+          locationId,
+          desiredDateTime: dt,
+          desiredBayId: bayId,
+          clientId,
+          carId: body.carId,
+          serviceId: body.serviceId,
+          comment,
+          reason: bay.closedReason ?? 'BAY_CLOSED',
+        },
+      });
+
+      // realtime: и админ, и клиент обновят списки без ручного refresh
+      this.ws.emitBookingChanged(locationId, bayId);
+
+      // 409 -> на клиенте покажем human message
+      throw new ConflictException('BAY_CLOSED_WAITLISTED');
+    }
+
     const baseDur = this._serviceDurationOrDefault(service.durationMin);
     const rawDur = baseDur + bufferMin;
-    const newDurTotal = this._roundUpToStepMin(rawDur, BookingsService.SLOT_STEP_MIN);
+    const newDurTotal = this._roundUpToStepMin(
+      rawDur,
+      BookingsService.SLOT_STEP_MIN,
+    );
 
     const newStart = dt;
     const newEnd = this._end(newStart, newDurTotal);

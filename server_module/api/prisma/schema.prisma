@@ -113,9 +113,9 @@ model Location {
   tenantId String @default("demo-tenant")
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  name     String @unique
+  name     String  @unique
   address  String?
-  colorHex String @default("#2D9CDB")
+  colorHex String  @default("#2D9CDB")
 
   baysCount Int @default(2)
 
@@ -126,7 +126,7 @@ model Location {
   clientLinks ClientLocation[]
 
   cashEvents       ShiftCashEvent[]
-  waitlistRequests WaitlistRequest[]  // ✅ back relation
+  waitlistRequests WaitlistRequest[] // ✅ back relation
 
   @@index([createdAt])
   @@index([tenantId])
@@ -157,13 +157,13 @@ model Client {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  phone String @unique
+  phone String  @unique
   name  String?
 
   gender    ClientGender?
   birthDate DateTime?
 
-  isBlocked       Boolean  @default(false)
+  isBlocked       Boolean   @default(false)
   blockReason     String?
   blockedAt       DateTime?
   blockedByUserId String?
@@ -172,7 +172,7 @@ model Client {
   bookings  Booking[]
   locations ClientLocation[]
 
-  waitlistRequests WaitlistRequest[]  // ✅ back relation
+  waitlistRequests WaitlistRequest[] // ✅ back relation
 
   @@index([phone])
   @@index([createdAt])
@@ -187,7 +187,7 @@ model ClientLocation {
   clientId   String
   locationId String
 
-  isBlocked       Boolean  @default(false)
+  isBlocked       Boolean   @default(false)
   blockReason     String?
   blockedAt       DateTime?
   blockedByUserId String?
@@ -237,7 +237,7 @@ model Service {
 
   name        String @unique
   priceRub    Int
-  durationMin Int @default(30)
+  durationMin Int    @default(30)
 
   bookings Booking[]
 
@@ -253,10 +253,10 @@ model Booking {
   location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
 
   shiftId String?
-  shift   Shift? @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+  shift   Shift?  @relation(fields: [shiftId], references: [id], onDelete: SetNull)
 
   dateTime DateTime
-  bayId    Int @default(1)
+  bayId    Int      @default(1)
 
   bufferMin  Int @default(0)
   depositRub Int @default(0)
@@ -313,12 +313,11 @@ model Payment {
   methodType PaymentMethodType @default(CARD)
   kind       PaymentKind
 
+  @@unique([bookingId, kind])
   @@index([bookingId])
   @@index([paidAt])
   @@index([kind])
   @@index([methodType])
-
-  @@unique([bookingId, kind])
 }
 
 model User {
@@ -326,10 +325,10 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  phone    String @unique
+  phone    String   @unique
   name     String?
   role     UserRole
-  isActive Boolean @default(true)
+  isActive Boolean  @default(true)
 
   locationId String
   location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
@@ -416,7 +415,9 @@ model AuditEvent {
   @@index([clientId])
 }
 
-/* ===================== WAITLIST ===================== */
+/**
+ * ===================== WAITLIST =====================
+ */
 
 enum WaitlistStatus {
   WAITING
@@ -443,7 +444,7 @@ model WaitlistRequest {
   client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
 
   carId String
-  car   Car @relation(fields: [carId], references: [id], onDelete: Cascade)
+  car   Car    @relation(fields: [carId], references: [id], onDelete: Cascade)
 
   serviceId String
   service   Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)

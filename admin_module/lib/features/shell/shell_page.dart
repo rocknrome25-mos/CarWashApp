@@ -393,7 +393,7 @@ class _ShiftTabState extends State<ShiftTab> {
           ? const Center(child: Text('Нет записей'))
           : ListView.separated(
               itemCount: bookings.length,
-              separatorBuilder: (_, __) => const Divider(height: 1),
+              separatorBuilder: (_, _) => const Divider(height: 1),
               itemBuilder: (context, i) {
                 final b = bookings[i] as Map<String, dynamic>;
 
@@ -846,7 +846,7 @@ class _WaitlistTabState extends State<WaitlistTab> {
           ? const Center(child: Text('Очередь пуста'))
           : ListView.separated(
               itemCount: waitlist.length,
-              separatorBuilder: (_, __) => const Divider(height: 1),
+              separatorBuilder: (_, _) => const Divider(height: 1),
               itemBuilder: (context, i) {
                 final w = waitlist[i] as Map<String, dynamic>;
 

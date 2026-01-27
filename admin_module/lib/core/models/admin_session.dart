@@ -31,28 +31,32 @@ class AdminSession {
     String? locationName,
   }) {
     final user = json['user'] as Map<String, dynamic>;
+
+    final ln = (locationName ?? '').trim();
+    final lnOrNull = ln.isEmpty ? null : ln;
+
     return AdminSession(
       userId: user['id'] as String,
       phone: user['phone'] as String,
       name: user['name'] as String?,
       locationId: user['locationId'] as String,
-      locationName: locationName,
+      locationName: lnOrNull,
       activeShiftId: json['activeShiftId'] as String?,
       featuresEnabled: featuresEnabled,
     );
   }
 
   Map<String, dynamic> toJson() => {
-        'user': {
-          'id': userId,
-          'phone': phone,
-          'name': name,
-          'locationId': locationId,
-          'locationName': locationName,
-        },
-        'activeShiftId': activeShiftId,
-        'featuresEnabled': featuresEnabled,
-      };
+    'user': {
+      'id': userId,
+      'phone': phone,
+      'name': name,
+      'locationId': locationId,
+      'locationName': locationName,
+    },
+    'activeShiftId': activeShiftId,
+    'featuresEnabled': featuresEnabled,
+  };
 
   factory AdminSession.fromJson(Map<String, dynamic> json) {
     final user = json['user'] as Map<String, dynamic>;
@@ -65,12 +69,15 @@ class AdminSession {
       });
     }
 
+    final ln = (user['locationName'] as String?)?.trim();
+    final lnOrNull = (ln == null || ln.isEmpty) ? null : ln;
+
     return AdminSession(
       userId: user['id'] as String,
       phone: user['phone'] as String,
       name: user['name'] as String?,
       locationId: user['locationId'] as String,
-      locationName: user['locationName'] as String?,
+      locationName: lnOrNull,
       activeShiftId: json['activeShiftId'] as String?,
       featuresEnabled: fe,
     );
@@ -80,14 +87,18 @@ class AdminSession {
     String? activeShiftId,
     Map<String, bool>? featuresEnabled,
     String? locationName,
-  }) =>
-      AdminSession(
-        userId: userId,
-        phone: phone,
-        name: name,
-        locationId: locationId,
-        locationName: locationName ?? this.locationName,
-        activeShiftId: activeShiftId ?? this.activeShiftId,
-        featuresEnabled: featuresEnabled ?? this.featuresEnabled,
-      );
+  }) {
+    final ln = (locationName ?? '').trim();
+    final lnOrNull = ln.isEmpty ? null : ln;
+
+    return AdminSession(
+      userId: userId,
+      phone: phone,
+      name: name,
+      locationId: locationId,
+      locationName: lnOrNull ?? this.locationName,
+      activeShiftId: activeShiftId ?? this.activeShiftId,
+      featuresEnabled: featuresEnabled ?? this.featuresEnabled,
+    );
+  }
 }
