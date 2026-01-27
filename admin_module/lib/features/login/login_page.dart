@@ -36,6 +36,15 @@ class _LoginPageState extends State<LoginPage> {
     return out;
   }
 
+  String? _parseLocationName(Map<String, dynamic> cfg) {
+    final loc = cfg['location'];
+    if (loc is Map) {
+      final name = (loc['name'] ?? '').toString().trim();
+      if (name.isNotEmpty) return name;
+    }
+    return null;
+  }
+
   Future<void> _login() async {
     setState(() {
       loading = true;
@@ -46,21 +55,21 @@ class _LoginPageState extends State<LoginPage> {
       final loginJson = await widget.api.adminLogin(ctrl.text.trim());
 
       final user = loginJson['user'] as Map<String, dynamic>;
-      final locationId = user['locationId'] as String;
+      final locationId = (user['locationId'] ?? '').toString();
 
       final cfg = await widget.api.getConfig(locationId);
       final features = _parseFeatures(cfg);
+      final locationName = _parseLocationName(cfg);
 
       final session = AdminSession.fromLoginJson(
         loginJson,
         featuresEnabled: features,
+        locationName: locationName,
       );
 
       await widget.store.save(session);
 
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
 
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
@@ -72,15 +81,17 @@ class _LoginPageState extends State<LoginPage> {
         ),
       );
     } catch (e) {
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
       setState(() => error = e.toString());
     } finally {
-      if (mounted) {
-        setState(() => loading = false);
-      }
+      if (mounted) setState(() => loading = false);
     }
+  }
+
+  @override
+  void dispose() {
+    ctrl.dispose();
+    super.dispose();
   }
 
   @override
@@ -96,8 +107,7 @@ class _LoginPageState extends State<LoginPage> {
               decoration: const InputDecoration(labelText: 'Телефон'),
             ),
             const SizedBox(height: 12),
-            if (error != null)
-              Text(error!, style: const TextStyle(color: Colors.red)),
+            if (error != null) Text(error!, style: const TextStyle(color: Colors.red)),
             const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,

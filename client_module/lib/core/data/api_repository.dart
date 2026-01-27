@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../api/api_client.dart';
@@ -8,7 +9,6 @@ import '../models/booking.dart';
 import '../models/car.dart';
 import '../models/service.dart';
 import '../models/client.dart';
-import '../models/location.dart';
 import '../realtime/realtime_client.dart';
 
 class ApiRepository implements AppRepository {
@@ -181,17 +181,19 @@ class ApiRepository implements AppRepository {
 
   @override
   Future<Client> loginDemo({required String phone}) async {
+    // ✅ Safety: demo login allowed only in debug builds
+    if (!kDebugMode) {
+      throw Exception('Demo-вход отключён в релизной версии.');
+    }
+
     final p = phone.trim();
     if (p.isEmpty) {
       throw Exception('Телефон обязателен для входа');
     }
 
+    // ✅ ВАЖНО: не пишем name="Demo", чтобы не портить реальные данные даже в debug
     final j =
-        await api.postJson('/clients/register', {
-              'phone': p,
-              'name': 'Demo',
-              'gender': 'MALE',
-            })
+        await api.postJson('/clients/register', {'phone': p, 'gender': 'MALE'})
             as Map<String, dynamic>;
 
     final c = Client.fromJson(j);

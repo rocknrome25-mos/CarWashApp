@@ -25,10 +25,17 @@ class CalendarPage extends StatefulWidget {
 class _CalendarPageState extends State<CalendarPage> {
   bool loading = true;
   String? error;
+
   List<dynamic> bookings = [];
+  List<dynamic> waitlist = [];
+
+  // bays state
+  final Map<int, bool> bayIsActive = {1: true, 2: true};
+
   DateTime selectedDay = DateTime.now();
 
-  bool get _cashEnabled => widget.session.featureOn('CASH_DRAWER', defaultValue: true);
+  bool get _cashEnabled =>
+      widget.session.featureOn('CASH_DRAWER', defaultValue: true);
 
   String get _ymd => DateFormat('yyyy-MM-dd').format(selectedDay);
 
@@ -44,22 +51,45 @@ class _CalendarPageState extends State<CalendarPage> {
   @override
   void initState() {
     super.initState();
-    _load();
+    _loadAll();
   }
 
-  Future<void> _load() async {
+  Future<void> _loadAll() async {
     setState(() {
       loading = true;
       error = null;
     });
+
     try {
-      final list = await widget.api.calendarDay(
-        widget.session.userId,
-        widget.session.activeShiftId!,
-        _ymd,
-      );
+      final uid = widget.session.userId;
+      final sid = widget.session.activeShiftId!;
+
+      final list = await widget.api.calendarDay(uid, sid, _ymd);
+      final wl = await widget.api.waitlistDay(uid, sid, _ymd);
+
+      final bays = await widget.api.listBays(uid, sid);
+      final map = <int, bool>{};
+
+      for (final x in bays) {
+        if (x is Map<String, dynamic>) {
+          final n = (x['number'] as num?)?.toInt();
+          final a = x['isActive'];
+          if (n != null && n >= 1 && n <= 20) {
+            map[n] = a == true;
+          }
+        }
+      }
+
       if (!mounted) return;
-      setState(() => bookings = list);
+      setState(() {
+        bookings = list;
+        waitlist = wl;
+        if (map.isNotEmpty) {
+          // we only show 1/2 in UI now
+          bayIsActive[1] = map[1] ?? bayIsActive[1] ?? true;
+          bayIsActive[2] = map[2] ?? bayIsActive[2] ?? true;
+        }
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() => error = e.toString());
@@ -80,7 +110,9 @@ class _CalendarPageState extends State<CalendarPage> {
     final finishedAt = b['finishedAt']?.toString();
 
     if (raw == 'CANCELED') return 'ОТМЕНЕНО';
-    if (startedAt != null && startedAt.isNotEmpty && (finishedAt == null || finishedAt.isEmpty)) {
+    if (startedAt != null &&
+        startedAt.isNotEmpty &&
+        (finishedAt == null || finishedAt.isEmpty)) {
       return 'МОЕТСЯ';
     }
     if (raw == 'COMPLETED') return 'ЗАВЕРШЕНО';
@@ -128,7 +160,9 @@ class _CalendarPageState extends State<CalendarPage> {
       await widget.store.clear();
       if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => LoginPage(api: widget.api, store: widget.store)),
+        MaterialPageRoute(
+          builder: (_) => LoginPage(api: widget.api, store: widget.store),
+        ),
         (r) => false,
       );
     } catch (e) {
@@ -167,14 +201,21 @@ class _CalendarPageState extends State<CalendarPage> {
                     children: [
                       Row(
                         children: [
-                          const Expanded(child: Text('Ожидаемая сумма наличных')),
-                          Text('$expectedRub ₽', style: const TextStyle(fontWeight: FontWeight.w600)),
+                          const Expanded(
+                            child: Text('Ожидаемая сумма наличных'),
+                          ),
+                          Text(
+                            '$expectedRub ₽',
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
                         ],
                       ),
                       const SizedBox(height: 8),
                       Row(
                         children: [
-                          const Expanded(child: Text('Разница (факт - ожидаемая)')),
+                          const Expanded(
+                            child: Text('Разница (факт - ожидаемая)'),
+                          ),
                           Text(
                             '${diff >= 0 ? '+' : ''}$diff ₽',
                             style: TextStyle(
@@ -188,22 +229,30 @@ class _CalendarPageState extends State<CalendarPage> {
                       TextField(
                         controller: countedCtrl,
                         keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(labelText: 'Фактически в кассе (₽)'),
+                        decoration: const InputDecoration(
+                          labelText: 'Фактически в кассе (₽)',
+                        ),
                         onChanged: (_) => setStateDialog(() {}),
                       ),
                       TextField(
                         controller: handoverCtrl,
                         keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(labelText: 'Сдать владельцу (₽)'),
+                        decoration: const InputDecoration(
+                          labelText: 'Сдать владельцу (₽)',
+                        ),
                       ),
                       TextField(
                         controller: keepCtrl,
                         keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(labelText: 'Оставить в кассе (₽)'),
+                        decoration: const InputDecoration(
+                          labelText: 'Оставить в кассе (₽)',
+                        ),
                       ),
                       TextField(
                         controller: noteCtrl,
-                        decoration: const InputDecoration(labelText: 'Комментарий (необязательно)'),
+                        decoration: const InputDecoration(
+                          labelText: 'Комментарий (необязательно)',
+                        ),
                       ),
                     ],
                   ),
@@ -246,7 +295,9 @@ class _CalendarPageState extends State<CalendarPage> {
       if (!mounted) return;
 
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => LoginPage(api: widget.api, store: widget.store)),
+        MaterialPageRoute(
+          builder: (_) => LoginPage(api: widget.api, store: widget.store),
+        ),
         (r) => false,
       );
     } catch (e) {
@@ -265,7 +316,190 @@ class _CalendarPageState extends State<CalendarPage> {
 
   void _shiftDay(int deltaDays) {
     setState(() => selectedDay = selectedDay.add(Duration(days: deltaDays)));
-    _load();
+    _loadAll();
+  }
+
+  Future<void> _toggleBayCard(int bayNumber) async {
+    final isOpen = bayIsActive[bayNumber] ?? true;
+    final uid = widget.session.userId;
+    final sid = widget.session.activeShiftId!;
+
+    try {
+      if (isOpen) {
+        // close -> require reason
+        final ctrl = TextEditingController(text: 'Ремонт/тех.перерыв');
+        final ok = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => AlertDialog(
+            title: Text('Закрыть пост $bayNumber'),
+            content: TextField(
+              controller: ctrl,
+              decoration: const InputDecoration(
+                labelText: 'Причина (обязательно)',
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('Отмена'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text('Закрыть'),
+              ),
+            ],
+          ),
+        );
+        if (ok != true) return;
+
+        final reason = ctrl.text.trim();
+        if (reason.isEmpty) {
+          setState(() => error = 'Причина закрытия поста обязательна');
+          return;
+        }
+
+        await widget.api.setBayActive(
+          uid,
+          sid,
+          bayNumber: bayNumber,
+          isActive: false,
+          reason: reason,
+        );
+      } else {
+        // open -> DO NOT SEND reason
+        await widget.api.setBayActive(
+          uid,
+          sid,
+          bayNumber: bayNumber,
+          isActive: true,
+        );
+      }
+
+      await _loadAll();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => error = e.toString());
+    }
+  }
+
+  Widget _bayCard(int bayNumber) {
+    final isOpen = bayIsActive[bayNumber] ?? true;
+
+    final statusText = isOpen ? 'ОТКРЫТ' : 'ЗАКРЫТ';
+    final statusIcon = isOpen ? Icons.check_circle : Icons.cancel;
+    final statusColor = isOpen ? Colors.green : Colors.red;
+
+    final btnText = isOpen ? 'Закрыть пост' : 'Открыть пост';
+    final btnIcon = isOpen ? Icons.lock : Icons.lock_open;
+
+    final button = isOpen
+        ? OutlinedButton.icon(
+            onPressed: loading ? null : () => _toggleBayCard(bayNumber),
+            icon: Icon(btnIcon),
+            label: Text(btnText),
+          )
+        : FilledButton.icon(
+            onPressed: loading ? null : () => _toggleBayCard(bayNumber),
+            icon: Icon(btnIcon),
+            label: Text(btnText),
+          );
+
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Пост $bayNumber',
+              style: const TextStyle(fontWeight: FontWeight.w900),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Icon(statusIcon, color: statusColor),
+                const SizedBox(width: 8),
+                Text(
+                  statusText,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w900,
+                    color: statusColor,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            SizedBox(width: double.infinity, child: button),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _baysRow() {
+    return Row(children: [_bayCard(1), const SizedBox(width: 10), _bayCard(2)]);
+  }
+
+  Widget _waitlistSection() {
+    if (waitlist.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 12, 12, 6),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Очередь (waitlist)',
+            style: TextStyle(fontWeight: FontWeight.w900),
+          ),
+          const SizedBox(height: 8),
+          ...waitlist.map((x) {
+            final w = x as Map<String, dynamic>;
+
+            final dtIso = (w['desiredDateTime'] ?? w['dateTime'] ?? '')
+                .toString();
+            final time = dtIso.isNotEmpty ? _fmtTime(dtIso) : '--:--';
+
+            final bay = (w['desiredBayId'] ?? w['bayId'] ?? '').toString();
+
+            final serviceName = w['service']?['name']?.toString() ?? 'Услуга';
+
+            final clientName = w['client']?['name']?.toString();
+            final clientPhone = w['client']?['phone']?.toString();
+            final clientTitle = (clientName != null && clientName.isNotEmpty)
+                ? clientName
+                : (clientPhone ?? '');
+
+            final plate = w['car']?['plateDisplay']?.toString() ?? '';
+            final make = w['car']?['makeDisplay']?.toString() ?? '';
+            final model = w['car']?['modelDisplay']?.toString() ?? '';
+            final carLine = plate.isEmpty ? '' : ' • $plate • $make $model';
+
+            final reason = (w['reason'] ?? w['waitlistReason'] ?? '')
+                .toString();
+
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                '$time • Пост ${bay.isEmpty ? "—" : bay} • $serviceName • $clientTitle$carLine\n'
+                'Причина: ${reason.isEmpty ? "—" : reason}',
+                style: const TextStyle(fontSize: 12),
+              ),
+            );
+          }),
+        ],
+      ),
+    );
   }
 
   @override
@@ -276,127 +510,177 @@ class _CalendarPageState extends State<CalendarPage> {
       appBar: AppBar(
         title: Text(_ruTitle()),
         actions: [
-          IconButton(tooltip: 'Вчера', onPressed: () => _shiftDay(-1), icon: const Icon(Icons.chevron_left)),
+          IconButton(
+            tooltip: 'Вчера',
+            onPressed: () => _shiftDay(-1),
+            icon: const Icon(Icons.chevron_left),
+          ),
           IconButton(
             tooltip: 'Сегодня',
             onPressed: () {
               setState(() => selectedDay = DateTime.now());
-              _load();
+              _loadAll();
             },
             icon: const Icon(Icons.today),
           ),
-          IconButton(tooltip: 'Завтра', onPressed: () => _shiftDay(1), icon: const Icon(Icons.chevron_right)),
-          IconButton(icon: const Icon(Icons.refresh), onPressed: _load),
-          TextButton(onPressed: _closeShift, child: const Text('Закрыть смену')),
+          IconButton(
+            tooltip: 'Завтра',
+            onPressed: () => _shiftDay(1),
+            icon: const Icon(Icons.chevron_right),
+          ),
+          IconButton(icon: const Icon(Icons.refresh), onPressed: _loadAll),
+          TextButton(
+            onPressed: _closeShift,
+            child: const Text('Закрыть смену'),
+          ),
           const SizedBox(width: 8),
         ],
       ),
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : error != null
-              ? Center(child: Text(error!, style: const TextStyle(color: Colors.red)))
-              : bookings.isEmpty
-                  ? const Center(child: Text('Нет записей'))
-                  : ListView.separated(
-                      itemCount: bookings.length,
-                      separatorBuilder: (_, _) => const Divider(height: 1),
-                      itemBuilder: (context, i) {
-                        final b = bookings[i] as Map<String, dynamic>;
+          ? Center(
+              child: Text(error!, style: const TextStyle(color: Colors.red)),
+            )
+          : Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+                  child: _baysRow(),
+                ),
+                _waitlistSection(),
+                const SizedBox(height: 6),
+                Expanded(
+                  child: bookings.isEmpty
+                      ? const Center(child: Text('Нет записей'))
+                      : ListView.separated(
+                          itemCount: bookings.length,
+                          separatorBuilder: (context, index) =>
+                              const Divider(height: 1),
+                          itemBuilder: (context, i) {
+                            final b = bookings[i] as Map<String, dynamic>;
 
-                        final statusRu = _statusRu(b);
-                        final statusColor = _statusColor(statusRu);
+                            final statusRu = _statusRu(b);
+                            final statusColor = _statusColor(statusRu);
 
-                        final serviceName = b['service']?['name']?.toString() ?? 'Услуга';
-                        final bayId = b['bayId']?.toString() ?? '';
-                        final dateTimeIso = b['dateTime']?.toString() ?? '';
+                            final serviceName =
+                                b['service']?['name']?.toString() ?? 'Услуга';
+                            final bayId = b['bayId']?.toString() ?? '';
+                            final dateTimeIso = b['dateTime']?.toString() ?? '';
 
-                        final clientName = b['client']?['name']?.toString();
-                        final clientPhone = b['client']?['phone']?.toString();
-                        final clientTitle = (clientName != null && clientName.isNotEmpty) ? clientName : (clientPhone ?? '');
+                            final clientName = b['client']?['name']?.toString();
+                            final clientPhone = b['client']?['phone']
+                                ?.toString();
+                            final clientTitle =
+                                (clientName != null && clientName.isNotEmpty)
+                                ? clientName
+                                : (clientPhone ?? '');
 
-                        final plate = b['car']?['plateDisplay']?.toString() ?? '';
-                        final make = b['car']?['makeDisplay']?.toString() ?? '';
-                        final model = b['car']?['modelDisplay']?.toString() ?? '';
-                        final color = b['car']?['color']?.toString();
-                        final body = b['car']?['bodyType']?.toString();
+                            final plate =
+                                b['car']?['plateDisplay']?.toString() ?? '';
+                            final make =
+                                b['car']?['makeDisplay']?.toString() ?? '';
+                            final model =
+                                b['car']?['modelDisplay']?.toString() ?? '';
+                            final carLine = plate.isEmpty
+                                ? ''
+                                : 'Авто: $plate • $make $model';
 
-                        final carParts = <String>[];
-                        if (plate.isNotEmpty) carParts.add(plate);
-                        final mm = ('$make $model').trim();
-                        if (mm.isNotEmpty) carParts.add(mm);
-                        if (body != null && body.trim().isNotEmpty) carParts.add(body.trim());
-                        if (color != null && color.trim().isNotEmpty) carParts.add(color.trim());
-                        final carLine = carParts.isEmpty ? '' : 'Авто: ${carParts.join(' • ')}';
+                            final clientComment = b['comment']?.toString();
+                            final hasComment =
+                                clientComment != null &&
+                                clientComment.trim().isNotEmpty;
 
-                        final clientComment = b['comment']?.toString();
-                        final hasComment = clientComment != null && clientComment.trim().isNotEmpty;
+                            final time = dateTimeIso.isNotEmpty
+                                ? _fmtTime(dateTimeIso)
+                                : '--:--';
 
-                        final time = dateTimeIso.isNotEmpty ? _fmtTime(dateTimeIso) : '--:--';
+                            final paid =
+                                (b['paidTotalRub'] as num?)?.toInt() ?? 0;
+                            final toPay =
+                                (b['remainingRub'] as num?)?.toInt() ?? 0;
 
-                        final paid = (b['paidTotalRub'] as num?)?.toInt() ?? 0;
-                        final toPay = (b['remainingRub'] as num?)?.toInt() ?? 0;
+                            final ps = (b['paymentStatus'] ?? '').toString();
+                            final psRu = _paymentStatusRu(ps);
 
-                        final ps = (b['paymentStatus'] ?? '').toString();
-                        final psRu = _paymentStatusRu(ps);
+                            final badges = (b['paymentBadges'] is List)
+                                ? (b['paymentBadges'] as List)
+                                      .map((x) => x.toString())
+                                      .toList()
+                                : <String>[];
 
-                        final badges = (b['paymentBadges'] is List)
-                            ? (b['paymentBadges'] as List).map((x) => x.toString()).toList()
-                            : <String>[];
-
-                        return ListTile(
-                          title: Text('$time • $serviceName • Пост $bayId'),
-                          subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(clientTitle),
-                              if (carLine.isNotEmpty) Text(carLine),
-                              if (hasComment) Text('Комментарий: ${clientComment.trim()}'),
-                              const SizedBox(height: 6),
-                              Row(
+                            return ListTile(
+                              title: Text('$time • $serviceName • Пост $bayId'),
+                              subtitle: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Chip(
-                                    label: Text(statusRu),
-                                    visualDensity: VisualDensity.compact,
-                                    side: BorderSide(color: statusColor),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Text(psRu),
-                                ],
-                              ),
-                              const SizedBox(height: 4),
-                              Text('Оплачено: $paid ₽   К оплате: $toPay ₽'),
-                              const SizedBox(height: 6),
-                              Wrap(
-                                spacing: 8,
-                                children: [
-                                  for (final x in badges)
-                                    Chip(
-                                      avatar: Icon(_payIcon(x), size: 18),
-                                      label: Text(x == 'CARD' ? 'Карта' : x == 'CASH' ? 'Наличные' : 'Контракт'),
-                                      visualDensity: VisualDensity.compact,
+                                  Text(clientTitle),
+                                  if (carLine.isNotEmpty) Text(carLine),
+                                  if (hasComment)
+                                    Text(
+                                      'Комментарий: ${clientComment.trim()}',
                                     ),
+                                  const SizedBox(height: 6),
+                                  Row(
+                                    children: [
+                                      Chip(
+                                        label: Text(statusRu),
+                                        visualDensity: VisualDensity.compact,
+                                        side: BorderSide(color: statusColor),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Text(psRu),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Оплачено: $paid ₽   К оплате: $toPay ₽',
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Wrap(
+                                    spacing: 8,
+                                    children: [
+                                      for (final x in badges)
+                                        Chip(
+                                          avatar: Icon(_payIcon(x), size: 18),
+                                          label: Text(
+                                            x == 'CARD'
+                                                ? 'Карта'
+                                                : x == 'CASH'
+                                                ? 'Наличные'
+                                                : 'Контракт',
+                                          ),
+                                          visualDensity: VisualDensity.compact,
+                                        ),
+                                    ],
+                                  ),
                                 ],
                               ),
-                            ],
-                          ),
-                          onTap: () async {
-                            await showModalBottomSheet(
-                              context: context,
-                              isScrollControlled: true,
-                              builder: (_) => BookingActionsSheet(
-                                api: widget.api,
-                                session: widget.session,
-                                booking: b,
-                                onDone: _load,
-                              ),
+                              onTap: () async {
+                                await showModalBottomSheet(
+                                  context: context,
+                                  isScrollControlled: true,
+                                  builder: (_) => BookingActionsSheet(
+                                    api: widget.api,
+                                    session: widget.session,
+                                    booking: b,
+                                    onDone: _loadAll,
+                                  ),
+                                );
+                              },
                             );
                           },
-                        );
-                      },
-                    ),
+                        ),
+                ),
+              ],
+            ),
       bottomNavigationBar: Padding(
         padding: const EdgeInsets.all(8),
-        child: Text('Shift: $shiftId', textAlign: TextAlign.center, style: const TextStyle(color: Colors.grey)),
+        child: Text(
+          'Shift: $shiftId',
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: Colors.grey),
+        ),
       ),
     );
   }

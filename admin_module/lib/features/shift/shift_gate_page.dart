@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import '../../core/api/admin_api_client.dart';
 import '../../core/models/admin_session.dart';
 import '../../core/storage/session_store.dart';
-import '../calendar/calendar_page.dart';
 import '../login/login_page.dart';
+import '../shell/shell_page.dart';
 
 class ShiftGatePage extends StatefulWidget {
   final AdminApiClient api;
@@ -28,15 +27,6 @@ class _ShiftGatePageState extends State<ShiftGatePage> {
   late AdminSession session = widget.session;
 
   bool get _cashEnabled => session.featureOn('CASH_DRAWER', defaultValue: true);
-
-  String _ruNowLine() {
-    final now = DateTime.now();
-    final date = DateFormat('EEEE, d MMMM y', 'ru_RU').format(now);
-    final time = DateFormat('HH:mm').format(now);
-    return '${_cap(date)} • $time';
-  }
-
-  String _cap(String s) => s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
 
   Future<void> _logout() async {
     await widget.store.clear();
@@ -85,7 +75,6 @@ class _ShiftGatePageState extends State<ShiftGatePage> {
       session = session.copyWith(activeShiftId: shiftId);
       await widget.store.save(session);
 
-      // ✅ if CASH_DRAWER enabled → require open-float
       if (_cashEnabled) {
         final openFloat = await _askOpenFloat();
         if (openFloat == null) {
@@ -102,7 +91,7 @@ class _ShiftGatePageState extends State<ShiftGatePage> {
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
-          builder: (_) => CalendarPage(api: widget.api, store: widget.store, session: session),
+          builder: (_) => ShellPage(api: widget.api, store: widget.store, session: session),
         ),
       );
     } catch (e) {
@@ -118,7 +107,7 @@ class _ShiftGatePageState extends State<ShiftGatePage> {
     final shiftId = session.activeShiftId;
 
     if (shiftId != null && shiftId.isNotEmpty) {
-      return CalendarPage(api: widget.api, store: widget.store, session: session);
+      return ShellPage(api: widget.api, store: widget.store, session: session);
     }
 
     return Scaffold(
@@ -133,12 +122,8 @@ class _ShiftGatePageState extends State<ShiftGatePage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(_ruNowLine(), style: const TextStyle(fontWeight: FontWeight.w600)),
-            const SizedBox(height: 8),
             Text('Админ: ${session.phone}'),
             Text('Локация: ${session.locationId}'),
-            const SizedBox(height: 8),
-            Text('Фичи: CASH_DRAWER=${_cashEnabled ? "ON" : "OFF"}'),
             const SizedBox(height: 12),
             if (error != null) Text(error!, style: const TextStyle(color: Colors.red)),
             const SizedBox(height: 12),

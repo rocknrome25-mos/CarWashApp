@@ -125,7 +125,8 @@ model Location {
   shifts      Shift[]
   clientLinks ClientLocation[]
 
-  cashEvents ShiftCashEvent[]
+  cashEvents       ShiftCashEvent[]
+  waitlistRequests WaitlistRequest[]  // ✅ back relation
 
   @@index([createdAt])
   @@index([tenantId])
@@ -170,6 +171,8 @@ model Client {
   cars      Car[]
   bookings  Booking[]
   locations ClientLocation[]
+
+  waitlistRequests WaitlistRequest[]  // ✅ back relation
 
   @@index([phone])
   @@index([createdAt])
@@ -222,6 +225,8 @@ model Car {
 
   bookings Booking[]
 
+  waitlistRequests WaitlistRequest[] // ✅ back relation
+
   @@index([clientId])
 }
 
@@ -235,6 +240,8 @@ model Service {
   durationMin Int @default(30)
 
   bookings Booking[]
+
+  waitlistRequests WaitlistRequest[] // ✅ back relation
 }
 
 model Booking {
@@ -254,8 +261,7 @@ model Booking {
   bufferMin  Int @default(0)
   depositRub Int @default(0)
 
-  /// ✅ скидка (рубли) и комментарий
-  discountRub  Int    @default(0)
+  discountRub  Int     @default(0)
   discountNote String?
 
   comment   String?
@@ -348,7 +354,7 @@ model Shift {
   adminId    String
 
   status   ShiftStatus @default(OPEN)
-  openedAt DateTime @default(now())
+  openedAt DateTime    @default(now())
   closedAt DateTime?
 
   location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
@@ -408,4 +414,47 @@ model AuditEvent {
   @@index([shiftId])
   @@index([bookingId])
   @@index([clientId])
+}
+
+/* ===================== WAITLIST ===================== */
+
+enum WaitlistStatus {
+  WAITING
+  INVITED
+  CANCELED
+  EXPIRED
+  CONVERTED
+}
+
+model WaitlistRequest {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  status WaitlistStatus @default(WAITING)
+
+  locationId String
+  location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  desiredDateTime DateTime
+  desiredBayId    Int?
+
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  carId String
+  car   Car @relation(fields: [carId], references: [id], onDelete: Cascade)
+
+  serviceId String
+  service   Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  comment String?
+  reason  String?
+
+  invitedAt DateTime?
+
+  @@index([locationId, createdAt])
+  @@index([locationId, status])
+  @@index([clientId, createdAt])
+  @@index([desiredDateTime])
 }

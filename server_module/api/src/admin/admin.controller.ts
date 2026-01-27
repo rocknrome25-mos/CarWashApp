@@ -21,6 +21,9 @@ import { CloseCashDto } from './cash/dto/close-cash.dto';
 import { AdminBookingPayDto } from './dto/admin-booking-pay.dto';
 import { AdminBookingDiscountDto } from './dto/admin-booking-discount.dto';
 
+import { AdminBayCloseDto } from './dto/admin-bay-close.dto';
+import { AdminBayOpenDto } from './dto/admin-bay-open.dto';
+
 @Controller('admin')
 export class AdminController {
   constructor(private readonly admin: AdminService) {}
@@ -103,18 +106,6 @@ export class AdminController {
     return this.admin.cashClose(uid, sid, dto);
   }
 
-  @Get('cash/summary')
-  cashSummary(
-    @Headers('x-user-id') userId?: string,
-    @Headers('x-shift-id') shiftId?: string,
-  ) {
-    const uid = (userId ?? '').trim();
-    const sid = (shiftId ?? '').trim();
-    if (!uid) throw new BadRequestException('x-user-id is required');
-    if (!sid) throw new BadRequestException('x-shift-id is required');
-    return this.admin.cashSummary(uid, sid);
-  }
-
   @Get('cash/expected')
   cashExpected(
     @Headers('x-user-id') userId?: string,
@@ -125,6 +116,71 @@ export class AdminController {
     if (!uid) throw new BadRequestException('x-user-id is required');
     if (!sid) throw new BadRequestException('x-shift-id is required');
     return this.admin.cashExpected(uid, sid);
+  }
+
+  // ===== BAY (close/open) =====
+
+  @Get('bays')
+  listBays(
+    @Headers('x-user-id') userId?: string,
+    @Headers('x-shift-id') shiftId?: string,
+  ) {
+    const uid = (userId ?? '').trim();
+    const sid = (shiftId ?? '').trim();
+    if (!uid) throw new BadRequestException('x-user-id is required');
+    if (!sid) throw new BadRequestException('x-shift-id is required');
+    return this.admin.listBays(uid, sid);
+  }
+
+  @Post('bays/:number/close')
+  closeBay(
+    @Headers('x-user-id') userId?: string,
+    @Headers('x-shift-id') shiftId?: string,
+    @Param('number') numberRaw?: string,
+    @Body() dto: AdminBayCloseDto = {} as AdminBayCloseDto,
+  ) {
+    const uid = (userId ?? '').trim();
+    const sid = (shiftId ?? '').trim();
+    const n = Number(numberRaw);
+    const bayNumber = Number.isFinite(n) ? Math.trunc(n) : 0;
+    if (!uid) throw new BadRequestException('x-user-id is required');
+    if (!sid) throw new BadRequestException('x-shift-id is required');
+    if (bayNumber < 1 || bayNumber > 20) throw new BadRequestException('bay number must be 1..20');
+    return this.admin.closeBay(uid, sid, bayNumber, dto);
+  }
+
+  @Post('bays/:number/open')
+  openBay(
+    @Headers('x-user-id') userId?: string,
+    @Headers('x-shift-id') shiftId?: string,
+    @Param('number') numberRaw?: string,
+    @Body() dto: AdminBayOpenDto = {} as AdminBayOpenDto,
+  ) {
+    const uid = (userId ?? '').trim();
+    const sid = (shiftId ?? '').trim();
+    const n = Number(numberRaw);
+    const bayNumber = Number.isFinite(n) ? Math.trunc(n) : 0;
+    if (!uid) throw new BadRequestException('x-user-id is required');
+    if (!sid) throw new BadRequestException('x-shift-id is required');
+    if (bayNumber < 1 || bayNumber > 20) throw new BadRequestException('bay number must be 1..20');
+    return this.admin.openBay(uid, sid, bayNumber, dto);
+  }
+
+  // ===== WAITLIST =====
+
+  @Get('waitlist/day')
+  waitlistDay(
+    @Headers('x-user-id') userId?: string,
+    @Headers('x-shift-id') shiftId?: string,
+    @Query('date') date?: string,
+  ) {
+    const uid = (userId ?? '').trim();
+    const sid = (shiftId ?? '').trim();
+    const d = (date ?? '').trim();
+    if (!uid) throw new BadRequestException('x-user-id is required');
+    if (!sid) throw new BadRequestException('x-shift-id is required');
+    if (!d) throw new BadRequestException('date is required (YYYY-MM-DD)');
+    return this.admin.getWaitlistDay(uid, sid, d);
   }
 
   // ===== CALENDAR =====
@@ -210,7 +266,6 @@ export class AdminController {
     return this.admin.payBookingAdmin(uid, sid, bid, dto);
   }
 
-  // ✅ NEW: discount
   @Post('bookings/:id/discount')
   discountBooking(
     @Headers('x-user-id') userId?: string,

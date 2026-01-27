@@ -97,6 +97,71 @@ class AdminApiClient {
     return _decodeList(res, 'calendar');
   }
 
+  // ===== WAITLIST =====
+
+  Future<List<dynamic>> waitlistDay(
+    String userId,
+    String shiftId,
+    String ymd,
+  ) async {
+    final res = await http
+        .get(
+          _u('/admin/waitlist/day', {'date': ymd}),
+          headers: _jsonHeaders(userId: userId, shiftId: shiftId),
+        )
+        .timeout(_timeout);
+    return _decodeList(res, 'waitlist');
+  }
+
+  // ===== BAYS =====
+
+  Future<List<dynamic>> listBays(String userId, String shiftId) async {
+    final res = await http
+        .get(
+          _u('/admin/bays'),
+          headers: _jsonHeaders(userId: userId, shiftId: shiftId),
+        )
+        .timeout(_timeout);
+    return _decodeList(res, 'list bays');
+  }
+
+  /// ✅ IMPORTANT:
+  /// - При OPEN: reason НЕ отправляем вообще
+  /// - При CLOSE: reason ОБЯЗАТЕЛЕН и отправляем
+  Future<Map<String, dynamic>> setBayActive(
+    String userId,
+    String shiftId, {
+    required int bayNumber,
+    required bool isActive,
+    String? reason,
+  }) async {
+    final path = isActive
+        ? '/admin/bays/$bayNumber/open'
+        : '/admin/bays/$bayNumber/close';
+
+    Object? body;
+    if (!isActive) {
+      final r = (reason ?? '').trim();
+      if (r.isEmpty) {
+        throw Exception('Причина закрытия обязательна');
+      }
+      body = jsonEncode({'reason': r});
+    } else {
+      // OPEN: no body
+      body = null;
+    }
+
+    final res = await http
+        .post(
+          _u(path),
+          headers: _jsonHeaders(userId: userId, shiftId: shiftId),
+          body: body,
+        )
+        .timeout(_timeout);
+
+    return _decodeMap(res, isActive ? 'open bay' : 'close bay');
+  }
+
   // ===== BOOKINGS =====
 
   Future<Map<String, dynamic>> startBooking(
@@ -194,11 +259,11 @@ class AdminApiClient {
     String shiftId,
     String bookingId, {
     required int discountRub,
-    String? reason,
+    required String reason,
   }) async {
     final payload = <String, dynamic>{
       'discountRub': discountRub,
-      if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
+      'reason': reason.trim(),
     };
 
     final res = await http
@@ -238,44 +303,6 @@ class AdminApiClient {
     }
   }
 
-  Future<void> cashIn(
-    String userId,
-    String shiftId,
-    int amountRub, {
-    required String note,
-  }) async {
-    final res = await http
-        .post(
-          _u('/admin/cash/in'),
-          headers: _jsonHeaders(userId: userId, shiftId: shiftId),
-          body: jsonEncode({'amountRub': amountRub, 'note': note.trim()}),
-        )
-        .timeout(_timeout);
-
-    if (res.statusCode >= 400) {
-      throw Exception('cash in failed: ${res.statusCode} ${res.body}');
-    }
-  }
-
-  Future<void> cashOut(
-    String userId,
-    String shiftId,
-    int amountRub, {
-    required String note,
-  }) async {
-    final res = await http
-        .post(
-          _u('/admin/cash/out'),
-          headers: _jsonHeaders(userId: userId, shiftId: shiftId),
-          body: jsonEncode({'amountRub': amountRub, 'note': note.trim()}),
-        )
-        .timeout(_timeout);
-
-    if (res.statusCode >= 400) {
-      throw Exception('cash out failed: ${res.statusCode} ${res.body}');
-    }
-  }
-
   Future<Map<String, dynamic>> cashExpected(
     String userId,
     String shiftId,
@@ -286,22 +313,7 @@ class AdminApiClient {
           headers: _jsonHeaders(userId: userId, shiftId: shiftId),
         )
         .timeout(_timeout);
-
     return _decodeMap(res, 'cash expected');
-  }
-
-  Future<Map<String, dynamic>> cashSummary(
-    String userId,
-    String shiftId,
-  ) async {
-    final res = await http
-        .get(
-          _u('/admin/cash/summary'),
-          headers: _jsonHeaders(userId: userId, shiftId: shiftId),
-        )
-        .timeout(_timeout);
-
-    return _decodeMap(res, 'cash summary');
   }
 
   Future<void> cashClose(
