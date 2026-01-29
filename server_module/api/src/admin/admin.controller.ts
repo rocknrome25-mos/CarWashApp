@@ -7,6 +7,7 @@ import {
   Param,
   Post,
   Query,
+  Delete,
 } from '@nestjs/common';
 import { AdminService } from './admin.service';
 import { AdminLoginDto } from './dto/admin-login.dto';
@@ -145,7 +146,9 @@ export class AdminController {
     const bayNumber = Number.isFinite(n) ? Math.trunc(n) : 0;
     if (!uid) throw new BadRequestException('x-user-id is required');
     if (!sid) throw new BadRequestException('x-shift-id is required');
-    if (bayNumber < 1 || bayNumber > 20) throw new BadRequestException('bay number must be 1..20');
+    if (bayNumber < 1 || bayNumber > 20) {
+      throw new BadRequestException('bay number must be 1..20');
+    }
     return this.admin.closeBay(uid, sid, bayNumber, dto);
   }
 
@@ -162,7 +165,9 @@ export class AdminController {
     const bayNumber = Number.isFinite(n) ? Math.trunc(n) : 0;
     if (!uid) throw new BadRequestException('x-user-id is required');
     if (!sid) throw new BadRequestException('x-shift-id is required');
-    if (bayNumber < 1 || bayNumber > 20) throw new BadRequestException('bay number must be 1..20');
+    if (bayNumber < 1 || bayNumber > 20) {
+      throw new BadRequestException('bay number must be 1..20');
+    }
     return this.admin.openBay(uid, sid, bayNumber, dto);
   }
 
@@ -181,6 +186,28 @@ export class AdminController {
     if (!sid) throw new BadRequestException('x-shift-id is required');
     if (!d) throw new BadRequestException('date is required (YYYY-MM-DD)');
     return this.admin.getWaitlistDay(uid, sid, d);
+  }
+
+  @Post('waitlist/:id/convert')
+  convertWaitlist(
+    @Headers('x-user-id') userId?: string,
+    @Headers('x-shift-id') shiftId?: string,
+    @Param('id') waitlistId?: string,
+    @Body() body: any = {},
+  ) {
+    const uid = (userId ?? '').trim();
+    const sid = (shiftId ?? '').trim();
+    const wid = (waitlistId ?? '').trim();
+    if (!uid) throw new BadRequestException('x-user-id is required');
+    if (!sid) throw new BadRequestException('x-shift-id is required');
+    if (!wid) throw new BadRequestException('waitlist id is required');
+
+    const bayId = body?.bayId;
+    const dateTime = body?.dateTime;
+    return this.admin.convertWaitlistToBooking(uid, sid, wid, {
+      bayId,
+      dateTime,
+    });
   }
 
   // ===== CALENDAR =====
@@ -280,5 +307,97 @@ export class AdminController {
     if (!sid) throw new BadRequestException('x-shift-id is required');
     if (!bid) throw new BadRequestException('booking id is required');
     return this.admin.applyDiscount(uid, sid, bid, dto);
+  }
+
+  // ===== UPSALE (addons) =====
+
+  @Get('bookings/:id/addons')
+  listAddons(
+    @Headers('x-user-id') userId?: string,
+    @Headers('x-shift-id') shiftId?: string,
+    @Param('id') bookingId?: string,
+  ) {
+    const uid = (userId ?? '').trim();
+    const sid = (shiftId ?? '').trim();
+    const bid = (bookingId ?? '').trim();
+    if (!uid) throw new BadRequestException('x-user-id is required');
+    if (!sid) throw new BadRequestException('x-shift-id is required');
+    if (!bid) throw new BadRequestException('booking id is required');
+    return this.admin.listBookingAddons(uid, sid, bid);
+  }
+
+  @Post('bookings/:id/addons')
+  addAddon(
+    @Headers('x-user-id') userId?: string,
+    @Headers('x-shift-id') shiftId?: string,
+    @Param('id') bookingId?: string,
+    @Body() body: any = {},
+  ) {
+    const uid = (userId ?? '').trim();
+    const sid = (shiftId ?? '').trim();
+    const bid = (bookingId ?? '').trim();
+    const serviceId = (body?.serviceId ?? '').toString().trim();
+    const qty = body?.qty;
+    if (!uid) throw new BadRequestException('x-user-id is required');
+    if (!sid) throw new BadRequestException('x-shift-id is required');
+    if (!bid) throw new BadRequestException('booking id is required');
+    if (!serviceId) throw new BadRequestException('serviceId is required');
+    return this.admin.addBookingAddon(uid, sid, bid, { serviceId, qty });
+  }
+
+  @Delete('bookings/:id/addons/:serviceId')
+  removeAddon(
+    @Headers('x-user-id') userId?: string,
+    @Headers('x-shift-id') shiftId?: string,
+    @Param('id') bookingId?: string,
+    @Param('serviceId') serviceId?: string,
+  ) {
+    const uid = (userId ?? '').trim();
+    const sid = (shiftId ?? '').trim();
+    const bid = (bookingId ?? '').trim();
+    const sid2 = (serviceId ?? '').trim();
+    if (!uid) throw new BadRequestException('x-user-id is required');
+    if (!sid) throw new BadRequestException('x-shift-id is required');
+    if (!bid) throw new BadRequestException('booking id is required');
+    if (!sid2) throw new BadRequestException('serviceId is required');
+    return this.admin.removeBookingAddon(uid, sid, bid, sid2);
+  }
+
+  // ===== PHOTOS =====
+
+  @Get('bookings/:id/photos')
+  listPhotos(
+    @Headers('x-user-id') userId?: string,
+    @Headers('x-shift-id') shiftId?: string,
+    @Param('id') bookingId?: string,
+  ) {
+    const uid = (userId ?? '').trim();
+    const sid = (shiftId ?? '').trim();
+    const bid = (bookingId ?? '').trim();
+    if (!uid) throw new BadRequestException('x-user-id is required');
+    if (!sid) throw new BadRequestException('x-shift-id is required');
+    if (!bid) throw new BadRequestException('booking id is required');
+    return this.admin.listBookingPhotos(uid, sid, bid);
+  }
+
+  @Post('bookings/:id/photos')
+  addPhoto(
+    @Headers('x-user-id') userId?: string,
+    @Headers('x-shift-id') shiftId?: string,
+    @Param('id') bookingId?: string,
+    @Body() body: any = {},
+  ) {
+    const uid = (userId ?? '').trim();
+    const sid = (shiftId ?? '').trim();
+    const bid = (bookingId ?? '').trim();
+    const kind = (body?.kind ?? '').toString().trim();
+    const url = (body?.url ?? '').toString().trim();
+    const note = (body?.note ?? '').toString().trim();
+    if (!uid) throw new BadRequestException('x-user-id is required');
+    if (!sid) throw new BadRequestException('x-shift-id is required');
+    if (!bid) throw new BadRequestException('booking id is required');
+    if (!kind) throw new BadRequestException('kind is required (BEFORE/AFTER)');
+    if (!url) throw new BadRequestException('url is required');
+    return this.admin.addBookingPhoto(uid, sid, bid, { kind, url, note });
   }
 }

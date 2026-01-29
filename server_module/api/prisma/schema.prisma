@@ -72,6 +72,17 @@ enum ShiftCashEventType {
   KEEP_IN_DRAWER
 }
 
+/**
+ * ===================== ADDONS + PHOTOS =====================
+ */
+
+enum BookingPhotoKind {
+  BEFORE
+  AFTER
+  DAMAGE
+  OTHER
+}
+
 model Tenant {
   id        String   @id
   createdAt DateTime @default(now())
@@ -126,7 +137,7 @@ model Location {
   clientLinks ClientLocation[]
 
   cashEvents       ShiftCashEvent[]
-  waitlistRequests WaitlistRequest[] // ✅ back relation
+  waitlistRequests WaitlistRequest[]
 
   @@index([createdAt])
   @@index([tenantId])
@@ -172,7 +183,7 @@ model Client {
   bookings  Booking[]
   locations ClientLocation[]
 
-  waitlistRequests WaitlistRequest[] // ✅ back relation
+  waitlistRequests WaitlistRequest[]
 
   @@index([phone])
   @@index([createdAt])
@@ -223,9 +234,8 @@ model Car {
   clientId String?
   client   Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
 
-  bookings Booking[]
-
-  waitlistRequests WaitlistRequest[] // ✅ back relation
+  bookings         Booking[]
+  waitlistRequests WaitlistRequest[]
 
   @@index([clientId])
 }
@@ -239,9 +249,12 @@ model Service {
   priceRub    Int
   durationMin Int    @default(30)
 
-  bookings Booking[]
+  bookings         Booking[]
+  waitlistRequests WaitlistRequest[]
 
-  waitlistRequests WaitlistRequest[] // ✅ back relation
+  bookingAddons BookingAddon[]
+
+  @@index([createdAt])
 }
 
 model Booking {
@@ -287,6 +300,12 @@ model Booking {
 
   payments Payment[]
 
+  addons BookingAddon[]
+  photos BookingPhoto[]
+
+  // waitlist conversion back relation
+  convertedFromWaitlists WaitlistRequest[] @relation("WaitlistConvertedBooking")
+
   @@index([locationId])
   @@index([locationId, bayId])
   @@index([locationId, dateTime])
@@ -298,6 +317,49 @@ model Booking {
   @@index([status])
   @@index([paymentDueAt])
   @@index([bayId])
+}
+
+model BookingAddon {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  bookingId String
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  serviceId String
+  service   Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  qty Int @default(1)
+
+  // snapshot to keep historical values
+  priceRubSnapshot    Int
+  durationMinSnapshot Int
+
+  note String?
+
+  @@unique([bookingId, serviceId])
+  @@index([bookingId, createdAt])
+  @@index([serviceId])
+}
+
+model BookingPhoto {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  bookingId String
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  kind BookingPhotoKind
+  url  String
+  note String?
+
+  uploadedByUserId String?
+  uploadedByUser   User?   @relation("UserToBookingPhoto", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([bookingId, createdAt])
+  @@index([uploadedByUserId])
+  @@index([kind])
 }
 
 model Payment {
@@ -339,6 +401,9 @@ model User {
   shifts     Shift[]
   audits     AuditEvent[]
   cashEvents ShiftCashEvent[]
+
+  // IMPORTANT: exactly one opposite field for BookingPhoto.uploadedByUser
+  bookingPhotos BookingPhoto[] @relation("UserToBookingPhoto")
 
   @@index([role])
   @@index([locationId])
@@ -454,8 +519,13 @@ model WaitlistRequest {
 
   invitedAt DateTime?
 
+  // conversion link to booking
+  convertedBookingId String?
+  convertedBooking   Booking? @relation("WaitlistConvertedBooking", fields: [convertedBookingId], references: [id], onDelete: SetNull)
+
   @@index([locationId, createdAt])
   @@index([locationId, status])
   @@index([clientId, createdAt])
   @@index([desiredDateTime])
+  @@index([convertedBookingId])
 }

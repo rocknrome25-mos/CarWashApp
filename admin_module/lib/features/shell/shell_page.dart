@@ -401,7 +401,7 @@ class _ShiftTabState extends State<ShiftTab> {
       final v = x['bayId'];
       if (v is int) return v;
       if (v is num) return v.toInt();
-      return int.tryParse('${x['bayId']}') ?? 0;
+      return int.tryParse('$v') ?? 0;
     }
     return 0;
   }
@@ -477,7 +477,9 @@ class _ShiftTabState extends State<ShiftTab> {
                   height: 3,
                   width: 46,
                   decoration: BoxDecoration(
-                    color: selected ? indicatorColor(index) : Colors.transparent,
+                    color: selected
+                        ? indicatorColor(index)
+                        : Colors.transparent,
                     borderRadius: BorderRadius.circular(999),
                   ),
                 ),
@@ -536,7 +538,7 @@ class _ShiftTabState extends State<ShiftTab> {
         ? clientName
         : (clientPhone ?? '');
 
-    // ✅ fixed car line: no model, no stray dash
+    // ✅ fixed car line: no model, no dash
     final carLine = _buildCarLineFromBooking(b);
 
     final paid = (b['paidTotalRub'] as num?)?.toInt() ?? 0;
@@ -688,8 +690,8 @@ class _ShiftTabState extends State<ShiftTab> {
                               x == 'CARD'
                                   ? 'Карта'
                                   : x == 'CASH'
-                                      ? 'Наличные'
-                                      : 'Контракт',
+                                  ? 'Наличные'
+                                  : 'Контракт',
                             ),
                             visualDensity: VisualDensity.compact,
                           ),
@@ -744,32 +746,30 @@ class _ShiftTabState extends State<ShiftTab> {
             child: loading
                 ? const Center(child: CircularProgressIndicator())
                 : (error != null)
-                    ? Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Text(
-                            error!,
-                            style: const TextStyle(color: Colors.red),
-                          ),
-                        ),
-                      )
-                    : list.isEmpty
-                        ? Center(
-                            child: Text(
-                              'Нет записей на Пост $bayId',
-                              style:
-                                  const TextStyle(fontWeight: FontWeight.w700),
-                            ),
-                          )
-                        : ListView.separated(
-                            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                            itemCount: list.length,
-                            separatorBuilder: (_, __) =>
-                                const SizedBox(height: 10),
-                            itemBuilder: (context, i) {
-                              return _bookingCard(context, list[i]);
-                            },
-                          ),
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Text(
+                        error!,
+                        style: const TextStyle(color: Colors.red),
+                      ),
+                    ),
+                  )
+                : list.isEmpty
+                ? Center(
+                    child: Text(
+                      'Нет записей на Пост $bayId',
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                    itemCount: list.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 10),
+                    itemBuilder: (context, i) {
+                      return _bookingCard(context, list[i]);
+                    },
+                  ),
           ),
         ],
       ),
@@ -824,9 +824,7 @@ class _BaysTabState extends State<BaysTab> {
         if (x is Map<String, dynamic>) {
           final n = (x['number'] as num?)?.toInt();
           final a = x['isActive'];
-          if (n != null && n >= 1 && n <= 20) {
-            map[n] = a == true;
-          }
+          if (n != null && n >= 1 && n <= 20) map[n] = a == true;
         }
       }
 
@@ -986,23 +984,18 @@ class _BaysTabState extends State<BaysTab> {
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : (error != null)
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child:
-                        Text(error!, style: const TextStyle(color: Colors.red)),
-                  ),
-                )
-              : Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
-                    children: [
-                      bayCard(1),
-                      const SizedBox(width: 10),
-                      bayCard(2),
-                    ],
-                  ),
-                ),
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(error!, style: const TextStyle(color: Colors.red)),
+              ),
+            )
+          : Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                children: [bayCard(1), const SizedBox(width: 10), bayCard(2)],
+              ),
+            ),
     );
   }
 }
@@ -1128,98 +1121,92 @@ class _WaitlistTabState extends State<WaitlistTab> {
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : (error != null)
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child:
-                        Text(error!, style: const TextStyle(color: Colors.red)),
-                  ),
-                )
-              : waitlist.isEmpty
-                  ? const Center(child: Text('Очередь пуста'))
-                  : ListView.separated(
-                      padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-                      itemCount: waitlist.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 10),
-                      itemBuilder: (context, i) {
-                        final w = waitlist[i] as Map<String, dynamic>;
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(error!, style: const TextStyle(color: Colors.red)),
+              ),
+            )
+          : waitlist.isEmpty
+          ? const Center(child: Text('Очередь пуста'))
+          : ListView.separated(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+              itemCount: waitlist.length,
+              separatorBuilder: (_, _) => const SizedBox(height: 10),
+              itemBuilder: (context, i) {
+                final w = waitlist[i] as Map<String, dynamic>;
 
-                        final dtIso =
-                            (w['desiredDateTime'] ?? w['dateTime'] ?? '')
-                                .toString();
-                        final time = dtIso.isNotEmpty ? fmtTime(dtIso) : '--:--';
+                final dtIso = (w['desiredDateTime'] ?? w['dateTime'] ?? '')
+                    .toString();
+                final time = dtIso.isNotEmpty ? fmtTime(dtIso) : '--:--';
 
-                        final bay =
-                            (w['desiredBayId'] ?? w['bayId'] ?? '').toString();
-                        final serviceName =
-                            w['service']?['name']?.toString() ?? 'Услуга';
+                final bay = (w['desiredBayId'] ?? w['bayId'] ?? '').toString();
+                final serviceName =
+                    w['service']?['name']?.toString() ?? 'Услуга';
 
-                        final clientName = w['client']?['name']?.toString();
-                        final clientPhone = w['client']?['phone']?.toString();
-                        final clientTitle =
-                            (clientName != null && clientName.isNotEmpty)
-                                ? clientName
-                                : (clientPhone ?? '');
+                final clientName = w['client']?['name']?.toString();
+                final clientPhone = w['client']?['phone']?.toString();
+                final clientTitle =
+                    (clientName != null && clientName.isNotEmpty)
+                    ? clientName
+                    : (clientPhone ?? '');
 
-                        // ✅ no model, no dash
-                        final carLine = _buildCarLineFromWaitlist(w);
+                final carLine = _buildCarLineFromWaitlist(w);
 
-                        final reason =
-                            (w['reason'] ?? w['waitlistReason'] ?? '').toString();
+                final reason = (w['reason'] ?? w['waitlistReason'] ?? '')
+                    .toString();
 
-                        return Container(
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: cs.surface,
-                            borderRadius: BorderRadius.circular(18),
-                            border: Border.all(
-                              color: cs.outlineVariant.withValues(alpha: 0.6),
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                blurRadius: 10,
-                                offset: const Offset(0, 6),
-                                color: Colors.black.withValues(alpha: 0.04),
-                              ),
-                            ],
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                '$time • Пост ${bay.isEmpty ? '—' : bay} • $serviceName',
-                                style:
-                                    const TextStyle(fontWeight: FontWeight.w900),
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                clientTitle,
-                                style:
-                                    const TextStyle(fontWeight: FontWeight.w800),
-                              ),
-                              if (carLine.isNotEmpty) ...[
-                                const SizedBox(height: 4),
-                                Text(
-                                  carLine,
-                                  style: TextStyle(
-                                    color: cs.onSurface.withValues(alpha: 0.75),
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                              ],
-                              const SizedBox(height: 8),
-                              Text(
-                                'Причина: ${reason.isEmpty ? '—' : reason}',
-                                style: TextStyle(
-                                  color: cs.onSurface.withValues(alpha: 0.75),
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
+                return Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: cs.surface,
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(
+                      color: cs.outlineVariant.withValues(alpha: 0.6),
                     ),
+                    boxShadow: [
+                      BoxShadow(
+                        blurRadius: 10,
+                        offset: const Offset(0, 6),
+                        color: Colors.black.withValues(alpha: 0.04),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '$time • Пост ${bay.isEmpty ? '—' : bay} • $serviceName',
+                        style: const TextStyle(fontWeight: FontWeight.w900),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        clientTitle,
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                      if (carLine.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          carLine,
+                          style: TextStyle(
+                            color: cs.onSurface.withValues(alpha: 0.75),
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 8),
+                      Text(
+                        'Причина: ${reason.isEmpty ? '—' : reason}',
+                        style: TextStyle(
+                          color: cs.onSurface.withValues(alpha: 0.75),
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
     );
   }
 }

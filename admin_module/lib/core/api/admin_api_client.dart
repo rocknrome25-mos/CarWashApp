@@ -113,6 +113,30 @@ class AdminApiClient {
     return _decodeList(res, 'waitlist');
   }
 
+  Future<Map<String, dynamic>> convertWaitlistToBooking(
+    String userId,
+    String shiftId,
+    String waitlistId, {
+    int? bayId,
+    String? dateTimeIso,
+  }) async {
+    final payload = <String, dynamic>{
+      if (bayId != null) 'bayId': bayId,
+      if (dateTimeIso != null && dateTimeIso.trim().isNotEmpty)
+        'dateTime': dateTimeIso.trim(),
+    };
+
+    final res = await http
+        .post(
+          _u('/admin/waitlist/$waitlistId/convert'),
+          headers: _jsonHeaders(userId: userId, shiftId: shiftId),
+          body: jsonEncode(payload),
+        )
+        .timeout(_timeout);
+
+    return _decodeMap(res, 'waitlist convert');
+  }
+
   // ===== BAYS =====
 
   Future<List<dynamic>> listBays(String userId, String shiftId) async {
@@ -274,6 +298,102 @@ class AdminApiClient {
         .timeout(_timeout);
 
     return _decodeMap(res, 'admin discount');
+  }
+
+  // ===== UPSALE (ADDONS) =====
+
+  Future<List<dynamic>> listBookingAddons(
+    String userId,
+    String shiftId,
+    String bookingId,
+  ) async {
+    final res = await http
+        .get(
+          _u('/admin/bookings/$bookingId/addons'),
+          headers: _jsonHeaders(userId: userId, shiftId: shiftId),
+        )
+        .timeout(_timeout);
+    return _decodeList(res, 'list addons');
+  }
+
+  Future<Map<String, dynamic>> addBookingAddon(
+    String userId,
+    String shiftId,
+    String bookingId, {
+    required String serviceId,
+    int qty = 1,
+  }) async {
+    final payload = <String, dynamic>{
+      'serviceId': serviceId.trim(),
+      'qty': qty,
+    };
+
+    final res = await http
+        .post(
+          _u('/admin/bookings/$bookingId/addons'),
+          headers: _jsonHeaders(userId: userId, shiftId: shiftId),
+          body: jsonEncode(payload),
+        )
+        .timeout(_timeout);
+
+    return _decodeMap(res, 'add addon');
+  }
+
+  Future<Map<String, dynamic>> removeBookingAddon(
+    String userId,
+    String shiftId,
+    String bookingId, {
+    required String serviceId,
+  }) async {
+    final res = await http
+        .delete(
+          _u('/admin/bookings/$bookingId/addons/${serviceId.trim()}'),
+          headers: _jsonHeaders(userId: userId, shiftId: shiftId),
+        )
+        .timeout(_timeout);
+
+    return _decodeMap(res, 'remove addon');
+  }
+
+  // ===== PHOTOS =====
+
+  Future<List<dynamic>> listBookingPhotos(
+    String userId,
+    String shiftId,
+    String bookingId,
+  ) async {
+    final res = await http
+        .get(
+          _u('/admin/bookings/$bookingId/photos'),
+          headers: _jsonHeaders(userId: userId, shiftId: shiftId),
+        )
+        .timeout(_timeout);
+    return _decodeList(res, 'list photos');
+  }
+
+  Future<Map<String, dynamic>> addBookingPhoto(
+    String userId,
+    String shiftId,
+    String bookingId, {
+    required String kind, // BEFORE/AFTER/DAMAGE/OTHER
+    required String url,
+    String? note,
+  }) async {
+    final payload = <String, dynamic>{
+      'kind': kind.trim(),
+      'url': url.trim(),
+      if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
+    };
+
+    final res = await http
+        .post(
+          _u('/admin/bookings/$bookingId/photos'),
+          headers: _jsonHeaders(userId: userId, shiftId: shiftId),
+          body: jsonEncode(payload),
+        )
+        .timeout(_timeout);
+
+    return _decodeMap(res, 'add photo');
   }
 
   // ===== CASH =====

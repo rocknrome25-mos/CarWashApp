@@ -59,54 +59,78 @@ export class BookingsService {
     return Math.max(min, Math.min(max, xi));
   }
 
+  // единый include для booking
+  private _bookingInclude() {
+    return {
+      car: true,
+      service: true,
+      payments: { orderBy: { paidAt: 'asc' as const } },
+      location: true,
+      addons: { include: { service: true } },
+      photos: { orderBy: { createdAt: 'asc' as const } },
+    };
+  }
+
   private async _expirePendingPayments(): Promise<void> {
     const now = new Date();
 
-    await this.prisma.booking.updateMany({
+    const expired = await this.prisma.booking.findMany({
       where: {
         status: BookingStatus.PENDING_PAYMENT,
         paymentDueAt: { not: null, lt: now },
       },
+      select: { id: true, locationId: true, bayId: true },
+    });
+
+    if (expired.length === 0) return;
+
+    await this.prisma.booking.updateMany({
+      where: { id: { in: expired.map((x) => x.id) } },
       data: {
         status: BookingStatus.CANCELED,
         canceledAt: now,
         cancelReason: 'PAYMENT_EXPIRED',
       },
     });
+
+    for (const b of expired) {
+      this.ws.emitBookingChanged(b.locationId, b.bayId ?? 1);
+    }
   }
 
   private async _autoCompletePastActive(): Promise<void> {
     const now = new Date();
 
     const candidates = await this.prisma.booking.findMany({
-      where: {
-        status: BookingStatus.ACTIVE,
-        dateTime: { lt: now },
-      },
+      where: { status: BookingStatus.ACTIVE, dateTime: { lt: now } },
       select: {
         id: true,
         dateTime: true,
         bufferMin: true,
+        bayId: true,
+        locationId: true,
         service: { select: { durationMin: true } },
       },
     });
 
-    const toCompleteIds = candidates
-      .filter((b) => {
-        const base = this._serviceDurationOrDefault(b.service?.durationMin);
-        const raw = base + (b.bufferMin ?? 0);
-        const total = this._roundUpToStepMin(raw, BookingsService.SLOT_STEP_MIN);
-        const end = this._end(b.dateTime, total);
-        return end.getTime() < now.getTime();
-      })
-      .map((b) => b.id);
+    const toComplete = candidates.filter((b) => {
+      const base = this._serviceDurationOrDefault(b.service?.durationMin);
+      const raw = base + (b.bufferMin ?? 0);
+      const total = this._roundUpToStepMin(raw, BookingsService.SLOT_STEP_MIN);
+      const end = this._end(b.dateTime, total);
+      return end.getTime() < now.getTime();
+    });
 
-    if (toCompleteIds.length === 0) return;
+    if (toComplete.length === 0) return;
 
     await this.prisma.booking.updateMany({
-      where: { id: { in: toCompleteIds } },
+      where: { id: { in: toComplete.map((x) => x.id) } },
       data: { status: BookingStatus.COMPLETED },
     });
+
+    for (const b of toComplete) {
+      this.ws.emitBookingChanged(b.locationId, b.bayId ?? 1);
+    }
   }
 
   private async _housekeeping(): Promise<void> {
@@ -131,7 +155,6 @@ export class BookingsService {
       select: { id: true, baysCount: true },
     });
     if (!loc) throw new BadRequestException('Location not found');
-
     if (!loc.baysCount || loc.baysCount <= 0) {
       throw new BadRequestException('Location has invalid baysCount');
     }
@@ -151,7 +174,6 @@ export class BookingsService {
 
     const locationId = (args.locationId ?? '').trim();
     if (!locationId) throw new BadRequestException('locationId is required');
-
     await this._ensureLocationExists(locationId);
 
     const bayId = args.bayId;
@@ -213,21 +235,13 @@ export class BookingsService {
   async findAll(includeCanceled: boolean, clientId?: string) {
     await this._housekeeping();
 
-    const where: any = includeCanceled
-      ? {}
-      : { status: { not: BookingStatus.CANCELED } };
-
+    const where: any = includeCanceled ? {} : { status: { not: BookingStatus.CANCELED } };
     if (clientId) where.clientId = clientId;
 
     return this.prisma.booking.findMany({
       where,
       orderBy: { dateTime: 'asc' },
-      include: {
-        car: true,
-        service: true,
-        payments: { orderBy: { paidAt: 'asc' } },
-        location: true,
-      },
+      include: this._bookingInclude(),
     });
   }
 
@@ -252,9 +266,7 @@ export class BookingsService {
     if (!clientId) throw new BadRequestException('clientId is required');
 
     const dt = new Date(body.dateTime);
-    if (isNaN(dt.getTime())) {
-      throw new BadRequestException('dateTime must be ISO string');
-    }
+    if (isNaN(dt.getTime())) throw new BadRequestException('dateTime must be ISO string');
 
     const nowMs = Date.now();
     const graceMs = 30 * 1000;
@@ -263,14 +275,13 @@ export class BookingsService {
     }
 
     let locationId = (body.locationId ?? '').trim();
-    if (!locationId) {
-      locationId = await this._getDefaultLocationId();
-    }
+    if (!locationId) locationId = await this._getDefaultLocationId();
     await this._ensureLocationExists(locationId);
 
     const bayId = this._clampInt(body.bayId, 1, 1, 20);
     const bufferMin = this._clampInt(body.bufferMin, 15, 0, 120);
     const depositRub = this._clampInt(body.depositRub, 500, 0, 1_000_000);
+
     const comment =
       typeof body.comment === 'string' && body.comment.trim().length > 0
         ? body.comment.trim().slice(0, 500)
@@ -281,10 +292,7 @@ export class BookingsService {
       select: { id: true, clientId: true },
     });
     if (!car) throw new BadRequestException('Car not found');
-
-    if (car.clientId && car.clientId !== clientId) {
-      throw new ForbiddenException('Not your car');
-    }
+    if (car.clientId && car.clientId !== clientId) throw new ForbiddenException('Not your car');
 
     const service = await this.prisma.service.findUnique({
       where: { id: body.serviceId },
@@ -292,7 +300,7 @@ export class BookingsService {
     });
     if (!service) throw new BadRequestException('Service not found');
 
-    // ✅ NEW: если пост закрыт — создаём waitlist вместо booking
+    // ✅ if bay closed => write to waitlist
     const bay = await this._getBayOrThrow(locationId, bayId);
     if (bay.isActive !== true) {
       await this.prisma.waitlistRequest.create({
@@ -309,19 +317,13 @@ export class BookingsService {
         },
       });
 
-      // realtime: и админ, и клиент обновят списки без ручного refresh
       this.ws.emitBookingChanged(locationId, bayId);
-
-      // 409 -> на клиенте покажем human message
       throw new ConflictException('BAY_CLOSED_WAITLISTED');
     }
 
     const baseDur = this._serviceDurationOrDefault(service.durationMin);
     const rawDur = baseDur + bufferMin;
-    const newDurTotal = this._roundUpToStepMin(
-      rawDur,
-      BookingsService.SLOT_STEP_MIN,
-    );
+    const newDurTotal = this._roundUpToStepMin(rawDur, BookingsService.SLOT_STEP_MIN);
 
     const newStart = dt;
     const newEnd = this._end(newStart, newDurTotal);
@@ -347,9 +349,7 @@ export class BookingsService {
               create: { clientId, locationId, lastVisitAt: now },
             });
 
-            if (cl.isBlocked) {
-              throw new ForbiddenException('You are blocked for this location');
-            }
+            if (cl.isBlocked) throw new ForbiddenException('You are blocked for this location');
 
             const windowStart = new Date(newStart.getTime() - 24 * 60 * 60 * 1000);
             const windowEnd = new Date(newEnd.getTime() + 24 * 60 * 60 * 1000);
@@ -389,9 +389,7 @@ export class BookingsService {
               return this._overlaps(newStart, newEnd, bStart, bEnd);
             });
 
-            if (anyOverlap) {
-              throw new ConflictException('Selected time slot is already booked');
-            }
+            if (anyOverlap) throw new ConflictException('Selected time slot is already booked');
 
             const carNearby = await tx.booking.findMany({
               where: {
@@ -426,9 +424,7 @@ export class BookingsService {
               return this._overlaps(newStart, newEnd, bStart, bEnd);
             });
 
-            if (carOverlap) {
-              throw new ConflictException('This car already has a booking at this time');
-            }
+            if (carOverlap) throw new ConflictException('This car already has a booking at this time');
 
             return tx.booking.create({
               data: {
@@ -446,12 +442,7 @@ export class BookingsService {
                 status: BookingStatus.PENDING_PAYMENT,
                 paymentDueAt: dueAt,
               },
-              include: {
-                car: true,
-                service: true,
-                payments: { orderBy: { paidAt: 'asc' } },
-                location: true,
-              },
+              include: this._bookingInclude(),
             });
           },
           { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
@@ -460,9 +451,7 @@ export class BookingsService {
         break;
       } catch (e: any) {
         if (e instanceof Prisma.PrismaClientKnownRequestError) {
-          if (e.code === 'P2002') {
-            throw new ConflictException('Selected time slot is already booked');
-          }
+          if (e.code === 'P2002') throw new ConflictException('Selected time slot is already booked');
           if (e.code === 'P2034') {
             if (attempt < 2) continue;
             throw new ConflictException('Selected time slot is already booked');
@@ -473,7 +462,6 @@ export class BookingsService {
     }
 
     this.ws.emitBookingChanged(locationId, bayId);
-
     return created;
   }
 
@@ -505,7 +493,6 @@ export class BookingsService {
     await this._housekeeping();
 
     const kind = this._parsePayKind(body?.kind);
-
     const method = (body?.method ?? 'CARD').trim() || 'CARD';
     const methodType = this._parseMethodType(body?.methodType ?? body?.method);
 
@@ -516,28 +503,18 @@ export class BookingsService {
         payments: true,
       },
     });
-
     if (!booking) throw new NotFoundException('Booking not found');
 
     const now = new Date();
-
-    if (booking.status === BookingStatus.CANCELED) {
-      throw new ConflictException('Booking is canceled');
-    }
+    if (booking.status === BookingStatus.CANCELED) throw new ConflictException('Booking is canceled');
 
     if (kind === PaymentKind.DEPOSIT) {
-      if (booking.status === BookingStatus.COMPLETED) {
-        throw new ConflictException('Booking is completed');
-      }
+      if (booking.status === BookingStatus.COMPLETED) throw new ConflictException('Booking is completed');
+
       if (booking.status === BookingStatus.ACTIVE) {
         return this.prisma.booking.findUnique({
           where: { id },
-          include: {
-            car: true,
-            service: true,
-            payments: { orderBy: { paidAt: 'asc' } },
-            location: true,
-          },
+          include: this._bookingInclude(),
         });
       }
 
@@ -557,12 +534,7 @@ export class BookingsService {
         throw new ConflictException('Booking already started');
       }
 
-      const amountRub = this._clampInt(
-        body?.amountRub,
-        booking.depositRub ?? 0,
-        0,
-        1_000_000,
-      );
+      const amountRub = this._clampInt(body?.amountRub, booking.depositRub ?? 0, 0, 1_000_000);
 
       await this.prisma.payment.create({
         data: {
@@ -581,16 +553,10 @@ export class BookingsService {
           status: BookingStatus.ACTIVE,
           paymentDueAt: null,
         },
-        include: {
-          car: true,
-          service: true,
-          payments: { orderBy: { paidAt: 'asc' } },
-          location: true,
-        },
+        include: this._bookingInclude(),
       });
 
       this.ws.emitBookingChanged(updated.locationId, updated.bayId ?? 1);
-
       return updated;
     }
 
@@ -607,24 +573,16 @@ export class BookingsService {
           paidAt: now,
         },
       });
-    } catch (e) {
+    } catch {
       throw new ConflictException(`Payment kind ${kind} already exists for this booking`);
     }
 
     const refreshed = await this.prisma.booking.findUnique({
       where: { id },
-      include: {
-        car: true,
-        service: true,
-        payments: { orderBy: { paidAt: 'asc' } },
-        location: true,
-      },
+      include: this._bookingInclude(),
     });
 
-    if (refreshed) {
-      this.ws.emitBookingChanged(refreshed.locationId, refreshed.bayId ?? 1);
-    }
-
+    if (refreshed) this.ws.emitBookingChanged(refreshed.locationId, refreshed.bayId ?? 1);
     return refreshed;
   }
 
@@ -645,7 +603,6 @@ export class BookingsService {
         service: { select: { durationMin: true } },
       },
     });
-
     if (!existing) throw new NotFoundException('Booking not found');
 
     if (existing.clientId && existing.clientId !== clientId) {
@@ -655,7 +612,7 @@ export class BookingsService {
     if (existing.status === BookingStatus.CANCELED) {
       return this.prisma.booking.findUnique({
         where: { id },
-        include: { car: true, service: true, payments: true, location: true },
+        include: this._bookingInclude(),
       });
     }
 
@@ -684,11 +641,10 @@ export class BookingsService {
             ? 'USER_CANCELED_PENDING'
             : 'USER_CANCELED',
       },
-      include: { car: true, service: true, payments: true, location: true },
+      include: this._bookingInclude(),
     });
 
     this.ws.emitBookingChanged(updated.locationId, updated.bayId ?? 1);
-
     return updated;
   }
 }
