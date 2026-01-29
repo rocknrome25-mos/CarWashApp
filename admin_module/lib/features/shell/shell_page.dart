@@ -24,13 +24,13 @@ class ShellPage extends StatefulWidget {
 }
 
 class _ShellPageState extends State<ShellPage> {
-  int _idx = 0;
+  int idx = 0;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: IndexedStack(
-        index: _idx,
+        index: idx,
         children: [
           ShiftTab(
             api: widget.api,
@@ -50,8 +50,8 @@ class _ShellPageState extends State<ShellPage> {
         ],
       ),
       bottomNavigationBar: NavigationBar(
-        selectedIndex: _idx,
-        onDestinationSelected: (v) => setState(() => _idx = v),
+        selectedIndex: idx,
+        onDestinationSelected: (v) => setState(() => idx = v),
         destinations: const [
           NavigationDestination(icon: Icon(Icons.event_note), label: 'Смена'),
           NavigationDestination(icon: Icon(Icons.car_repair), label: 'Посты'),
@@ -87,36 +87,39 @@ class _ShiftTabState extends State<ShiftTab> {
   List<dynamic> bookings = [];
   DateTime selectedDay = DateTime.now();
 
-  bool get _cashEnabled =>
+  bool get cashEnabled =>
       widget.session.featureOn('CASH_DRAWER', defaultValue: true);
-  String get _ymd => DateFormat('yyyy-MM-dd').format(selectedDay);
+  String get ymd => DateFormat('yyyy-MM-dd').format(selectedDay);
 
-  String _cap(String s) => s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
+  String cap(String s) => s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
 
-  String _ruTitle() {
+  String ruTitle() {
     final d = selectedDay;
     final dayName = DateFormat('EEEE', 'ru_RU').format(d);
     final date = DateFormat('d MMMM y', 'ru_RU').format(d);
-    return '${_cap(dayName)} • $date';
+    return '${cap(dayName)} • $date';
   }
 
   @override
   void initState() {
     super.initState();
-    _load();
+    load();
   }
 
-  Future<void> _load() async {
+  Future<void> load() async {
     setState(() {
       loading = true;
       error = null;
     });
 
     try {
+      final sid = widget.session.activeShiftId ?? '';
+      if (sid.isEmpty) throw Exception('Нет активной смены. Перезайди.');
+
       final list = await widget.api.calendarDay(
         widget.session.userId,
-        widget.session.activeShiftId!,
-        _ymd,
+        sid,
+        ymd,
       );
       if (!mounted) return;
       setState(() => bookings = list);
@@ -128,18 +131,12 @@ class _ShiftTabState extends State<ShiftTab> {
     }
   }
 
-  void _shiftDay(int deltaDays) {
+  void shiftDay(int deltaDays) {
     setState(() => selectedDay = selectedDay.add(Duration(days: deltaDays)));
-    _load();
+    load();
   }
 
-  String _fmtTime(String iso) {
-    final dt = DateTime.parse(iso).toLocal();
-    return DateFormat('HH:mm').format(dt);
-  }
-
-  // status RU + МОЕТСЯ
-  String _statusRu(Map<String, dynamic> b) {
+  String statusRu(Map<String, dynamic> b) {
     final raw = (b['status'] ?? '').toString();
     final startedAt = b['startedAt']?.toString();
     final finishedAt = b['finishedAt']?.toString();
@@ -154,8 +151,8 @@ class _ShiftTabState extends State<ShiftTab> {
     return 'ОЖИДАЕТ';
   }
 
-  Color _statusColor(String statusRu) {
-    switch (statusRu) {
+  Color statusColor(String s) {
+    switch (s) {
       case 'МОЕТСЯ':
         return Colors.blue;
       case 'ЗАВЕРШЕНО':
@@ -167,14 +164,14 @@ class _ShiftTabState extends State<ShiftTab> {
     }
   }
 
-  String _paymentStatusRu(String ps) {
+  String paymentStatusRu(String ps) {
     if (ps == 'PAID') return 'ОПЛАЧЕНО';
     if (ps == 'PARTIAL') return 'ЧАСТИЧНО';
     if (ps == 'UNPAID') return 'НЕ ОПЛАЧЕНО';
     return ps;
   }
 
-  IconData _payIcon(String x) {
+  IconData payIcon(String x) {
     switch (x) {
       case 'CARD':
         return Icons.credit_card;
@@ -187,13 +184,16 @@ class _ShiftTabState extends State<ShiftTab> {
     }
   }
 
-  Future<void> _closeShiftNoCash() async {
+  Future<void> closeShiftNoCash() async {
     final userId = widget.session.userId;
-    final shiftId = widget.session.activeShiftId!;
+    final shiftId = widget.session.activeShiftId ?? '';
+    if (shiftId.isEmpty) return;
+
     try {
       await widget.api.closeShift(userId, shiftId);
       await widget.store.clear();
       if (!mounted) return;
+
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(
           builder: (_) => LoginPage(api: widget.api, store: widget.store),
@@ -206,9 +206,11 @@ class _ShiftTabState extends State<ShiftTab> {
     }
   }
 
-  Future<void> _closeShiftWithCash() async {
+  Future<void> closeShiftWithCash() async {
     final userId = widget.session.userId;
-    final shiftId = widget.session.activeShiftId!;
+    final shiftId = widget.session.activeShiftId ?? '';
+    if (shiftId.isEmpty) return;
+
     try {
       final exp = await widget.api.cashExpected(userId, shiftId);
       if (!mounted) return;
@@ -241,7 +243,7 @@ class _ShiftTabState extends State<ShiftTab> {
                           ),
                           Text(
                             '$expectedRub ₽',
-                            style: const TextStyle(fontWeight: FontWeight.w600),
+                            style: const TextStyle(fontWeight: FontWeight.w800),
                           ),
                         ],
                       ),
@@ -254,7 +256,7 @@ class _ShiftTabState extends State<ShiftTab> {
                           Text(
                             '${diff >= 0 ? '+' : ''}$diff ₽',
                             style: TextStyle(
-                              fontWeight: FontWeight.w600,
+                              fontWeight: FontWeight.w800,
                               color: diff == 0 ? Colors.green : Colors.red,
                             ),
                           ),
@@ -325,7 +327,6 @@ class _ShiftTabState extends State<ShiftTab> {
       );
 
       await widget.api.closeShift(userId, shiftId);
-
       await widget.store.clear();
       if (!mounted) return;
 
@@ -341,69 +342,76 @@ class _ShiftTabState extends State<ShiftTab> {
     }
   }
 
-  Future<void> _closeShift() async {
-    if (_cashEnabled) {
-      await _closeShiftWithCash();
+  Future<void> closeShift() async {
+    if (cashEnabled) {
+      await closeShiftWithCash();
     } else {
-      await _closeShiftNoCash();
+      await closeShiftNoCash();
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final shiftId = widget.session.activeShiftId ?? '';
+    final cs = Theme.of(context).colorScheme;
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(_ruTitle()),
+        title: Text(ruTitle()),
         actions: [
           IconButton(
             tooltip: 'Вчера',
-            onPressed: () => _shiftDay(-1),
+            onPressed: () => shiftDay(-1),
             icon: const Icon(Icons.chevron_left),
           ),
           IconButton(
             tooltip: 'Сегодня',
             onPressed: () {
               setState(() => selectedDay = DateTime.now());
-              _load();
+              load();
             },
             icon: const Icon(Icons.today),
           ),
           IconButton(
             tooltip: 'Завтра',
-            onPressed: () => _shiftDay(1),
+            onPressed: () => shiftDay(1),
             icon: const Icon(Icons.chevron_right),
           ),
-          IconButton(icon: const Icon(Icons.refresh), onPressed: _load),
-          TextButton(
-            onPressed: _closeShift,
-            child: const Text('Закрыть смену'),
-          ),
+          IconButton(icon: const Icon(Icons.refresh), onPressed: load),
+          TextButton(onPressed: closeShift, child: const Text('Закрыть смену')),
           const SizedBox(width: 8),
         ],
       ),
       body: loading
           ? const Center(child: CircularProgressIndicator())
-          : error != null
+          : (error != null)
           ? Center(
-              child: Text(error!, style: const TextStyle(color: Colors.red)),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(error!, style: const TextStyle(color: Colors.red)),
+              ),
             )
           : bookings.isEmpty
           ? const Center(child: Text('Нет записей'))
           : ListView.separated(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
               itemCount: bookings.length,
-              separatorBuilder: (_, _) => const Divider(height: 1),
+              separatorBuilder: (_, __) => const SizedBox(height: 10),
               itemBuilder: (context, i) {
                 final b = bookings[i] as Map<String, dynamic>;
 
-                final statusRu = _statusRu(b);
-                final statusColor = _statusColor(statusRu);
+                final st = statusRu(b);
+                final stColor = statusColor(st);
 
                 final serviceName =
                     b['service']?['name']?.toString() ?? 'Услуга';
                 final bayId = b['bayId']?.toString() ?? '';
                 final dateTimeIso = b['dateTime']?.toString() ?? '';
+
+                final time = dateTimeIso.isNotEmpty
+                    ? DateFormat(
+                        'HH:mm',
+                      ).format(DateTime.parse(dateTimeIso).toLocal())
+                    : '--:--';
 
                 final clientName = b['client']?['name']?.toString();
                 final clientPhone = b['client']?['phone']?.toString();
@@ -415,23 +423,13 @@ class _ShiftTabState extends State<ShiftTab> {
                 final plate = b['car']?['plateDisplay']?.toString() ?? '';
                 final make = b['car']?['makeDisplay']?.toString() ?? '';
                 final model = b['car']?['modelDisplay']?.toString() ?? '';
-                final carLine = plate.isEmpty
-                    ? ''
-                    : 'Авто: $plate • $make $model';
-
-                final clientComment = b['comment']?.toString();
-                final hasComment =
-                    clientComment != null && clientComment.trim().isNotEmpty;
-
-                final time = dateTimeIso.isNotEmpty
-                    ? _fmtTime(dateTimeIso)
-                    : '--:--';
+                final carLine = plate.isEmpty ? '' : '$plate • $make $model';
 
                 final paid = (b['paidTotalRub'] as num?)?.toInt() ?? 0;
                 final toPay = (b['remainingRub'] as num?)?.toInt() ?? 0;
 
                 final ps = (b['paymentStatus'] ?? '').toString();
-                final psRu = _paymentStatusRu(ps);
+                final psRu = paymentStatusRu(ps);
 
                 final badges = (b['paymentBadges'] is List)
                     ? (b['paymentBadges'] as List)
@@ -439,49 +437,8 @@ class _ShiftTabState extends State<ShiftTab> {
                           .toList()
                     : <String>[];
 
-                return ListTile(
-                  title: Text('$time • $serviceName • Пост $bayId'),
-                  subtitle: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(clientTitle),
-                      if (carLine.isNotEmpty) Text(carLine),
-                      if (hasComment)
-                        Text('Комментарий: ${clientComment.trim()}'),
-                      const SizedBox(height: 6),
-                      Row(
-                        children: [
-                          Chip(
-                            label: Text(statusRu),
-                            visualDensity: VisualDensity.compact,
-                            side: BorderSide(color: statusColor),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(psRu),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Text('Оплачено: $paid ₽   К оплате: $toPay ₽'),
-                      const SizedBox(height: 6),
-                      Wrap(
-                        spacing: 8,
-                        children: [
-                          for (final x in badges)
-                            Chip(
-                              avatar: Icon(_payIcon(x), size: 18),
-                              label: Text(
-                                x == 'CARD'
-                                    ? 'Карта'
-                                    : x == 'CASH'
-                                    ? 'Наличные'
-                                    : 'Контракт',
-                              ),
-                              visualDensity: VisualDensity.compact,
-                            ),
-                        ],
-                      ),
-                    ],
-                  ),
+                return InkWell(
+                  borderRadius: BorderRadius.circular(18),
                   onTap: () async {
                     await showModalBottomSheet(
                       context: context,
@@ -490,21 +447,162 @@ class _ShiftTabState extends State<ShiftTab> {
                         api: widget.api,
                         session: widget.session,
                         booking: b,
-                        onDone: _load,
+                        onDone: load,
                       ),
                     );
                   },
+                  child: Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: cs.surface,
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(
+                        color: cs.outlineVariant.withValues(alpha: 0.6),
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          blurRadius: 10,
+                          offset: const Offset(0, 6),
+                          color: Colors.black.withValues(alpha: 0.04),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // LEFT
+                        Expanded(
+                          flex: 6,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                time,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 15,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                serviceName,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              Text(
+                                clientTitle,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                              if (carLine.isNotEmpty) ...[
+                                const SizedBox(height: 4),
+                                Text(
+                                  carLine,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                    color: cs.onSurface.withValues(alpha: 0.7),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+
+                        // MIDDLE
+                        Expanded(
+                          flex: 3,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              Text(
+                                'Пост $bayId',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 6,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: stColor.withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: stColor),
+                                ),
+                                child: Text(
+                                  st,
+                                  style: TextStyle(
+                                    color: stColor,
+                                    fontWeight: FontWeight.w900,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+
+                        // RIGHT
+                        Expanded(
+                          flex: 6,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text(
+                                psRu,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                'Оплачено: $paid ₽\nК оплате: $toPay ₽',
+                                textAlign: TextAlign.right,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w800,
+                                  color: cs.onSurface.withValues(alpha: 0.75),
+                                ),
+                              ),
+                              if (badges.isNotEmpty) ...[
+                                const SizedBox(height: 10),
+                                Wrap(
+                                  alignment: WrapAlignment.end,
+                                  spacing: 6,
+                                  runSpacing: 6,
+                                  children: [
+                                    for (final x in badges)
+                                      Chip(
+                                        avatar: Icon(payIcon(x), size: 18),
+                                        label: Text(
+                                          x == 'CARD'
+                                              ? 'Карта'
+                                              : x == 'CASH'
+                                              ? 'Наличные'
+                                              : 'Контракт',
+                                        ),
+                                        visualDensity: VisualDensity.compact,
+                                      ),
+                                  ],
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 );
               },
             ),
-      bottomNavigationBar: Padding(
-        padding: const EdgeInsets.all(8),
-        child: Text(
-          'Shift: $shiftId',
-          textAlign: TextAlign.center,
-          style: const TextStyle(color: Colors.grey),
-        ),
-      ),
     );
   }
 }
@@ -536,20 +634,20 @@ class _BaysTabState extends State<BaysTab> {
   @override
   void initState() {
     super.initState();
-    _loadBays();
+    loadBays();
   }
 
-  Future<void> _loadBays() async {
+  Future<void> loadBays() async {
     setState(() {
       loading = true;
       error = null;
     });
 
     try {
-      final bays = await widget.api.listBays(
-        widget.session.userId,
-        widget.session.activeShiftId!,
-      );
+      final sid = widget.session.activeShiftId ?? '';
+      if (sid.isEmpty) throw Exception('Нет активной смены. Перезайди.');
+
+      final bays = await widget.api.listBays(widget.session.userId, sid);
 
       final map = <int, bool>{};
       for (final x in bays) {
@@ -564,8 +662,8 @@ class _BaysTabState extends State<BaysTab> {
 
       if (!mounted) return;
       setState(() {
-        bayIsActive[1] = map[1] ?? bayIsActive[1] ?? true;
-        bayIsActive[2] = map[2] ?? bayIsActive[2] ?? true;
+        bayIsActive[1] = map[1] ?? (bayIsActive[1] ?? true);
+        bayIsActive[2] = map[2] ?? (bayIsActive[2] ?? true);
       });
     } catch (e) {
       if (!mounted) return;
@@ -575,10 +673,11 @@ class _BaysTabState extends State<BaysTab> {
     }
   }
 
-  Future<void> _toggleBay(int bayNumber) async {
+  Future<void> toggleBay(int bayNumber) async {
     final isOpen = bayIsActive[bayNumber] ?? true;
     final uid = widget.session.userId;
-    final sid = widget.session.activeShiftId!;
+    final sid = widget.session.activeShiftId ?? '';
+    if (sid.isEmpty) return;
 
     try {
       if (isOpen) {
@@ -622,7 +721,6 @@ class _BaysTabState extends State<BaysTab> {
           reason: reason,
         );
       } else {
-        // OPEN: no reason
         await widget.api.setBayActive(
           uid,
           sid,
@@ -631,14 +729,15 @@ class _BaysTabState extends State<BaysTab> {
         );
       }
 
-      await _loadBays();
+      await loadBays();
     } catch (e) {
       if (!mounted) return;
       setState(() => error = e.toString());
     }
   }
 
-  Widget _bayCard(int bayNumber) {
+  Widget bayCard(int bayNumber) {
+    final cs = Theme.of(context).colorScheme;
     final isOpen = bayIsActive[bayNumber] ?? true;
 
     final statusText = isOpen ? 'ОТКРЫТ' : 'ЗАКРЫТ';
@@ -650,22 +749,30 @@ class _BaysTabState extends State<BaysTab> {
 
     final button = isOpen
         ? OutlinedButton.icon(
-            onPressed: loading ? null : () => _toggleBay(bayNumber),
+            onPressed: loading ? null : () => toggleBay(bayNumber),
             icon: Icon(btnIcon),
             label: Text(btnText),
           )
         : FilledButton.icon(
-            onPressed: loading ? null : () => _toggleBay(bayNumber),
+            onPressed: loading ? null : () => toggleBay(bayNumber),
             icon: Icon(btnIcon),
             label: Text(btnText),
           );
 
     return Expanded(
       child: Container(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
+          color: cs.surface,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
+          boxShadow: [
+            BoxShadow(
+              blurRadius: 10,
+              offset: const Offset(0, 6),
+              color: Colors.black.withValues(alpha: 0.04),
+            ),
+          ],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -674,7 +781,7 @@ class _BaysTabState extends State<BaysTab> {
               'Пост $bayNumber',
               style: const TextStyle(fontWeight: FontWeight.w900),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             Row(
               children: [
                 Icon(statusIcon, color: statusColor),
@@ -688,7 +795,7 @@ class _BaysTabState extends State<BaysTab> {
                 ),
               ],
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
             SizedBox(width: double.infinity, child: button),
           ],
         ),
@@ -698,41 +805,34 @@ class _BaysTabState extends State<BaysTab> {
 
   @override
   Widget build(BuildContext context) {
-    final shiftId = widget.session.activeShiftId ?? '';
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('Посты'),
         actions: [
-          IconButton(icon: const Icon(Icons.refresh), onPressed: _loadBays),
+          IconButton(icon: const Icon(Icons.refresh), onPressed: loadBays),
           const SizedBox(width: 8),
         ],
       ),
       body: loading
           ? const Center(child: CircularProgressIndicator())
-          : error != null
+          : (error != null)
           ? Center(
-              child: Text(error!, style: const TextStyle(color: Colors.red)),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(error!, style: const TextStyle(color: Colors.red)),
+              ),
             )
           : Padding(
               padding: const EdgeInsets.all(12),
               child: Row(
-                children: [_bayCard(1), const SizedBox(width: 10), _bayCard(2)],
+                children: [bayCard(1), const SizedBox(width: 10), bayCard(2)],
               ),
             ),
-      bottomNavigationBar: Padding(
-        padding: const EdgeInsets.all(8),
-        child: Text(
-          'Shift: $shiftId',
-          textAlign: TextAlign.center,
-          style: const TextStyle(color: Colors.grey),
-        ),
-      ),
     );
   }
 }
 
-/* ========================= TAB 3: ОЧЕРЕДЬ ========================= */
+/* ========================= TAB 3: ОЖИДАНИЕ ========================= */
 
 class WaitlistTab extends StatefulWidget {
   final AdminApiClient api;
@@ -757,40 +857,39 @@ class _WaitlistTabState extends State<WaitlistTab> {
   List<dynamic> waitlist = [];
   DateTime selectedDay = DateTime.now();
 
-  String get _ymd => DateFormat('yyyy-MM-dd').format(selectedDay);
+  String get ymd => DateFormat('yyyy-MM-dd').format(selectedDay);
 
-  String _cap(String s) => s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
+  String cap(String s) => s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
 
-  String _ruTitle() {
+  String ruTitle() {
     final d = selectedDay;
     final dayName = DateFormat('EEEE', 'ru_RU').format(d);
     final date = DateFormat('d MMMM y', 'ru_RU').format(d);
-    return '${_cap(dayName)} • $date';
+    return '${cap(dayName)} • $date';
   }
 
   @override
   void initState() {
     super.initState();
-    _load();
+    load();
   }
 
-  void _shiftDay(int deltaDays) {
+  void shiftDay(int deltaDays) {
     setState(() => selectedDay = selectedDay.add(Duration(days: deltaDays)));
-    _load();
+    load();
   }
 
-  Future<void> _load() async {
+  Future<void> load() async {
     setState(() {
       loading = true;
       error = null;
     });
 
     try {
-      final wl = await widget.api.waitlistDay(
-        widget.session.userId,
-        widget.session.activeShiftId!,
-        _ymd,
-      );
+      final sid = widget.session.activeShiftId ?? '';
+      if (sid.isEmpty) throw Exception('Нет активной смены. Перезайди.');
+
+      final wl = await widget.api.waitlistDay(widget.session.userId, sid, ymd);
       if (!mounted) return;
       setState(() => waitlist = wl);
     } catch (e) {
@@ -801,58 +900,62 @@ class _WaitlistTabState extends State<WaitlistTab> {
     }
   }
 
-  String _fmtTime(String iso) {
+  String fmtTime(String iso) {
     final dt = DateTime.parse(iso).toLocal();
     return DateFormat('HH:mm').format(dt);
   }
 
   @override
   Widget build(BuildContext context) {
-    final shiftId = widget.session.activeShiftId ?? '';
+    final cs = Theme.of(context).colorScheme;
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(_ruTitle()),
+        title: Text(ruTitle()),
         actions: [
           IconButton(
             tooltip: 'Вчера',
-            onPressed: () => _shiftDay(-1),
+            onPressed: () => shiftDay(-1),
             icon: const Icon(Icons.chevron_left),
           ),
           IconButton(
             tooltip: 'Сегодня',
             onPressed: () {
               setState(() => selectedDay = DateTime.now());
-              _load();
+              load();
             },
             icon: const Icon(Icons.today),
           ),
           IconButton(
             tooltip: 'Завтра',
-            onPressed: () => _shiftDay(1),
+            onPressed: () => shiftDay(1),
             icon: const Icon(Icons.chevron_right),
           ),
-          IconButton(icon: const Icon(Icons.refresh), onPressed: _load),
+          IconButton(icon: const Icon(Icons.refresh), onPressed: load),
           const SizedBox(width: 8),
         ],
       ),
       body: loading
           ? const Center(child: CircularProgressIndicator())
-          : error != null
+          : (error != null)
           ? Center(
-              child: Text(error!, style: const TextStyle(color: Colors.red)),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(error!, style: const TextStyle(color: Colors.red)),
+              ),
             )
           : waitlist.isEmpty
           ? const Center(child: Text('Очередь пуста'))
           : ListView.separated(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
               itemCount: waitlist.length,
-              separatorBuilder: (_, _) => const Divider(height: 1),
+              separatorBuilder: (_, __) => const SizedBox(height: 10),
               itemBuilder: (context, i) {
                 final w = waitlist[i] as Map<String, dynamic>;
 
                 final dtIso = (w['desiredDateTime'] ?? w['dateTime'] ?? '')
                     .toString();
-                final time = dtIso.isNotEmpty ? _fmtTime(dtIso) : '--:--';
+                final time = dtIso.isNotEmpty ? fmtTime(dtIso) : '--:--';
 
                 final bay = (w['desiredBayId'] ?? w['bayId'] ?? '').toString();
                 final serviceName =
@@ -873,26 +976,57 @@ class _WaitlistTabState extends State<WaitlistTab> {
                 final reason = (w['reason'] ?? w['waitlistReason'] ?? '')
                     .toString();
 
-                return ListTile(
-                  title: Text(
-                    '$time • Пост ${bay.isEmpty ? "—" : bay} • $serviceName',
+                return Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: cs.surface,
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(
+                      color: cs.outlineVariant.withValues(alpha: 0.6),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        blurRadius: 10,
+                        offset: const Offset(0, 6),
+                        color: Colors.black.withValues(alpha: 0.04),
+                      ),
+                    ],
                   ),
-                  subtitle: Text(
-                    '$clientTitle${carLine.isEmpty ? "" : "\n$carLine"}\n'
-                    'Причина: ${reason.isEmpty ? "—" : reason}',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '$time • Пост ${bay.isEmpty ? '—' : bay} • $serviceName',
+                        style: const TextStyle(fontWeight: FontWeight.w900),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        clientTitle,
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                      if (carLine.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          carLine,
+                          style: TextStyle(
+                            color: cs.onSurface.withValues(alpha: 0.75),
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 8),
+                      Text(
+                        'Причина: ${reason.isEmpty ? '—' : reason}',
+                        style: TextStyle(
+                          color: cs.onSurface.withValues(alpha: 0.75),
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
                   ),
-                  isThreeLine: true,
                 );
               },
             ),
-      bottomNavigationBar: Padding(
-        padding: const EdgeInsets.all(8),
-        child: Text(
-          'Shift: $shiftId',
-          textAlign: TextAlign.center,
-          style: const TextStyle(color: Colors.grey),
-        ),
-      ),
     );
   }
 }
