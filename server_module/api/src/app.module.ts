@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ScheduleModule } from '@nestjs/schedule';
 
 import { AdminModule } from './admin/admin.module';
 import { AppController } from './app.controller';
@@ -13,6 +14,7 @@ import { ConfigModule } from './config/config.module';
 
 @Module({
   imports: [
+    ScheduleModule.forRoot(), // ✅ CRON / scheduler
     PrismaModule,
     ServicesModule,
     BookingsModule,

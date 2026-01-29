@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import '../../core/data/app_repository.dart';
 import '../../core/models/booking.dart';
@@ -744,6 +745,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     );
   }
 
+  // ===== SAVE =====
   Future<void> _save() async {
     if (_saving) return;
     if (!_formKey.currentState!.validate()) return;
@@ -766,11 +768,8 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
       bayIdToSend = _pickedBayIdForAny;
       bayIdToSend ??= await _pickBayForSlotAny(slot);
       if (bayIdToSend == null) {
-        messenger.showSnackBar(
-          const SnackBar(
-            content: Text('Нет доступной линии на это время. Выбери другое.'),
-          ),
-        );
+        final msg = e.toString();
+        messenger.showSnackBar(SnackBar(content: Text(msg)));
         return;
       }
     }
@@ -817,6 +816,22 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
       }
     } catch (e) {
       if (!mounted) return;
+
+      // ✅ ВАЖНО: если пост закрыт и сервер создал waitlist — показываем human message
+      final msg = e.toString().toLowerCase();
+      if (msg.contains('bay_closed_waitlisted')) {
+        messenger.showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Посты сейчас закрыты. Мы добавили вас в очередь ожидания и свяжемся, когда появится возможность.',
+            ),
+            duration: Duration(seconds: 4),
+          ),
+        );
+        Navigator.of(context).pop(false);
+        return;
+      }
+
       messenger.showSnackBar(SnackBar(content: Text('Ошибка: $e')));
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -965,7 +980,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                                   ),
                                 ),
                                 const SizedBox(width: 10),
-                                // ✅ ВАЖНО: НЕ Expanded в dropdown overlay
                                 Flexible(
                                   child: Text(
                                     '${l.name} — ${l.address}',

@@ -32,17 +32,30 @@ class _BookingsPageState extends State<BookingsPage> {
   StreamSubscription? _rtSub;
   Timer? _rtDebounce;
 
+  // ✅ NEW: periodic refresh to pick up payment-expired status without manual refresh
+  Timer? _autoRefresh;
+
   @override
   void initState() {
     super.initState();
     _future = _load();
     _subscribeRealtime();
+
+    // каждые 30 секунд обновляем (лёгкий и безопасный вариант)
+    _autoRefresh = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (!mounted) return;
+      _refresh();
+    });
   }
 
   @override
   void dispose() {
+    _autoRefresh?.cancel();
+    _autoRefresh = null;
+
     _rtDebounce?.cancel();
     _rtDebounce = null;
+
     _rtSub?.cancel();
     _rtSub = null;
     super.dispose();
@@ -51,7 +64,7 @@ class _BookingsPageState extends State<BookingsPage> {
   void _subscribeRealtime() {
     _rtSub?.cancel();
     _rtSub = widget.repo.bookingEvents.listen((_) {
-      // Любое booking.changed → обновляем список (это история по сети)
+      // Любое booking.changed → обновляем список
       _rtDebounce?.cancel();
       _rtDebounce = Timer(const Duration(milliseconds: 250), () {
         if (!mounted) return;
@@ -162,9 +175,7 @@ class _BookingsPageState extends State<BookingsPage> {
     if (name.contains('комплекс')) {
       return 'assets/images/services/kompleks_512.jpg';
     }
-    if (name.contains('воск')) {
-      return 'assets/images/services/vosk_512.jpg';
-    }
+    if (name.contains('воск')) return 'assets/images/services/vosk_512.jpg';
     return 'assets/images/services/kuzov_512.jpg';
   }
 
@@ -190,11 +201,7 @@ class _BookingsPageState extends State<BookingsPage> {
       ),
       child: Text(
         _statusText(b),
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w900,
-          color: c,
-        ),
+        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w900, color: c),
       ),
     );
   }
@@ -229,10 +236,7 @@ class _BookingsPageState extends State<BookingsPage> {
         const SizedBox(width: 8),
         Text(
           _bayText(bayId),
-          style: const TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w900,
-          ),
+          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w900),
         ),
       ],
     );
@@ -280,10 +284,9 @@ class _BookingsPageState extends State<BookingsPage> {
           color: Theme.of(context).cardColor,
           borderRadius: BorderRadius.circular(18),
           border: Border.all(
-            color: Theme.of(context)
-                .colorScheme
-                .outlineVariant
-                .withValues(alpha: 0.6),
+            color: Theme.of(
+              context,
+            ).colorScheme.outlineVariant.withValues(alpha: 0.6),
           ),
         ),
         child: Row(
@@ -450,8 +453,6 @@ class _BookingsPageState extends State<BookingsPage> {
     );
   }
 }
-
-// ================= models =================
 
 class _BookingsBundle {
   final List<Booking> bookings;
