@@ -23,63 +23,83 @@ class _AdminAppState extends State<AdminApp> {
   final api = AdminApiClient(baseUrl: 'http://127.0.0.1:3000');
   final store = SessionStore();
 
+  // Акцент “тиффани” (можно поменять потом)
+  static const _seed = Color(0xFF2DD4BF);
+
   @override
   Widget build(BuildContext context) {
-    // Пока оставляем цвет "как есть" (seed можно поменять потом на Tiffany)
-    const seed = Color(0xFF2D9CDB);
-
+    // “Яндекс-подобный” тёмный минимализм: мягкие поверхности + яркий акцент
     final colorScheme = ColorScheme.fromSeed(
-      seedColor: seed,
-      brightness: Brightness.light,
+      seedColor: _seed,
+      brightness: Brightness.dark,
     );
 
     final theme = ThemeData(
       useMaterial3: true,
       colorScheme: colorScheme,
-      scaffoldBackgroundColor: colorScheme.surface,
-      // ✅ CardThemeData (а не CardTheme)
-      cardTheme: CardThemeData(
-        color: colorScheme.surface,
+
+      // Фон как у “приложений-кошельков/заправок”: темный, но не черный.
+      scaffoldBackgroundColor: const Color(0xFF0B0F14),
+
+      // Карточки: крупные скругления + лёгкая обводка
+      cardTheme: const CardThemeData(
         elevation: 0,
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(18),
-          side: BorderSide(
-            color: colorScheme.outlineVariant.withValues(alpha: 0.6),
+          borderRadius: BorderRadius.all(Radius.circular(20)),
+        ),
+      ),
+
+      // AppBar: “плоский”, без лишней заливки
+      appBarTheme: const AppBarTheme(
+        centerTitle: false,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        backgroundColor: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
+      ),
+
+      // Input: как “брендовый” интерфейс — мягкий outline
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: colorScheme.surfaceContainerHighest.withValues(alpha: 0.22),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide(color: colorScheme.outlineVariant),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide(color: colorScheme.outlineVariant),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide(color: colorScheme.primary, width: 1.2),
+        ),
+      ),
+
+      // NavigationBar: темная панель + “пилюля” индикатора
+      navigationBarTheme: NavigationBarThemeData(
+        backgroundColor: const Color(0xFF0B0F14),
+        indicatorColor: colorScheme.primary.withValues(alpha: 0.18),
+        labelTextStyle: WidgetStatePropertyAll(
+          TextStyle(
+            fontWeight: FontWeight.w700,
+            color: colorScheme.onSurface.withValues(alpha: 0.75),
           ),
         ),
-      ),
-      appBarTheme: AppBarTheme(
-        backgroundColor: colorScheme.surface,
-        surfaceTintColor: Colors.transparent,
-        elevation: 0,
-        centerTitle: false,
-        titleTextStyle: TextStyle(
-          color: colorScheme.onSurface,
-          fontSize: 18,
-          fontWeight: FontWeight.w800,
+        iconTheme: WidgetStatePropertyAll(
+          IconThemeData(color: colorScheme.onSurface.withValues(alpha: 0.75)),
         ),
-        iconTheme: IconThemeData(color: colorScheme.onSurface),
       ),
-      navigationBarTheme: NavigationBarThemeData(
-        backgroundColor: colorScheme.surface,
-        surfaceTintColor: Colors.transparent,
-        indicatorColor: colorScheme.primary.withValues(alpha: 0.12),
-        labelTextStyle: WidgetStateProperty.resolveWith((states) {
-          final selected = states.contains(WidgetState.selected);
-          return TextStyle(
-            fontWeight: selected ? FontWeight.w900 : FontWeight.w700,
-            fontSize: 12,
-            color: selected
-                ? colorScheme.onSurface
-                : colorScheme.onSurface.withValues(alpha: 0.7),
-          );
-        }),
-      ),
-      dividerTheme: DividerThemeData(
-        color: colorScheme.outlineVariant.withValues(alpha: 0.6),
-        thickness: 1,
-        space: 1,
+
+      // Chips: компактные, как у Яндекс
+      chipTheme: ChipThemeData(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        labelStyle: TextStyle(
+          fontWeight: FontWeight.w700,
+          color: colorScheme.onSurface,
+        ),
+        side: BorderSide(color: colorScheme.outlineVariant),
       ),
     );
 

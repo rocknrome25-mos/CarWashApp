@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../core/api/admin_api_client.dart';
@@ -25,11 +23,9 @@ class BookingActionsSheet extends StatefulWidget {
 
 class _BookingActionsSheetState extends State<BookingActionsSheet> {
   bool loading = false;
-  String? error;
 
   final noteCtrl = TextEditingController();
 
-  // Перенос: причина (dropdown) + комментарий (обязательный)
   static const _moveReasons = <String>[
     'Задержка',
     'Сбой',
@@ -43,10 +39,8 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
   int selectedBay = 1;
   DateTime? selectedDateTimeLocal;
 
-  // Оплата админом
   String paymentMethod = 'CARD'; // CARD / CASH / CONTRACT
 
-  // Скидка
   final discountCtrl = TextEditingController(text: '0');
   final discountReasonCtrl = TextEditingController(text: '');
 
@@ -59,16 +53,22 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
   bool get _discountEnabled =>
       widget.session.featureOn('DISCOUNTS', defaultValue: true);
 
+  String get _userId => widget.session.userId;
+  String get _shiftId => widget.session.activeShiftId ?? '';
+  String get _bookingId => widget.booking['id'] as String;
+
   @override
   void initState() {
     super.initState();
 
     final bayId = widget.booking['bayId'];
-    if (bayId is num) selectedBay = bayId.toInt();
+    if (bayId is num) {
+      selectedBay = bayId.toInt();
+    }
 
     final adminNote = widget.booking['adminNote'];
     if (adminNote is String && adminNote.trim().isNotEmpty) {
-      noteCtrl.text = adminNote;
+      noteCtrl.text = adminNote.trim();
     }
 
     final dtIso = widget.booking['dateTime']?.toString();
@@ -78,14 +78,14 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
 
     paymentMethod = 'CARD';
 
-    // текущая скидка
     final dr = widget.booking['discountRub'];
     if (dr is num) {
       discountCtrl.text = dr.toInt().toString();
     }
+
     final dn = widget.booking['discountNote'];
     if (dn is String && dn.trim().isNotEmpty) {
-      discountReasonCtrl.text = dn;
+      discountReasonCtrl.text = dn.trim();
     }
   }
 
@@ -98,9 +98,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     super.dispose();
   }
 
-  String get _userId => widget.session.userId;
-  String get _shiftId => widget.session.activeShiftId ?? '';
-  String get _bookingId => widget.booking['id'] as String;
+  // ---------- helpers ----------
 
   String _fmtTimeIso(String? iso) {
     if (iso == null || iso.isEmpty) return '--:--';
@@ -108,9 +106,8 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     return DateFormat('HH:mm').format(dt);
   }
 
-  String _fmtDateTimeLocal(DateTime dt) {
-    return DateFormat('yyyy-MM-dd HH:mm').format(dt);
-  }
+  String _fmtDateTimeLocal(DateTime dt) =>
+      DateFormat('yyyy-MM-dd HH:mm').format(dt);
 
   int _intOr0(dynamic v) {
     if (v is int) return v;
@@ -118,7 +115,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     return 0;
   }
 
-  // ===== статус на русском + МОЕТСЯ =====
   String _rawStatus() => (widget.booking['status'] ?? '').toString();
   String? _startedAtIso() => widget.booking['startedAt']?.toString();
   String? _finishedAtIso() => widget.booking['finishedAt']?.toString();
@@ -140,7 +136,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
       case 'COMPLETED':
         return 'ЗАВЕРШЕНО';
       case 'ACTIVE':
-        return 'ОЖИДАЕТ';
       case 'PENDING_PAYMENT':
         return 'ОЖИДАЕТ';
       default:
@@ -155,7 +150,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
   bool get _canFinish => !_isCanceled && !_isCompletedRu;
   bool get _canMove => _moveEnabled && !_isCanceled && !_isCompletedRu;
 
-  // ===== оплаты =====
   List<String> _paymentBadges() {
     final b = widget.booking['paymentBadges'];
     if (b is List) return b.map((x) => x.toString()).toList();
@@ -172,7 +166,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
   }
 
   int _paidTotalRub() => _intOr0(widget.booking['paidTotalRub']);
-  int _toPayRub() => _intOr0(widget.booking['remainingRub']); // к оплате
+  int _toPayRub() => _intOr0(widget.booking['remainingRub']);
   int _discountRub() => _intOr0(widget.booking['discountRub']);
   int _effectivePriceRub() => _intOr0(widget.booking['effectivePriceRub']);
 
@@ -196,42 +190,17 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     return Colors.orange;
   }
 
-  // ===== HUMAN ERRORS =====
-
-  /// Try to extract JSON body from strings like:
-  /// "start failed: 409 {\"message\":\"Bay is closed\",\"error\":\"Conflict\",\"statusCode\":409}"
-  Map<String, dynamic>? _extractJsonFromException(Object e) {
-    final s = e.toString();
-    final i = s.indexOf('{');
-    final j = s.lastIndexOf('}');
-    if (i < 0 || j <= i) return null;
-
-    final chunk = s.substring(i, j + 1);
-    try {
-      final decoded = jsonDecode(chunk);
-      if (decoded is Map<String, dynamic>) return decoded;
-    } catch (_) {
-      return null;
-    }
-    return null;
-  }
+  // ---------- UX: Human errors ----------
 
   bool _isBayClosedError(Object e) {
-    final j = _extractJsonFromException(e);
-    final msg = (j?['message'] ?? '').toString().toLowerCase();
-
-    if (msg.contains('bay is closed') ||
-        msg.contains('post is closed') ||
-        msg.contains('пост закрыт') ||
-        msg.contains('bay closed')) {
-      return true;
-    }
-
     final s = e.toString().toLowerCase();
     return s.contains('409') &&
         (s.contains('bay is closed') ||
+            s.contains('bay closed') ||
             s.contains('post is closed') ||
-            s.contains('пост закрыт'));
+            s.contains('post closed') ||
+            s.contains('пост закрыт') ||
+            s.contains('bay_is_closed'));
   }
 
   Future<void> _showBayClosedDialog() async {
@@ -254,11 +223,16 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     );
   }
 
+  void _showSnack(String msg) {
+    final m = msg.trim();
+    if (m.isEmpty) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(m), behavior: SnackBarBehavior.floating),
+    );
+  }
+
   Future<void> _run(Future<void> Function() fn) async {
-    setState(() {
-      loading = true;
-      error = null;
-    });
+    setState(() => loading = true);
     try {
       await fn();
       widget.onDone();
@@ -269,14 +243,15 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
 
       if (_isBayClosedError(e)) {
         await _showBayClosedDialog();
-        setState(() => error = null);
       } else {
-        setState(() => error = e.toString());
+        _showSnack(e.toString());
       }
     } finally {
       if (mounted) setState(() => loading = false);
     }
   }
+
+  // ---------- actions ----------
 
   Future<void> _start() async {
     if (!_canStart) return;
@@ -335,15 +310,13 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
       firstDate: DateTime.now().subtract(const Duration(days: 1)),
       lastDate: DateTime.now().add(const Duration(days: 60)),
     );
-    if (date == null) return;
-    if (!mounted) return;
+    if (date == null || !mounted) return;
 
     final time = await showTimePicker(
       context: context,
       initialTime: TimeOfDay.fromDateTime(initial),
     );
-    if (time == null) return;
-    if (!mounted) return;
+    if (time == null || !mounted) return;
 
     setState(() {
       selectedDateTimeLocal = DateTime(
@@ -361,17 +334,17 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
 
     final dt = selectedDateTimeLocal;
     if (dt == null) {
-      setState(() => error = 'Выбери новое время для переноса');
+      _showSnack('Выбери новое время для переноса');
       return;
     }
 
     final comment = moveCommentCtrl.text.trim();
     if (comment.isEmpty) {
-      setState(() => error = 'Комментарий к переносу обязателен');
+      _showSnack('Комментарий к переносу обязателен');
       return;
     }
     if (!clientAgreed) {
-      setState(() => error = 'Нужно подтвердить согласие клиента');
+      _showSnack('Нужно подтвердить согласие клиента');
       return;
     }
 
@@ -396,11 +369,11 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     if (toPay <= 0) return;
 
     if (paymentMethod == 'CASH' && !_cashEnabled) {
-      setState(() => error = 'Наличные отключены для этого заказчика');
+      _showSnack('Наличные отключены для этого заказчика');
       return;
     }
     if (paymentMethod == 'CONTRACT' && !_contractEnabled) {
-      setState(() => error = 'Контракт отключён для этого заказчика');
+      _showSnack('Контракт отключён для этого заказчика');
       return;
     }
 
@@ -423,13 +396,13 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
 
     final v = int.tryParse(discountCtrl.text.trim()) ?? 0;
     if (v < 0) {
-      setState(() => error = 'Скидка не может быть отрицательной');
+      _showSnack('Скидка не может быть отрицательной');
       return;
     }
 
     final reason = discountReasonCtrl.text.trim();
     if (reason.isEmpty) {
-      setState(() => error = 'Причина скидки обязательна');
+      _showSnack('Причина скидки обязательна');
       return;
     }
 
@@ -462,9 +435,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
       }
     }
 
-    if (!choices.contains(paymentMethod)) {
-      paymentMethod = 'CARD';
-    }
+    if (!choices.contains(paymentMethod)) paymentMethod = 'CARD';
 
     return Wrap(
       spacing: 8,
@@ -482,8 +453,65 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     );
   }
 
+  Widget _sectionCard({
+    required String title,
+    required Widget child,
+    Widget? trailing,
+  }) {
+    final cs = Theme.of(context).colorScheme;
+
+    return Card(
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: cs.surface,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    title,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w900,
+                      fontSize: 14,
+                    ),
+                  ),
+                ),
+                if (trailing != null) trailing,
+              ],
+            ),
+            const SizedBox(height: 12),
+            child,
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _statusPill(String text) {
+    final c = _statusColor();
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: c.withValues(alpha: 0.16),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: c.withValues(alpha: 0.7)),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(color: c, fontWeight: FontWeight.w900, fontSize: 12),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     final b = widget.booking;
 
     final serviceName = b['service']?['name']?.toString() ?? 'Услуга';
@@ -491,11 +519,10 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
 
     final clientName = b['client']?['name']?.toString();
     final clientPhone = b['client']?['phone']?.toString();
-    final titleClient = (clientName != null && clientName.isNotEmpty)
+    final clientTitle = (clientName != null && clientName.isNotEmpty)
         ? clientName
         : (clientPhone ?? '');
 
-    // авто
     final plate = b['car']?['plateDisplay']?.toString() ?? '';
     final make = b['car']?['makeDisplay']?.toString() ?? '';
     final model = b['car']?['modelDisplay']?.toString() ?? '';
@@ -508,15 +535,11 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     if (mm.isNotEmpty) carParts.add(mm);
     if (body != null && body.trim().isNotEmpty) carParts.add(body.trim());
     if (color != null && color.trim().isNotEmpty) carParts.add(color.trim());
-    final carLine = carParts.isEmpty
-        ? 'Авто: —'
-        : 'Авто: ${carParts.join(' • ')}';
+    final carLine = carParts.isEmpty ? '—' : carParts.join(' • ');
 
-    final clientComment = b['comment']?.toString();
-    final hasClientComment =
-        clientComment != null && clientComment.trim().isNotEmpty;
+    final dtIso = b['dateTime']?.toString() ?? '';
+    final dtLine = dtIso.isNotEmpty ? _fmtTimeIso(dtIso) : '--:--';
 
-    final dateTimeIso = b['dateTime']?.toString() ?? '';
     final startedAt = _startedAtIso();
     final finishedAt = _finishedAtIso();
 
@@ -527,306 +550,428 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     final discountRub = _discountRub();
     final effectivePriceRub = _effectivePriceRub();
 
-    final dtLine = dateTimeIso.isNotEmpty ? _fmtTimeIso(dateTimeIso) : '--:--';
+    final clientComment = b['comment']?.toString();
+    final hasClientComment =
+        clientComment != null && clientComment.trim().isNotEmpty;
 
     return SafeArea(
-      child: Padding(
-        padding: EdgeInsets.only(
-          left: 12,
-          right: 12,
-          top: 8,
-          bottom: 16 + MediaQuery.of(context).viewInsets.bottom,
-        ),
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // TOP BAR
-              Row(
+      child: Container(
+        color: Theme.of(context).scaffoldBackgroundColor,
+        child: Column(
+          children: [
+            // Sticky header
+            Container(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+              decoration: BoxDecoration(
+                color: cs.surfaceContainerHighest.withValues(alpha: 0.20),
+                border: Border(
+                  bottom: BorderSide(
+                    color: cs.outlineVariant.withValues(alpha: 0.6),
+                  ),
+                ),
+              ),
+              child: Row(
                 children: [
                   IconButton(
                     tooltip: 'Назад',
+                    onPressed: loading
+                        ? null
+                        : () => Navigator.of(context).pop(),
                     icon: const Icon(Icons.arrow_back),
-                    onPressed: () => Navigator.of(context).pop(),
                   ),
-                  const SizedBox(width: 4),
-                  const Text(
-                    'Запись',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-                  ),
-                ],
-              ),
-              const Divider(),
-
-              Row(
-                children: [
+                  const SizedBox(width: 6),
                   Expanded(
-                    child: Text(
-                      '$dtLine • $serviceName • Пост $bayIdStr',
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
-                      ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '$dtLine • $serviceName • Пост $bayIdStr',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w900,
+                            fontSize: 14,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          clientTitle,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            color: cs.onSurface.withValues(alpha: 0.75),
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
                     ),
                   ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: _statusColor().withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: _statusColor()),
-                    ),
-                    child: Text(
-                      _statusRu,
-                      style: TextStyle(color: _statusColor()),
-                    ),
-                  ),
+                  _statusPill(_statusRu),
                 ],
               ),
-              const SizedBox(height: 8),
+            ),
 
-              Text('Клиент: $titleClient'),
-              Text(
-                carLine,
-                style: const TextStyle(fontWeight: FontWeight.w600),
-              ),
-
-              if (hasClientComment) ...[
-                const SizedBox(height: 6),
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(),
-                  ),
-                  child: Text('Комментарий клиента: ${clientComment.trim()}'),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: EdgeInsets.only(
+                  left: 12,
+                  right: 12,
+                  top: 12,
+                  bottom: 16 + MediaQuery.of(context).viewInsets.bottom,
                 ),
-              ],
-
-              const SizedBox(height: 10),
-
-              Text('Начато: ${_fmtTimeIso(startedAt)}'),
-              Text('Завершено: ${_fmtTimeIso(finishedAt)}'),
-
-              const SizedBox(height: 12),
-
-              Text('Оплачено: $paid ₽ К оплате: $toPay ₽'),
-              const SizedBox(height: 6),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  for (final x in payBadges)
-                    Chip(
-                      avatar: Icon(_payIcon(x), size: 18),
-                      label: Text(
-                        x == 'CARD'
-                            ? 'Карта'
-                            : x == 'CASH'
-                            ? 'Наличные'
-                            : 'Контракт',
-                      ),
-                      visualDensity: VisualDensity.compact,
-                    ),
-                  Chip(
-                    label: Text(_paymentStatusRu),
-                    visualDensity: VisualDensity.compact,
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 10),
-
-              if (effectivePriceRub > 0) ...[
-                Text(
-                  'Стоимость: $effectivePriceRub ₽ (скидка: $discountRub ₽)',
-                ),
-                const SizedBox(height: 6),
-              ],
-
-              TextField(
-                controller: noteCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Комментарий администратора',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-
-              // DISCOUNT
-              if (_discountEnabled) ...[
-                const SizedBox(height: 14),
-                const Divider(),
-                const SizedBox(height: 10),
-                Text('Скидка', style: Theme.of(context).textTheme.titleMedium),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: discountCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: 'Скидка (₽)',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: discountReasonCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Причина скидки (обязательно)',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                ElevatedButton(
-                  onPressed: loading ? null : _applyDiscount,
-                  child: const Text('Применить скидку'),
-                ),
-              ],
-
-              // PAYMENT
-              if (toPay > 0) ...[
-                const SizedBox(height: 14),
-                const Divider(),
-                const SizedBox(height: 10),
-                Text('Оплата', style: Theme.of(context).textTheme.titleMedium),
-                const SizedBox(height: 8),
-                Text('К оплате: $toPay ₽'),
-                const SizedBox(height: 8),
-                _paymentMethodChips(),
-                const SizedBox(height: 8),
-                ElevatedButton.icon(
-                  onPressed: loading ? null : _payFully,
-                  icon: const Icon(Icons.payments),
-                  label: const Text('Оплачено полностью'),
-                ),
-              ],
-
-              const SizedBox(height: 14),
-              if (error != null) ...[
-                Text(error!, style: const TextStyle(color: Colors.red)),
-                const SizedBox(height: 8),
-              ],
-
-              // ACTIONS
-              Row(
-                children: [
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: loading || !_canStart ? null : _start,
-                      child: loading
-                          ? const SizedBox(
-                              height: 18,
-                              width: 18,
-                              child: CircularProgressIndicator(),
-                            )
-                          : const Text('Начато'),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: loading || !_canFinish ? null : _finish,
-                      child: const Text('Завершено'),
-                    ),
-                  ),
-                ],
-              ),
-
-              // MOVE
-              if (_moveEnabled) ...[
-                const SizedBox(height: 16),
-                const Divider(),
-                const SizedBox(height: 10),
-                Text(
-                  'Перенос записи',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 8),
-                Row(
+                child: Column(
                   children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: loading || !_canMove
-                            ? null
-                            : _pickMoveDateTime,
-                        child: Text(
-                          selectedDateTimeLocal == null
-                              ? 'Выбрать дату/время'
-                              : _fmtDateTimeLocal(selectedDateTimeLocal!),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    SizedBox(
-                      width: 120,
-                      child: DropdownButtonFormField<int>(
-                        initialValue: selectedBay,
-                        decoration: const InputDecoration(
-                          labelText: 'Пост',
-                          border: OutlineInputBorder(),
-                        ),
-                        items: const [
-                          DropdownMenuItem(value: 1, child: Text('Пост 1')),
-                          DropdownMenuItem(value: 2, child: Text('Пост 2')),
+                    _sectionCard(
+                      title: 'Информация',
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Клиент: $clientTitle',
+                            style: const TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Авто: $carLine',
+                            style: TextStyle(
+                              color: cs.onSurface.withValues(alpha: 0.8),
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  'Начато: ${_fmtTimeIso(startedAt)}',
+                                  style: TextStyle(
+                                    color: cs.onSurface.withValues(alpha: 0.75),
+                                  ),
+                                ),
+                              ),
+                              Expanded(
+                                child: Text(
+                                  'Завершено: ${_fmtTimeIso(finishedAt)}',
+                                  style: TextStyle(
+                                    color: cs.onSurface.withValues(alpha: 0.75),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          if (hasClientComment) ...[
+                            const SizedBox(height: 12),
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: cs.surfaceContainerHighest.withValues(
+                                  alpha: 0.18,
+                                ),
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(
+                                  color: cs.outlineVariant.withValues(
+                                    alpha: 0.55,
+                                  ),
+                                ),
+                              ),
+                              child: Text(
+                                'Комментарий клиента: ${clientComment.trim()}',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ],
                         ],
-                        onChanged: loading || !_canMove
-                            ? null
-                            : (v) => setState(() => selectedBay = v ?? 1),
                       ),
                     ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Checkbox(
-                      value: clientAgreed,
-                      onChanged: loading || !_canMove
-                          ? null
-                          : (v) => setState(() => clientAgreed = v ?? false),
-                    ),
-                    const Expanded(child: Text('Согласовано с клиентом')),
-                  ],
-                ),
-                DropdownButtonFormField<String>(
-                  initialValue: moveReasonKind,
-                  items: _moveReasons
-                      .map((x) => DropdownMenuItem(value: x, child: Text(x)))
-                      .toList(),
-                  onChanged: loading || !_canMove
-                      ? null
-                      : (v) => setState(
-                          () => moveReasonKind = v ?? _moveReasons.first,
-                        ),
-                  decoration: const InputDecoration(
-                    labelText: 'Причина',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: moveCommentCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Комментарий к переносу (обязательно)',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                ElevatedButton(
-                  onPressed: loading || !_canMove ? null : _move,
-                  child: const Text('Перенести'),
-                ),
-              ],
 
-              const SizedBox(height: 8),
-              TextButton(
-                onPressed: loading ? null : () => Navigator.of(context).pop(),
-                child: const Text('Закрыть'),
+                    const SizedBox(height: 10),
+
+                    _sectionCard(
+                      title: 'Оплата',
+                      trailing: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: cs.surfaceContainerHighest.withValues(
+                            alpha: 0.20,
+                          ),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: cs.outlineVariant.withValues(alpha: 0.55),
+                          ),
+                        ),
+                        child: Text(
+                          _paymentStatusRu,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w900,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Оплачено: $paid ₽   К оплате: $toPay ₽',
+                            style: const TextStyle(fontWeight: FontWeight.w900),
+                          ),
+                          if (effectivePriceRub > 0) ...[
+                            const SizedBox(height: 6),
+                            Text(
+                              'Стоимость: $effectivePriceRub ₽ (скидка: $discountRub ₽)',
+                              style: TextStyle(
+                                color: cs.onSurface.withValues(alpha: 0.75),
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
+                          if (payBadges.isNotEmpty) ...[
+                            const SizedBox(height: 10),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                for (final x in payBadges)
+                                  Chip(
+                                    avatar: Icon(_payIcon(x), size: 18),
+                                    label: Text(
+                                      x == 'CARD'
+                                          ? 'Карта'
+                                          : x == 'CASH'
+                                          ? 'Наличные'
+                                          : 'Контракт',
+                                    ),
+                                    visualDensity: VisualDensity.compact,
+                                  ),
+                              ],
+                            ),
+                          ],
+                          if (toPay > 0) ...[
+                            const SizedBox(height: 14),
+                            const Divider(),
+                            const SizedBox(height: 10),
+                            Text(
+                              'Способ оплаты',
+                              style: TextStyle(
+                                color: cs.onSurface.withValues(alpha: 0.85),
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            _paymentMethodChips(),
+                            const SizedBox(height: 10),
+                            SizedBox(
+                              width: double.infinity,
+                              child: FilledButton.icon(
+                                onPressed: loading ? null : _payFully,
+                                icon: const Icon(Icons.payments),
+                                label: const Text('Оплачено полностью'),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 10),
+
+                    _sectionCard(
+                      title: 'Заметка администратора',
+                      child: TextField(
+                        controller: noteCtrl,
+                        minLines: 1,
+                        maxLines: 4,
+                        decoration: const InputDecoration(
+                          labelText: 'Комментарий администратора',
+                        ),
+                      ),
+                    ),
+
+                    if (_discountEnabled) ...[
+                      const SizedBox(height: 10),
+                      _sectionCard(
+                        title: 'Скидка',
+                        child: Column(
+                          children: [
+                            TextField(
+                              controller: discountCtrl,
+                              keyboardType: TextInputType.number,
+                              decoration: const InputDecoration(
+                                labelText: 'Скидка (₽)',
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            TextField(
+                              controller: discountReasonCtrl,
+                              decoration: const InputDecoration(
+                                labelText: 'Причина скидки (обязательно)',
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            SizedBox(
+                              width: double.infinity,
+                              child: FilledButton(
+                                onPressed: loading ? null : _applyDiscount,
+                                child: const Text('Применить скидку'),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+
+                    const SizedBox(height: 10),
+
+                    _sectionCard(
+                      title: 'Действия',
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: FilledButton(
+                              onPressed: loading || !_canStart ? null : _start,
+                              child: loading
+                                  ? const SizedBox(
+                                      height: 18,
+                                      width: 18,
+                                      child: CircularProgressIndicator(),
+                                    )
+                                  : const Text('Начать'),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: loading || !_canFinish
+                                  ? null
+                                  : _finish,
+                              child: const Text('Завершить'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    if (_moveEnabled) ...[
+                      const SizedBox(height: 10),
+                      _sectionCard(
+                        title: 'Перенос записи',
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: OutlinedButton(
+                                    onPressed: loading || !_canMove
+                                        ? null
+                                        : _pickMoveDateTime,
+                                    child: Builder(
+                                      builder: (_) {
+                                        final dt =
+                                            selectedDateTimeLocal; // ✅ no "!"
+                                        return Text(
+                                          dt == null
+                                              ? 'Выбрать дату/время'
+                                              : _fmtDateTimeLocal(dt),
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                SizedBox(
+                                  width: 130,
+                                  child: DropdownButtonFormField<int>(
+                                    initialValue: selectedBay,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Пост',
+                                    ),
+                                    items: const [
+                                      DropdownMenuItem(
+                                        value: 1,
+                                        child: Text('Пост 1'),
+                                      ),
+                                      DropdownMenuItem(
+                                        value: 2,
+                                        child: Text('Пост 2'),
+                                      ),
+                                    ],
+                                    onChanged: loading || !_canMove
+                                        ? null
+                                        : (v) => setState(
+                                            () => selectedBay = v ?? 1,
+                                          ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            Row(
+                              children: [
+                                Checkbox(
+                                  value: clientAgreed,
+                                  onChanged: loading || !_canMove
+                                      ? null
+                                      : (v) => setState(
+                                          () => clientAgreed = v ?? false,
+                                        ),
+                                ),
+                                const Expanded(
+                                  child: Text('Согласовано с клиентом'),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            DropdownButtonFormField<String>(
+                              initialValue: moveReasonKind,
+                              items: _moveReasons
+                                  .map(
+                                    (x) => DropdownMenuItem(
+                                      value: x,
+                                      child: Text(x),
+                                    ),
+                                  )
+                                  .toList(),
+                              onChanged: loading || !_canMove
+                                  ? null
+                                  : (v) => setState(
+                                      () => moveReasonKind =
+                                          v ?? _moveReasons.first,
+                                    ),
+                              decoration: const InputDecoration(
+                                labelText: 'Причина',
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            TextField(
+                              controller: moveCommentCtrl,
+                              decoration: const InputDecoration(
+                                labelText: 'Комментарий (обязательно)',
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            SizedBox(
+                              width: double.infinity,
+                              child: FilledButton(
+                                onPressed: loading || !_canMove ? null : _move,
+                                child: const Text('Перенести'),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+
+                    const SizedBox(height: 14),
+                  ],
+                ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
