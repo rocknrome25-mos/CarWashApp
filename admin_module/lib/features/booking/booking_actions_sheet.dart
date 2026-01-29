@@ -525,16 +525,27 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
 
     final plate = b['car']?['plateDisplay']?.toString() ?? '';
     final make = b['car']?['makeDisplay']?.toString() ?? '';
-    final model = b['car']?['modelDisplay']?.toString() ?? '';
+    // ВАЖНО: модель у клиента может отсутствовать. Если пусто — не включаем вообще.
+    final modelRaw = b['car']?['modelDisplay'];
+    final model = modelRaw == null ? '' : modelRaw.toString().trim();
+
     final color = b['car']?['color']?.toString();
     final body = b['car']?['bodyType']?.toString();
 
+    // ✅ FIX: собираем "Авто" без лишних "—" и без пустой модели.
+    // Порядок: plate • make • body • color (или make • plate — на вкус; оставил plate первым как раньше у тебя)
     final carParts = <String>[];
-    if (plate.isNotEmpty) carParts.add(plate);
-    final mm = ('$make $model').trim();
-    if (mm.isNotEmpty) carParts.add(mm);
+    if (plate.trim().isNotEmpty) carParts.add(plate.trim());
+
+    final makePart = make.trim();
+    if (makePart.isNotEmpty) carParts.add(makePart);
+
+    // если вдруг модель всё-таки есть — добавим (но у тебя сейчас нет)
+    if (model.isNotEmpty) carParts.add(model);
+
     if (body != null && body.trim().isNotEmpty) carParts.add(body.trim());
     if (color != null && color.trim().isNotEmpty) carParts.add(color.trim());
+
     final carLine = carParts.isEmpty ? '—' : carParts.join(' • ');
 
     final dtIso = b['dateTime']?.toString() ?? '';
@@ -716,7 +727,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Оплачено: $paid ₽   К оплате: $toPay ₽',
+                            'Оплачено: $paid ₽ К оплате: $toPay ₽',
                             style: const TextStyle(fontWeight: FontWeight.w900),
                           ),
                           if (effectivePriceRub > 0) ...[
@@ -871,8 +882,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                                         : _pickMoveDateTime,
                                     child: Builder(
                                       builder: (_) {
-                                        final dt =
-                                            selectedDateTimeLocal; // ✅ no "!"
+                                        final dt = selectedDateTimeLocal;
                                         return Text(
                                           dt == null
                                               ? 'Выбрать дату/время'

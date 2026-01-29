@@ -413,7 +413,7 @@ class _ShiftTabState extends State<ShiftTab> {
         if (_bayIdOf(x) == bayId) out.add(x);
       }
     }
-    // Server already returns bayId asc + dateTime asc, but keep it safe:
+    // Server returns bayId asc + dateTime asc, but keep it safe.
     out.sort((a, b) {
       final ad =
           DateTime.tryParse((a['dateTime'] ?? '').toString()) ?? DateTime(1970);
@@ -427,8 +427,6 @@ class _ShiftTabState extends State<ShiftTab> {
   Widget _bayTabs(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
 
-    // You said: bay1 green line, bay2 blue line.
-    // Keep subtle: thin top indicator like Yandex segmented tabs.
     Color indicatorColor(int index) {
       if (index == 0) return const Color(0xFF2DBD6E); // green
       return const Color(0xFF2D9CDB); // blue
@@ -479,9 +477,7 @@ class _ShiftTabState extends State<ShiftTab> {
                   height: 3,
                   width: 46,
                   decoration: BoxDecoration(
-                    color: selected
-                        ? indicatorColor(index)
-                        : Colors.transparent,
+                    color: selected ? indicatorColor(index) : Colors.transparent,
                     borderRadius: BorderRadius.circular(999),
                   ),
                 ),
@@ -504,6 +500,22 @@ class _ShiftTabState extends State<ShiftTab> {
     );
   }
 
+  String _buildCarLineFromBooking(Map<String, dynamic> b) {
+    // Client module: no model. We show: PLATE • MAKE • BODYTYPE (only non-empty).
+    final plate = (b['car']?['plateDisplay'] ?? '').toString().trim();
+    final make = (b['car']?['makeDisplay'] ?? '').toString().trim();
+    final body = (b['car']?['bodyType'] ?? '').toString().trim();
+
+    bool ok(String s) => s.isNotEmpty && s != '—' && s.toLowerCase() != 'null';
+
+    final parts = <String>[];
+    if (ok(plate)) parts.add(plate);
+    if (ok(make)) parts.add(make);
+    if (ok(body)) parts.add(body);
+
+    return parts.join(' • ');
+  }
+
   Widget _bookingCard(BuildContext context, Map<String, dynamic> b) {
     final cs = Theme.of(context).colorScheme;
 
@@ -524,10 +536,8 @@ class _ShiftTabState extends State<ShiftTab> {
         ? clientName
         : (clientPhone ?? '');
 
-    final plate = b['car']?['plateDisplay']?.toString() ?? '';
-    final make = b['car']?['makeDisplay']?.toString() ?? '';
-    final model = b['car']?['modelDisplay']?.toString() ?? '';
-    final carLine = plate.isEmpty ? '' : '$plate • $make $model';
+    // ✅ fixed car line: no model, no stray dash
+    final carLine = _buildCarLineFromBooking(b);
 
     final paid = (b['paidTotalRub'] as num?)?.toInt() ?? 0;
     final toPay = (b['remainingRub'] as num?)?.toInt() ?? 0;
@@ -678,8 +688,8 @@ class _ShiftTabState extends State<ShiftTab> {
                               x == 'CARD'
                                   ? 'Карта'
                                   : x == 'CASH'
-                                  ? 'Наличные'
-                                  : 'Контракт',
+                                      ? 'Наличные'
+                                      : 'Контракт',
                             ),
                             visualDensity: VisualDensity.compact,
                           ),
@@ -734,30 +744,32 @@ class _ShiftTabState extends State<ShiftTab> {
             child: loading
                 ? const Center(child: CircularProgressIndicator())
                 : (error != null)
-                ? Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Text(
-                        error!,
-                        style: const TextStyle(color: Colors.red),
-                      ),
-                    ),
-                  )
-                : list.isEmpty
-                ? Center(
-                    child: Text(
-                      'Нет записей на Пост $bayId',
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                  )
-                : ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                    itemCount: list.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 10),
-                    itemBuilder: (context, i) {
-                      return _bookingCard(context, list[i]);
-                    },
-                  ),
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Text(
+                            error!,
+                            style: const TextStyle(color: Colors.red),
+                          ),
+                        ),
+                      )
+                    : list.isEmpty
+                        ? Center(
+                            child: Text(
+                              'Нет записей на Пост $bayId',
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.w700),
+                            ),
+                          )
+                        : ListView.separated(
+                            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                            itemCount: list.length,
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(height: 10),
+                            itemBuilder: (context, i) {
+                              return _bookingCard(context, list[i]);
+                            },
+                          ),
           ),
         ],
       ),
@@ -766,7 +778,6 @@ class _ShiftTabState extends State<ShiftTab> {
 }
 
 /* ========================= TAB 2: ПОСТЫ ========================= */
-/* (оставляю как у тебя сейчас — менять под realtime не нужно) */
 
 class BaysTab extends StatefulWidget {
   final AdminApiClient api;
@@ -975,24 +986,28 @@ class _BaysTabState extends State<BaysTab> {
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : (error != null)
-          ? Center(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Text(error!, style: const TextStyle(color: Colors.red)),
-              ),
-            )
-          : Padding(
-              padding: const EdgeInsets.all(12),
-              child: Row(
-                children: [bayCard(1), const SizedBox(width: 10), bayCard(2)],
-              ),
-            ),
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child:
+                        Text(error!, style: const TextStyle(color: Colors.red)),
+                  ),
+                )
+              : Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
+                      bayCard(1),
+                      const SizedBox(width: 10),
+                      bayCard(2),
+                    ],
+                  ),
+                ),
     );
   }
 }
 
 /* ========================= TAB 3: ОЖИДАНИЕ ========================= */
-/* (без realtime пока — подключим позже, если захочешь автообновление и тут) */
 
 class WaitlistTab extends StatefulWidget {
   final AdminApiClient api;
@@ -1065,6 +1080,21 @@ class _WaitlistTabState extends State<WaitlistTab> {
     return DateFormat('HH:mm').format(dt);
   }
 
+  String _buildCarLineFromWaitlist(Map<String, dynamic> w) {
+    final plate = (w['car']?['plateDisplay'] ?? '').toString().trim();
+    final make = (w['car']?['makeDisplay'] ?? '').toString().trim();
+    final body = (w['car']?['bodyType'] ?? '').toString().trim();
+
+    bool ok(String s) => s.isNotEmpty && s != '—' && s.toLowerCase() != 'null';
+
+    final parts = <String>[];
+    if (ok(plate)) parts.add(plate);
+    if (ok(make)) parts.add(make);
+    if (ok(body)) parts.add(body);
+
+    return parts.join(' • ');
+  }
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -1098,95 +1128,98 @@ class _WaitlistTabState extends State<WaitlistTab> {
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : (error != null)
-          ? Center(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Text(error!, style: const TextStyle(color: Colors.red)),
-              ),
-            )
-          : waitlist.isEmpty
-          ? const Center(child: Text('Очередь пуста'))
-          : ListView.separated(
-              padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-              itemCount: waitlist.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 10),
-              itemBuilder: (context, i) {
-                final w = waitlist[i] as Map<String, dynamic>;
-
-                final dtIso = (w['desiredDateTime'] ?? w['dateTime'] ?? '')
-                    .toString();
-                final time = dtIso.isNotEmpty ? fmtTime(dtIso) : '--:--';
-
-                final bay = (w['desiredBayId'] ?? w['bayId'] ?? '').toString();
-                final serviceName =
-                    w['service']?['name']?.toString() ?? 'Услуга';
-
-                final clientName = w['client']?['name']?.toString();
-                final clientPhone = w['client']?['phone']?.toString();
-                final clientTitle =
-                    (clientName != null && clientName.isNotEmpty)
-                    ? clientName
-                    : (clientPhone ?? '');
-
-                final plate = w['car']?['plateDisplay']?.toString() ?? '';
-                final make = w['car']?['makeDisplay']?.toString() ?? '';
-                final model = w['car']?['modelDisplay']?.toString() ?? '';
-                final carLine = plate.isEmpty ? '' : '$plate • $make $model';
-
-                final reason = (w['reason'] ?? w['waitlistReason'] ?? '')
-                    .toString();
-
-                return Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: cs.surface,
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(
-                      color: cs.outlineVariant.withValues(alpha: 0.6),
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        blurRadius: 10,
-                        offset: const Offset(0, 6),
-                        color: Colors.black.withValues(alpha: 0.04),
-                      ),
-                    ],
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child:
+                        Text(error!, style: const TextStyle(color: Colors.red)),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '$time • Пост ${bay.isEmpty ? '—' : bay} • $serviceName',
-                        style: const TextStyle(fontWeight: FontWeight.w900),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        clientTitle,
-                        style: const TextStyle(fontWeight: FontWeight.w800),
-                      ),
-                      if (carLine.isNotEmpty) ...[
-                        const SizedBox(height: 4),
-                        Text(
-                          carLine,
-                          style: TextStyle(
-                            color: cs.onSurface.withValues(alpha: 0.75),
-                            fontWeight: FontWeight.w700,
+                )
+              : waitlist.isEmpty
+                  ? const Center(child: Text('Очередь пуста'))
+                  : ListView.separated(
+                      padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+                      itemCount: waitlist.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 10),
+                      itemBuilder: (context, i) {
+                        final w = waitlist[i] as Map<String, dynamic>;
+
+                        final dtIso =
+                            (w['desiredDateTime'] ?? w['dateTime'] ?? '')
+                                .toString();
+                        final time = dtIso.isNotEmpty ? fmtTime(dtIso) : '--:--';
+
+                        final bay =
+                            (w['desiredBayId'] ?? w['bayId'] ?? '').toString();
+                        final serviceName =
+                            w['service']?['name']?.toString() ?? 'Услуга';
+
+                        final clientName = w['client']?['name']?.toString();
+                        final clientPhone = w['client']?['phone']?.toString();
+                        final clientTitle =
+                            (clientName != null && clientName.isNotEmpty)
+                                ? clientName
+                                : (clientPhone ?? '');
+
+                        // ✅ no model, no dash
+                        final carLine = _buildCarLineFromWaitlist(w);
+
+                        final reason =
+                            (w['reason'] ?? w['waitlistReason'] ?? '').toString();
+
+                        return Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: cs.surface,
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(
+                              color: cs.outlineVariant.withValues(alpha: 0.6),
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                blurRadius: 10,
+                                offset: const Offset(0, 6),
+                                color: Colors.black.withValues(alpha: 0.04),
+                              ),
+                            ],
                           ),
-                        ),
-                      ],
-                      const SizedBox(height: 8),
-                      Text(
-                        'Причина: ${reason.isEmpty ? '—' : reason}',
-                        style: TextStyle(
-                          color: cs.onSurface.withValues(alpha: 0.75),
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '$time • Пост ${bay.isEmpty ? '—' : bay} • $serviceName',
+                                style:
+                                    const TextStyle(fontWeight: FontWeight.w900),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                clientTitle,
+                                style:
+                                    const TextStyle(fontWeight: FontWeight.w800),
+                              ),
+                              if (carLine.isNotEmpty) ...[
+                                const SizedBox(height: 4),
+                                Text(
+                                  carLine,
+                                  style: TextStyle(
+                                    color: cs.onSurface.withValues(alpha: 0.75),
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ],
+                              const SizedBox(height: 8),
+                              Text(
+                                'Причина: ${reason.isEmpty ? '—' : reason}',
+                                style: TextStyle(
+                                  color: cs.onSurface.withValues(alpha: 0.75),
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
     );
   }
 }
