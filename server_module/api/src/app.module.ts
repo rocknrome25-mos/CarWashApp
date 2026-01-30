@@ -11,10 +11,13 @@ import { LocationsModule } from './locations/locations.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ServicesModule } from './services/services.module';
 import { ConfigModule } from './config/config.module';
+import { CronHousekeeperService } from '../src/cron/cron-housekeeper.service';
 
 @Module({
   imports: [
-    ScheduleModule.forRoot(), // ✅ CRON / scheduler
+    // ⬇️ scheduler для крон-задач
+    ScheduleModule.forRoot(),
+
     PrismaModule,
     ServicesModule,
     BookingsModule,
@@ -25,6 +28,10 @@ import { ConfigModule } from './config/config.module';
     ConfigModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    // ⬇️ наш планировщик
+    CronHousekeeperService,
+  ],
 })
 export class AppModule {}

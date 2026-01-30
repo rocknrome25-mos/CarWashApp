@@ -4,7 +4,9 @@ import {
   NotFoundException,
   ConflictException,
   ForbiddenException,
+  Logger,
 } from '@nestjs/common';
+import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   BookingStatus,
@@ -14,7 +16,6 @@ import {
   WaitlistStatus,
 } from '@prisma/client';
 import { BookingsGateway } from './bookings.gateway';
-import { Cron } from '@nestjs/schedule';
 
 type PayBody = {
   method?: string;
@@ -26,6 +27,7 @@ type PayBody = {
 @Injectable()
 export class BookingsService {
   private static readonly SLOT_STEP_MIN = 30;
+  private readonly logger = new Logger(BookingsService.name);
 
   constructor(
     private prisma: PrismaService,
@@ -50,7 +52,9 @@ export class BookingsService {
   }
 
   private _serviceDurationOrDefault(durationMin?: number | null) {
-    return typeof durationMin === 'number' && durationMin > 0 ? durationMin : 30;
+    return typeof durationMin === 'number' && durationMin > 0
+      ? durationMin
+      : 30;
   }
 
   private _clampInt(n: unknown, def: number, min: number, max: number) {
@@ -181,7 +185,7 @@ export class BookingsService {
   }
 
   /**
-   * ✅ CRON: чтобы статусы менялись даже если никто не дергает API.
+   * ✅ CRON: статусы меняются даже если никто не дергает API.
    * Каждую минуту: отменяем просроченные оплаты + автозавершаем прошедшие ACTIVE,
    * и шлём WS booking.changed.
    *
@@ -192,12 +196,16 @@ export class BookingsService {
     try {
       await this._housekeeping();
     } catch (e) {
-      // не валим процесс по cron-ошибке
-      // (при желании можно логгер подключить)
+      this.logger.error(`cronHousekeeping failed: ${e}`);
     }
   }
 
-  async getBusySlots(args: { locationId: string; bayId: number; from: Date; to: Date }) {
+  async getBusySlots(args: {
+    locationId: string;
+    bayId: number;
+    from: Date;
+    to: Date;
+  }) {
     await this._housekeeping();
 
     const locationId = (args.locationId ?? '').trim();
@@ -247,7 +255,10 @@ export class BookingsService {
       .map((b) => {
         const base = this._serviceDurationOrDefault(b.service?.durationMin);
         const raw = base + (b.bufferMin ?? 0);
-        const total = this._roundUpToStepMin(raw, BookingsService.SLOT_STEP_MIN);
+        const total = this._roundUpToStepMin(
+          raw,
+          BookingsService.SLOT_STEP_MIN,
+        );
         const start = b.dateTime;
         const end = this._end(start, total);
         return { start, end };
@@ -290,14 +301,18 @@ export class BookingsService {
     await this._housekeeping();
 
     if (!body || !body.carId || !body.serviceId || !body.dateTime) {
-      throw new BadRequestException('carId, serviceId and dateTime are required');
+      throw new BadRequestException(
+        'carId, serviceId and dateTime are required',
+      );
     }
 
     const clientId = (body.clientId ?? '').trim();
     if (!clientId) throw new BadRequestException('clientId is required');
 
     const dt = new Date(body.dateTime);
-    if (isNaN(dt.getTime())) throw new BadRequestException('dateTime must be ISO string');
+    if (isNaN(dt.getTime())) {
+      throw new BadRequestException('dateTime must be ISO string');
+    }
 
     const nowMs = Date.now();
     const graceMs = 30 * 1000;
@@ -333,7 +348,7 @@ export class BookingsService {
     });
     if (!service) throw new BadRequestException('Service not found');
 
-    // ✅ NEW: если ВСЕ посты закрыты — всегда waitlist
+    // ✅ если ВСЕ посты закрыты — всегда waitlist
     const anyBayActive = await this._isAnyBayActive(locationId);
     if (!anyBayActive) {
       await this.prisma.waitlistRequest.create({
@@ -350,10 +365,7 @@ export class BookingsService {
         },
       });
 
-      // WS обновление (пусть админ/клиент обновят списки)
       this.ws.emitBookingChanged(locationId, 1);
-
-      // 409 -> UI покажет human message
       throw new ConflictException('ALL_BAYS_CLOSED_WAITLISTED');
     }
 
@@ -375,14 +387,15 @@ export class BookingsService {
       });
 
       this.ws.emitBookingChanged(locationId, bayId);
-
-      // 409 -> UI покажет human message
       throw new ConflictException('BAY_CLOSED_WAITLISTED');
     }
 
     const baseDur = this._serviceDurationOrDefault(service.durationMin);
     const rawDur = baseDur + bufferMin;
-    const newDurTotal = this._roundUpToStepMin(rawDur, BookingsService.SLOT_STEP_MIN);
+    const newDurTotal = this._roundUpToStepMin(
+      rawDur,
+      BookingsService.SLOT_STEP_MIN,
+    );
 
     const newStart = dt;
     const newEnd = this._end(newStart, newDurTotal);
@@ -408,10 +421,16 @@ export class BookingsService {
               create: { clientId, locationId, lastVisitAt: now },
             });
 
-            if (cl.isBlocked) throw new ForbiddenException('You are blocked for this location');
+            if (cl.isBlocked) {
+              throw new ForbiddenException('You are blocked for this location');
+            }
 
-            const windowStart = new Date(newStart.getTime() - 24 * 60 * 60 * 1000);
-            const windowEnd = new Date(newEnd.getTime() + 24 * 60 * 60 * 1000);
+            const windowStart = new Date(
+              newStart.getTime() - 24 * 60 * 60 * 1000,
+            );
+            const windowEnd = new Date(
+              newEnd.getTime() + 24 * 60 * 60 * 1000,
+            );
 
             const nearby = await tx.booking.findMany({
               where: {
@@ -440,15 +459,22 @@ export class BookingsService {
             });
 
             const anyOverlap = relevant.find((b) => {
-              const bBase = this._serviceDurationOrDefault(b.service?.durationMin);
+              const bBase = this._serviceDurationOrDefault(
+                b.service?.durationMin,
+              );
               const bRaw = bBase + (b.bufferMin ?? 0);
-              const bTotal = this._roundUpToStepMin(bRaw, BookingsService.SLOT_STEP_MIN);
+              const bTotal = this._roundUpToStepMin(
+                bRaw,
+                BookingsService.SLOT_STEP_MIN,
+              );
               const bStart = b.dateTime;
               const bEnd = this._end(bStart, bTotal);
               return this._overlaps(newStart, newEnd, bStart, bEnd);
             });
 
-            if (anyOverlap) throw new ConflictException('Selected time slot is already booked');
+            if (anyOverlap) {
+              throw new ConflictException('Selected time slot is already booked');
+            }
 
             const carNearby = await tx.booking.findMany({
               where: {
@@ -475,15 +501,24 @@ export class BookingsService {
             });
 
             const carOverlap = carRelevant.find((b) => {
-              const bBase = this._serviceDurationOrDefault(b.service?.durationMin);
+              const bBase = this._serviceDurationOrDefault(
+                b.service?.durationMin,
+              );
               const bRaw = bBase + (b.bufferMin ?? 0);
-              const bTotal = this._roundUpToStepMin(bRaw, BookingsService.SLOT_STEP_MIN);
+              const bTotal = this._roundUpToStepMin(
+                bRaw,
+                BookingsService.SLOT_STEP_MIN,
+              );
               const bStart = b.dateTime;
               const bEnd = this._end(bStart, bTotal);
               return this._overlaps(newStart, newEnd, bStart, bEnd);
             });
 
-            if (carOverlap) throw new ConflictException('This car already has a booking at this time');
+            if (carOverlap) {
+              throw new ConflictException(
+                'This car already has a booking at this time',
+              );
+            }
 
             return tx.booking.create({
               data: {
@@ -510,7 +545,9 @@ export class BookingsService {
         break;
       } catch (e: any) {
         if (e instanceof Prisma.PrismaClientKnownRequestError) {
-          if (e.code === 'P2002') throw new ConflictException('Selected time slot is already booked');
+          if (e.code === 'P2002') {
+            throw new ConflictException('Selected time slot is already booked');
+          }
           if (e.code === 'P2034') {
             if (attempt < 2) continue;
             throw new ConflictException('Selected time slot is already booked');
@@ -562,10 +599,14 @@ export class BookingsService {
     if (!booking) throw new NotFoundException('Booking not found');
 
     const now = new Date();
-    if (booking.status === BookingStatus.CANCELED) throw new ConflictException('Booking is canceled');
+    if (booking.status === BookingStatus.CANCELED) {
+      throw new ConflictException('Booking is canceled');
+    }
 
     if (kind === PaymentKind.DEPOSIT) {
-      if (booking.status === BookingStatus.COMPLETED) throw new ConflictException('Booking is completed');
+      if (booking.status === BookingStatus.COMPLETED) {
+        throw new ConflictException('Booking is completed');
+      }
 
       if (booking.status === BookingStatus.ACTIVE) {
         return this.prisma.booking.findUnique({
@@ -577,7 +618,11 @@ export class BookingsService {
       if (!booking.paymentDueAt || booking.paymentDueAt.getTime() <= now.getTime()) {
         await this.prisma.booking.update({
           where: { id },
-          data: { status: BookingStatus.CANCELED, canceledAt: now, cancelReason: 'PAYMENT_EXPIRED' },
+          data: {
+            status: BookingStatus.CANCELED,
+            canceledAt: now,
+            cancelReason: 'PAYMENT_EXPIRED',
+          },
         });
         throw new ConflictException('Payment deadline expired');
       }
@@ -586,15 +631,30 @@ export class BookingsService {
         throw new ConflictException('Booking already started');
       }
 
-      const amountRub = this._clampInt(body?.amountRub, booking.depositRub ?? 0, 0, 1_000_000);
+      const amountRub = this._clampInt(
+        body?.amountRub,
+        booking.depositRub ?? 0,
+        0,
+        1_000_000,
+      );
 
       await this.prisma.payment.create({
-        data: { bookingId: booking.id, amountRub, method, methodType, kind: PaymentKind.DEPOSIT, paidAt: now },
+        data: {
+          bookingId: booking.id,
+          amountRub,
+          method,
+          methodType,
+          kind: PaymentKind.DEPOSIT,
+          paidAt: now,
+        },
       });
 
       const updated = await this.prisma.booking.update({
         where: { id },
-        data: { status: BookingStatus.ACTIVE, paymentDueAt: null },
+        data: {
+          status: BookingStatus.ACTIVE,
+          paymentDueAt: null,
+        },
         include: this._bookingInclude(),
       });
 
@@ -606,10 +666,19 @@ export class BookingsService {
 
     try {
       await this.prisma.payment.create({
-        data: { bookingId: booking.id, amountRub, method, methodType, kind, paidAt: now },
+        data: {
+          bookingId: booking.id,
+          amountRub,
+          method,
+          methodType,
+          kind,
+          paidAt: now,
+        },
       });
     } catch {
-      throw new ConflictException(`Payment kind ${kind} already exists for this booking`);
+      throw new ConflictException(
+        `Payment kind ${kind} already exists for this booking`,
+      );
     }
 
     const refreshed = await this.prisma.booking.findUnique({
@@ -617,7 +686,9 @@ export class BookingsService {
       include: this._bookingInclude(),
     });
 
-    if (refreshed) this.ws.emitBookingChanged(refreshed.locationId, refreshed.bayId ?? 1);
+    if (refreshed) {
+      this.ws.emitBookingChanged(refreshed.locationId, refreshed.bayId ?? 1);
+    }
     return refreshed;
   }
 
@@ -658,7 +729,10 @@ export class BookingsService {
     const end = this._end(existing.dateTime, total);
     const now = new Date();
 
-    if (end.getTime() <= now.getTime() || existing.status === BookingStatus.COMPLETED) {
+    if (
+      end.getTime() <= now.getTime() ||
+      existing.status === BookingStatus.COMPLETED
+    ) {
       throw new ConflictException('Cannot cancel a completed booking');
     }
 
@@ -671,7 +745,10 @@ export class BookingsService {
       data: {
         status: BookingStatus.CANCELED,
         canceledAt: now,
-        cancelReason: existing.status === BookingStatus.PENDING_PAYMENT ? 'USER_CANCELED_PENDING' : 'USER_CANCELED',
+        cancelReason:
+          existing.status === BookingStatus.PENDING_PAYMENT
+            ? 'USER_CANCELED_PENDING'
+            : 'USER_CANCELED',
       },
       include: this._bookingInclude(),
     });
