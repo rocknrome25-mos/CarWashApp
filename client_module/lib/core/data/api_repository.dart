@@ -62,9 +62,7 @@ class ApiRepository implements AppRepository {
   Future<void> setCurrentClient(Client c) async {
     cache.set(_kClient, c, ttl: const Duration(days: 365));
     cache.invalidate('cars');
-    cache.invalidate('bookings_all');
-    cache.invalidate('bookings_active');
-    cache.invalidatePrefix('busy_slots_');
+    _invalidateBookingCaches();
   }
 
   @override
@@ -72,9 +70,7 @@ class ApiRepository implements AppRepository {
     cache.invalidate(_kClient);
     cache.invalidate(_kLocation);
     cache.invalidate('cars');
-    cache.invalidate('bookings_all');
-    cache.invalidate('bookings_active');
-    cache.invalidatePrefix('busy_slots_');
+    _invalidateBookingCaches();
   }
 
   String _requireClientId() {
@@ -100,8 +96,7 @@ class ApiRepository implements AppRepository {
 
     // When location changes, invalidate availability + bookings caches
     cache.invalidatePrefix('busy_slots_');
-    cache.invalidate('bookings_all');
-    cache.invalidate('bookings_active');
+    _invalidateBookingCaches();
   }
 
   @override
@@ -181,7 +176,6 @@ class ApiRepository implements AppRepository {
 
   @override
   Future<Client> loginDemo({required String phone}) async {
-    // ✅ Safety: demo login allowed only in debug builds
     if (!kDebugMode) {
       throw Exception('Demo-вход отключён в релизной версии.');
     }
@@ -191,7 +185,6 @@ class ApiRepository implements AppRepository {
       throw Exception('Телефон обязателен для входа');
     }
 
-    // ✅ ВАЖНО: не пишем name="Demo", чтобы не портить реальные данные даже в debug
     final j =
         await api.postJson('/clients/register', {'phone': p, 'gender': 'MALE'})
             as Map<String, dynamic>;
@@ -238,7 +231,6 @@ class ApiRepository implements AppRepository {
     final cid = _requireClientId();
 
     final data = await api.getJson('/cars', query: {'clientId': cid}) as List;
-
     final list = data
         .map((e) => Car.fromJson(e as Map<String, dynamic>))
         .toList();
@@ -422,8 +414,10 @@ class ApiRepository implements AppRepository {
   Future<void> dispose() async {
     _rtDebounce?.cancel();
     _rtDebounce = null;
+
     await _rtSub?.cancel();
     _rtSub = null;
+
     await realtime.close();
   }
 }

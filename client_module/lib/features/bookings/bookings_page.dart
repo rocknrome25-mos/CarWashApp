@@ -32,39 +32,28 @@ class _BookingsPageState extends State<BookingsPage> {
   StreamSubscription? _rtSub;
   Timer? _rtDebounce;
 
-  // ✅ NEW: periodic refresh to pick up payment-expired status without manual refresh
-  Timer? _autoRefresh;
-
   @override
   void initState() {
     super.initState();
-    _future = _load();
+    _future = _load(force: false);
     _subscribeRealtime();
-
-    // каждые 30 секунд обновляем (лёгкий и безопасный вариант)
-    _autoRefresh = Timer.periodic(const Duration(seconds: 30), (_) {
-      if (!mounted) return;
-      _refresh();
-    });
   }
 
   @override
   void dispose() {
-    _autoRefresh?.cancel();
-    _autoRefresh = null;
-
     _rtDebounce?.cancel();
     _rtDebounce = null;
 
     _rtSub?.cancel();
     _rtSub = null;
+
     super.dispose();
   }
 
   void _subscribeRealtime() {
     _rtSub?.cancel();
     _rtSub = widget.repo.bookingEvents.listen((_) {
-      // Любое booking.changed → обновляем список
+      // Любое booking.changed → обновляем список, но с debounce
       _rtDebounce?.cancel();
       _rtDebounce = Timer(const Duration(milliseconds: 250), () {
         if (!mounted) return;
@@ -81,7 +70,7 @@ class _BookingsPageState extends State<BookingsPage> {
     }
   }
 
-  Future<_BookingsBundle> _load({bool force = false}) async {
+  Future<_BookingsBundle> _load({required bool force}) async {
     final res = await Future.wait([
       widget.repo.getBookings(includeCanceled: true, forceRefresh: force),
       widget.repo.getCars(forceRefresh: force),
@@ -172,9 +161,8 @@ class _BookingsPageState extends State<BookingsPage> {
 
   String _serviceImage(Service? s) {
     final name = (s?.name ?? '').toLowerCase();
-    if (name.contains('комплекс')) {
+    if (name.contains('комплекс'))
       return 'assets/images/services/kompleks_512.jpg';
-    }
     if (name.contains('воск')) return 'assets/images/services/vosk_512.jpg';
     return 'assets/images/services/kuzov_512.jpg';
   }
@@ -271,7 +259,6 @@ class _BookingsPageState extends State<BookingsPage> {
     required VoidCallback onTap,
   }) {
     final when = '${_dateHeader(b.dateTime)} • ${_time(b.dateTime)}';
-
     final total = _effectivePriceRub(service, b);
     final toPay = _toPayRub(service, b);
 
@@ -348,7 +335,7 @@ class _BookingsPageState extends State<BookingsPage> {
                   ],
                   const SizedBox(height: 4),
                   Text(
-                    'Стоимость: $total ₽   К оплате: $toPay ₽',
+                    'Стоимость: $total ₽ К оплате: $toPay ₽',
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w900,

@@ -29,7 +29,6 @@ export class BookingsGateway {
 
     if (!this.server) return;
 
-    // broadcast to all connected clients
     this.server.clients.forEach((client: WebSocket) => {
       // ws.OPEN === 1
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

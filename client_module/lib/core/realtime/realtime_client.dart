@@ -42,6 +42,24 @@ class RealtimeClient {
 
   RealtimeClient({required this.wsUri});
 
+  /// Helper: build ws://.../ws from http baseUrl
+  factory RealtimeClient.fromBaseUrl(String baseUrl) {
+    final b = baseUrl.trim();
+    final httpUri = Uri.parse(b);
+
+    final isHttps = httpUri.scheme == 'https';
+    final wsScheme = isHttps ? 'wss' : 'ws';
+
+    final wsUri = Uri(
+      scheme: wsScheme,
+      host: httpUri.host,
+      port: httpUri.hasPort ? httpUri.port : (isHttps ? 443 : 80),
+      path: '/ws',
+    );
+
+    return RealtimeClient(wsUri: wsUri);
+  }
+
   void connect() {
     if (_closed) return;
     _reconnectTimer?.cancel();
@@ -74,6 +92,7 @@ class RealtimeClient {
 
   void _scheduleReconnect() {
     if (_closed) return;
+
     _sub?.cancel();
     _sub = null;
     _ch = null;
@@ -84,12 +103,16 @@ class RealtimeClient {
 
   Future<void> close() async {
     _closed = true;
+
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
+
     await _sub?.cancel();
     _sub = null;
+
     await _ch?.sink.close();
     _ch = null;
+
     await _ctrl.close();
   }
 }
