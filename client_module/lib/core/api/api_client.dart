@@ -119,9 +119,14 @@ class ApiClient {
   String _humanizeMessage(int code, String msg) {
     final m = msg.toLowerCase();
 
-    // ✅ WAITLIST when bays are closed (server throws 409 BAY_CLOSED_WAITLISTED)
-    if (code == 409 && m.contains('bay_closed_waitlisted')) {
-      return 'Посты сейчас закрыты. Мы добавили вас в очередь ожидания и свяжемся, когда появится возможность.';
+    // ✅ WAITLIST when bays are closed
+    if (code == 409) {
+      if (m.contains('all_bays_closed_waitlisted')) {
+        return 'Посты сейчас закрыты. Мы добавили вас в очередь ожидания. Как только появится возможность — свяжемся с вами.';
+      }
+      if (m.contains('bay_closed_waitlisted')) {
+        return 'Выбранный пост сейчас закрыт. Мы добавили вас в очередь ожидания и свяжемся, когда появится возможность.';
+      }
     }
 
     // ✅ Payment expired housekeeping
@@ -131,6 +136,7 @@ class ApiClient {
       return 'Время оплаты истекло. Запись отменена.';
     }
 
+    // ✅ car delete guard
     if (code == 409 &&
         (m.contains('cannot delete car') ||
             (m.contains('delete') && m.contains('car'))) &&
@@ -138,6 +144,7 @@ class ApiClient {
       return 'Нельзя удалить авто: есть активные записи. Сначала отмените записи.';
     }
 
+    // ✅ cancel rules
     if ((code == 400 || code == 422) &&
         (m.contains('cannot cancel a past booking') ||
             (m.contains('cannot cancel') && m.contains('past')))) {
@@ -156,6 +163,7 @@ class ApiClient {
       return 'Нельзя отменить завершённую запись.';
     }
 
+    // ✅ generic conflict
     if (code == 409) {
       if (m.contains('slot') ||
           m.contains('busy') ||
@@ -170,14 +178,17 @@ class ApiClient {
       return 'Конфликт: данные изменились. Обнови список и попробуй снова.';
     }
 
+    // ✅ 404 mapping
     if (code == 404) {
       if (m.contains('booking')) return 'Запись не найдена.';
       if (m.contains('car')) return 'Авто не найдено (возможно, удалено).';
-      if (m.contains('service'))
+      if (m.contains('service')) {
         return 'Услуга не найдена (возможно, удалена).';
+      }
       return 'Ресурс не найден.';
     }
 
+    // ✅ validation
     if (code == 400 || code == 422) {
       if (m.contains('date') || m.contains('time') || m.contains('datetime')) {
         return 'Некорректная дата/время. Проверь и попробуй снова.';

@@ -1,7 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // Clipboard
 import 'package:intl/intl.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../core/api/admin_api_client.dart';
 import '../../core/models/admin_session.dart';
@@ -124,11 +126,7 @@ class _ShiftTabState extends State<ShiftTab> {
   @override
   void dispose() {
     _rtDebounce?.cancel();
-    _rtDebounce = null;
-
     _rtSub?.cancel();
-    _rtSub = null;
-
     _rt.close();
     super.dispose();
   }
@@ -140,14 +138,12 @@ class _ShiftTabState extends State<ShiftTab> {
 
       final loc = widget.session.locationId.trim();
       if (loc.isEmpty) return;
-
       if (ev.locationId.trim() != loc) return;
 
-      // debounce burst
       _rtDebounce?.cancel();
       _rtDebounce = Timer(const Duration(milliseconds: 250), () {
         if (!mounted) return;
-        load(); // refresh list
+        load();
       });
     });
   }
@@ -167,6 +163,7 @@ class _ShiftTabState extends State<ShiftTab> {
         sid,
         ymd,
       );
+
       if (!mounted) return;
       setState(() => bookings = list);
     } catch (e) {
@@ -401,7 +398,7 @@ class _ShiftTabState extends State<ShiftTab> {
       final v = x['bayId'];
       if (v is int) return v;
       if (v is num) return v.toInt();
-      return int.tryParse('$v') ?? 0;
+      return int.tryParse('${x['bayId']}') ?? 0;
     }
     return 0;
   }
@@ -413,7 +410,6 @@ class _ShiftTabState extends State<ShiftTab> {
         if (_bayIdOf(x) == bayId) out.add(x);
       }
     }
-    // Server returns bayId asc + dateTime asc, but keep it safe.
     out.sort((a, b) {
       final ad =
           DateTime.tryParse((a['dateTime'] ?? '').toString()) ?? DateTime(1970);
@@ -428,8 +424,8 @@ class _ShiftTabState extends State<ShiftTab> {
     final cs = Theme.of(context).colorScheme;
 
     Color indicatorColor(int index) {
-      if (index == 0) return const Color(0xFF2DBD6E); // green
-      return const Color(0xFF2D9CDB); // blue
+      if (index == 0) return const Color(0xFF2DBD6E);
+      return const Color(0xFF2D9CDB);
     }
 
     Widget tabButton({required int index, required String label}) {
@@ -503,7 +499,6 @@ class _ShiftTabState extends State<ShiftTab> {
   }
 
   String _buildCarLineFromBooking(Map<String, dynamic> b) {
-    // Client module: no model. We show: PLATE • MAKE • BODYTYPE (only non-empty).
     final plate = (b['car']?['plateDisplay'] ?? '').toString().trim();
     final make = (b['car']?['makeDisplay'] ?? '').toString().trim();
     final body = (b['car']?['bodyType'] ?? '').toString().trim();
@@ -538,7 +533,6 @@ class _ShiftTabState extends State<ShiftTab> {
         ? clientName
         : (clientPhone ?? '');
 
-    // ✅ fixed car line: no model, no dash
     final carLine = _buildCarLineFromBooking(b);
 
     final paid = (b['paidTotalRub'] as num?)?.toInt() ?? 0;
@@ -582,7 +576,6 @@ class _ShiftTabState extends State<ShiftTab> {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // LEFT
             Expanded(
               flex: 6,
               child: Column(
@@ -620,8 +613,6 @@ class _ShiftTabState extends State<ShiftTab> {
               ),
             ),
             const SizedBox(width: 10),
-
-            // MIDDLE
             Expanded(
               flex: 3,
               child: Column(
@@ -655,8 +646,6 @@ class _ShiftTabState extends State<ShiftTab> {
               ),
             ),
             const SizedBox(width: 10),
-
-            // RIGHT
             Expanded(
               flex: 6,
               child: Column(
@@ -766,9 +755,7 @@ class _ShiftTabState extends State<ShiftTab> {
                     padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
                     itemCount: list.length,
                     separatorBuilder: (_, _) => const SizedBox(height: 10),
-                    itemBuilder: (context, i) {
-                      return _bookingCard(context, list[i]);
-                    },
+                    itemBuilder: (context, i) => _bookingCard(context, list[i]),
                   ),
           ),
         ],
@@ -824,7 +811,9 @@ class _BaysTabState extends State<BaysTab> {
         if (x is Map<String, dynamic>) {
           final n = (x['number'] as num?)?.toInt();
           final a = x['isActive'];
-          if (n != null && n >= 1 && n <= 20) map[n] = a == true;
+          if (n != null && n >= 1 && n <= 20) {
+            map[n] = a == true;
+          }
         }
       }
 
@@ -1025,6 +1014,11 @@ class _WaitlistTabState extends State<WaitlistTab> {
   List<dynamic> waitlist = [];
   DateTime selectedDay = DateTime.now();
 
+  // realtime
+  late final RealtimeClient _rt;
+  StreamSubscription<BookingRealtimeEvent>? _rtSub;
+  Timer? _rtDebounce;
+
   String get ymd => DateFormat('yyyy-MM-dd').format(selectedDay);
 
   String cap(String s) => s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
@@ -1039,7 +1033,35 @@ class _WaitlistTabState extends State<WaitlistTab> {
   @override
   void initState() {
     super.initState();
+    _rt = RealtimeClient(baseHttpUrl: widget.api.baseUrl);
+    _rt.connect();
+    _subscribeRealtime();
     load();
+  }
+
+  @override
+  void dispose() {
+    _rtDebounce?.cancel();
+    _rtSub?.cancel();
+    _rt.close();
+    super.dispose();
+  }
+
+  void _subscribeRealtime() {
+    _rtSub?.cancel();
+    _rtSub = _rt.events.listen((ev) {
+      if (ev.type != 'booking.changed') return;
+
+      final loc = widget.session.locationId.trim();
+      if (loc.isEmpty) return;
+      if (ev.locationId.trim() != loc) return;
+
+      _rtDebounce?.cancel();
+      _rtDebounce = Timer(const Duration(milliseconds: 250), () {
+        if (!mounted) return;
+        load();
+      });
+    });
   }
 
   void shiftDay(int deltaDays) {
@@ -1088,10 +1110,304 @@ class _WaitlistTabState extends State<WaitlistTab> {
     return parts.join(' • ');
   }
 
-  @override
-  Widget build(BuildContext context) {
+  String _reasonRu(String raw) {
+    final r = raw.trim();
+    if (r.isEmpty) return '—';
+
+    final up = r.toUpperCase();
+
+    if (up.contains('ALL_BAYS_CLOSED')) return 'Все посты закрыты';
+    if (up.contains('BAY_CLOSED')) return 'Пост закрыт';
+
+    // Если причина уже человеческая ("Авария", "Тех.перерыв") — показываем как есть.
+    return r;
+  }
+
+  String _phoneFromWaitlist(Map<String, dynamic> w) {
+    return (w['client']?['phone'] ?? '').toString().trim();
+  }
+
+  Future<void> _copyPhone(String phone) async {
+    final p = phone.trim();
+    if (p.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: p));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Номер скопирован'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  // “по диспетчерски”: копируем и подсказываем
+  Future<void> _dispatcherCall(String phone) async {
+    final p = phone.trim();
+    if (p.isEmpty) return;
+    await _copyPhone(p);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Номер скопирован. Вставь в телефон для звонка.'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  Future<void> _openWaitlistSheet(Map<String, dynamic> w) async {
     final cs = Theme.of(context).colorScheme;
 
+    final dtIso = (w['desiredDateTime'] ?? w['dateTime'] ?? '').toString();
+    final time = dtIso.isNotEmpty ? fmtTime(dtIso) : '--:--';
+
+    final bay = (w['desiredBayId'] ?? w['bayId'] ?? '').toString();
+    final serviceName = w['service']?['name']?.toString() ?? 'Услуга';
+
+    final clientName = (w['client']?['name'] ?? '').toString().trim();
+    final clientPhone = _phoneFromWaitlist(w);
+
+    final clientTitle = clientName.isNotEmpty
+        ? clientName
+        : (clientPhone.isNotEmpty ? clientPhone : 'Клиент');
+
+    final carLine = _buildCarLineFromWaitlist(w);
+
+    final reasonRaw = (w['reason'] ?? w['waitlistReason'] ?? '').toString();
+    final reason = _reasonRu(reasonRaw);
+
+    final hasPhone = clientPhone.isNotEmpty;
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Ожидание • $time • Пост ${bay.isEmpty ? '—' : bay}',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+
+                // карточка инфо
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: cs.surface,
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(
+                      color: cs.outlineVariant.withValues(alpha: 0.6),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        serviceName,
+                        style: const TextStyle(fontWeight: FontWeight.w900),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        clientTitle,
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                      if (carLine.isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          carLine,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            color: cs.onSurface.withValues(alpha: 0.75),
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 10),
+                      Text(
+                        'Причина: $reason',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: cs.onSurface.withValues(alpha: 0.75),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 12),
+
+                // телефон крупно + кнопки “диспетчер”
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: cs.surface,
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(
+                      color: cs.outlineVariant.withValues(alpha: 0.6),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Телефон',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          color: cs.onSurface.withValues(alpha: 0.7),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      SelectableText(
+                        hasPhone ? clientPhone : '—',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 22,
+                          letterSpacing: 0.2,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: FilledButton.icon(
+                              onPressed: hasPhone
+                                  ? () => _copyPhone(clientPhone)
+                                  : null,
+                              icon: const Icon(Icons.copy),
+                              label: const Text('Скопировать'),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: hasPhone
+                                  ? () => Share.share(clientPhone)
+                                  : null,
+                              icon: const Icon(Icons.share),
+                              label: const Text('Поделиться'),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: hasPhone
+                              ? () => _dispatcherCall(clientPhone)
+                              : null,
+                          icon: const Icon(Icons.phone),
+                          label: const Text('Позвонить'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 8),
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Закрыть'),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _waitlistCard(BuildContext context, Map<String, dynamic> w) {
+    final cs = Theme.of(context).colorScheme;
+
+    final dtIso = (w['desiredDateTime'] ?? w['dateTime'] ?? '').toString();
+    final time = dtIso.isNotEmpty ? fmtTime(dtIso) : '--:--';
+
+    final bay = (w['desiredBayId'] ?? w['bayId'] ?? '').toString();
+    final serviceName = w['service']?['name']?.toString() ?? 'Услуга';
+
+    final clientName = (w['client']?['name'] ?? '').toString().trim();
+    final clientPhone = _phoneFromWaitlist(w);
+
+    final clientTitle = clientName.isNotEmpty
+        ? clientName
+        : (clientPhone.isNotEmpty ? clientPhone : 'Клиент');
+
+    final carLine = _buildCarLineFromWaitlist(w);
+
+    final reasonRaw = (w['reason'] ?? w['waitlistReason'] ?? '').toString();
+    final reason = _reasonRu(reasonRaw);
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(18),
+      onTap: () => _openWaitlistSheet(w),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: cs.surface,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
+          boxShadow: [
+            BoxShadow(
+              blurRadius: 10,
+              offset: const Offset(0, 6),
+              color: Colors.black.withValues(alpha: 0.04),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '$time • Пост ${bay.isEmpty ? '—' : bay} • $serviceName',
+              style: const TextStyle(fontWeight: FontWeight.w900),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              clientTitle,
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
+            if (carLine.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                carLine,
+                style: TextStyle(
+                  color: cs.onSurface.withValues(alpha: 0.75),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+            const SizedBox(height: 8),
+            Text(
+              'Причина: $reason',
+              style: TextStyle(
+                color: cs.onSurface.withValues(alpha: 0.75),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: Text(ruTitle()),
@@ -1135,76 +1451,7 @@ class _WaitlistTabState extends State<WaitlistTab> {
               separatorBuilder: (_, _) => const SizedBox(height: 10),
               itemBuilder: (context, i) {
                 final w = waitlist[i] as Map<String, dynamic>;
-
-                final dtIso = (w['desiredDateTime'] ?? w['dateTime'] ?? '')
-                    .toString();
-                final time = dtIso.isNotEmpty ? fmtTime(dtIso) : '--:--';
-
-                final bay = (w['desiredBayId'] ?? w['bayId'] ?? '').toString();
-                final serviceName =
-                    w['service']?['name']?.toString() ?? 'Услуга';
-
-                final clientName = w['client']?['name']?.toString();
-                final clientPhone = w['client']?['phone']?.toString();
-                final clientTitle =
-                    (clientName != null && clientName.isNotEmpty)
-                    ? clientName
-                    : (clientPhone ?? '');
-
-                final carLine = _buildCarLineFromWaitlist(w);
-
-                final reason = (w['reason'] ?? w['waitlistReason'] ?? '')
-                    .toString();
-
-                return Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: cs.surface,
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(
-                      color: cs.outlineVariant.withValues(alpha: 0.6),
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        blurRadius: 10,
-                        offset: const Offset(0, 6),
-                        color: Colors.black.withValues(alpha: 0.04),
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '$time • Пост ${bay.isEmpty ? '—' : bay} • $serviceName',
-                        style: const TextStyle(fontWeight: FontWeight.w900),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        clientTitle,
-                        style: const TextStyle(fontWeight: FontWeight.w800),
-                      ),
-                      if (carLine.isNotEmpty) ...[
-                        const SizedBox(height: 4),
-                        Text(
-                          carLine,
-                          style: TextStyle(
-                            color: cs.onSurface.withValues(alpha: 0.75),
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ],
-                      const SizedBox(height: 8),
-                      Text(
-                        'Причина: ${reason.isEmpty ? '—' : reason}',
-                        style: TextStyle(
-                          color: cs.onSurface.withValues(alpha: 0.75),
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ),
-                );
+                return _waitlistCard(context, w);
               },
             ),
     );

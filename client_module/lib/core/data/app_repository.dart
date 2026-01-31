@@ -6,7 +6,7 @@ import '../models/service.dart';
 import '../models/client.dart';
 import '../realtime/realtime_client.dart';
 
-/// ✅ Lightweight location DTO for client module (без отдельного models файла)
+/// ✅ Lightweight location DTO for client module
 class LocationLite {
   final String id;
   final String name;
@@ -63,12 +63,12 @@ abstract class AppRepository {
 
   Future<Client> loginDemo({required String phone});
 
-  // --- LOCATIONS (NEW) ---
+  // --- LOCATIONS ---
   LocationLite? get currentLocation;
 
   Future<List<LocationLite>> getLocations({bool forceRefresh = false});
 
-  /// ✅ null = сброс выбора (удобно для logout/переключения)
+  /// ✅ null = сброс выбора
   Future<void> setCurrentLocation(LocationLite? loc);
 
   // --- SERVICES ---
@@ -103,6 +103,13 @@ abstract class AppRepository {
     bool forceRefresh = false,
   });
 
+  /// ✅ NEW: waitlist for client
+  Future<List<Map<String, dynamic>>> getWaitlist({
+    required String clientId,
+    bool includeAll = false,
+  });
+
+  /// ✅ NEW: addons supported (toggle only on UI, but payload is list)
   Future<Booking> createBooking({
     required String locationId,
     required String carId,
@@ -112,6 +119,7 @@ abstract class AppRepository {
     int? depositRub,
     int? bufferMin,
     String? comment,
+    List<Map<String, dynamic>>? addons, // [{serviceId, qty}]
   });
 
   Future<Booking> payBooking({required String bookingId, String? method});

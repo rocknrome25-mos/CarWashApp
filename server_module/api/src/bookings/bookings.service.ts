@@ -24,6 +24,11 @@ type PayBody = {
   amountRub?: number;
 };
 
+type AddonInput = {
+  serviceId: string;
+  qty?: number;
+};
+
 @Injectable()
 export class BookingsService {
   private static readonly SLOT_STEP_MIN = 30;
@@ -33,6 +38,8 @@ export class BookingsService {
     private prisma: PrismaService,
     private ws: BookingsGateway,
   ) {}
+
+  /* ===================== helpers ===================== */
 
   private _minutesToMs(m: number) {
     return m * 60 * 1000;
@@ -52,9 +59,7 @@ export class BookingsService {
   }
 
   private _serviceDurationOrDefault(durationMin?: number | null) {
-    return typeof durationMin === 'number' && durationMin > 0
-      ? durationMin
-      : 30;
+    return typeof durationMin === 'number' && durationMin > 0 ? durationMin : 30;
   }
 
   private _clampInt(n: unknown, def: number, min: number, max: number) {
@@ -64,7 +69,6 @@ export class BookingsService {
     return Math.max(min, Math.min(max, xi));
   }
 
-  // единый include для booking
   private _bookingInclude() {
     return {
       car: true,
@@ -74,6 +78,30 @@ export class BookingsService {
       addons: { include: { service: true } },
       photos: { orderBy: { createdAt: 'asc' as const } },
     };
+  }
+
+  private _addonDurSum(
+    addons:
+      | Array<{ qty: number; durationMinSnapshot: number }>
+      | undefined
+      | null,
+  ): number {
+    const list = addons ?? [];
+    let sum = 0;
+    for (const a of list) {
+      const q =
+        typeof a.qty === 'number' && Number.isFinite(a.qty) && a.qty > 0
+          ? a.qty
+          : 1;
+      const d =
+        typeof a.durationMinSnapshot === 'number' &&
+        Number.isFinite(a.durationMinSnapshot) &&
+        a.durationMinSnapshot > 0
+          ? a.durationMinSnapshot
+          : 0;
+      sum += q * d;
+    }
+    return sum;
   }
 
   private async _ensureLocationExists(locationId: string): Promise<void> {
@@ -115,7 +143,9 @@ export class BookingsService {
     return !!row;
   }
 
-  private async _expirePendingPayments(): Promise<void> {
+  /* ===================== housekeeping ===================== */
+
+  private async _expirePendingPayments(): Promise<boolean> {
     const now = new Date();
 
     const expired = await this.prisma.booking.findMany({
@@ -126,7 +156,7 @@ export class BookingsService {
       select: { id: true, locationId: true, bayId: true },
     });
 
-    if (expired.length === 0) return;
+    if (expired.length === 0) return false;
 
     await this.prisma.booking.updateMany({
       where: { id: { in: expired.map((x) => x.id) } },
@@ -137,13 +167,14 @@ export class BookingsService {
       },
     });
 
-    // ✅ WS: чтобы и админ, и клиент обновили списки
     for (const b of expired) {
       this.ws.emitBookingChanged(b.locationId, b.bayId ?? 1);
     }
+
+    return true;
   }
 
-  private async _autoCompletePastActive(): Promise<void> {
+  private async _autoCompletePastActive(): Promise<boolean> {
     const now = new Date();
 
     const candidates = await this.prisma.booking.findMany({
@@ -155,28 +186,31 @@ export class BookingsService {
         bayId: true,
         locationId: true,
         service: { select: { durationMin: true } },
+        addons: { select: { qty: true, durationMinSnapshot: true } },
       },
     });
 
     const toComplete = candidates.filter((b) => {
       const base = this._serviceDurationOrDefault(b.service?.durationMin);
-      const raw = base + (b.bufferMin ?? 0);
+      const addonSum = this._addonDurSum(b.addons as any);
+      const raw = base + addonSum + (b.bufferMin ?? 0);
       const total = this._roundUpToStepMin(raw, BookingsService.SLOT_STEP_MIN);
       const end = this._end(b.dateTime, total);
       return end.getTime() < now.getTime();
     });
 
-    if (toComplete.length === 0) return;
+    if (toComplete.length === 0) return false;
 
     await this.prisma.booking.updateMany({
       where: { id: { in: toComplete.map((x) => x.id) } },
       data: { status: BookingStatus.COMPLETED },
     });
 
-    // ✅ WS
     for (const b of toComplete) {
       this.ws.emitBookingChanged(b.locationId, b.bayId ?? 1);
     }
+
+    return true;
   }
 
   private async _housekeeping(): Promise<void> {
@@ -186,26 +220,47 @@ export class BookingsService {
 
   /**
    * ✅ CRON: статусы меняются даже если никто не дергает API.
-   * Каждую минуту: отменяем просроченные оплаты + автозавершаем прошедшие ACTIVE,
-   * и шлём WS booking.changed.
-   *
-   * ВАЖНО: работает только если подключен ScheduleModule.forRoot() в AppModule.
+   * Каждую минуту:
+   * - отменяем просроченные оплаты
+   * - автозавершаем прошедшие ACTIVE
+   * WS шлём только если реально были изменения (чтобы клиент не дергался).
    */
-  @Cron('*/1 * * * *') // every minute
+  @Cron('*/1 * * * *')
   async cronHousekeeping() {
     try {
-      await this._housekeeping();
+      const changedA = await this._expirePendingPayments();
+      const changedB = await this._autoCompletePastActive();
+      if (!changedA && !changedB) return;
     } catch (e) {
       this.logger.error(`cronHousekeeping failed: ${e}`);
     }
   }
 
-  async getBusySlots(args: {
-    locationId: string;
-    bayId: number;
-    from: Date;
-    to: Date;
-  }) {
+  /* ===================== WAITLIST (client) ===================== */
+
+  async findWaitlistForClient(clientId: string, includeAll: boolean) {
+    const cid = (clientId ?? '').trim();
+    if (!cid) throw new BadRequestException('clientId is required');
+
+    const where: any = { clientId: cid };
+    if (!includeAll) where.status = WaitlistStatus.WAITING;
+
+    return this.prisma.waitlistRequest.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        location: {
+          select: { id: true, name: true, address: true, colorHex: true, baysCount: true },
+        },
+        car: true,
+        service: true,
+      },
+    });
+  }
+
+  /* ===================== BUSY SLOTS ===================== */
+
+  async getBusySlots(args: { locationId: string; bayId: number; from: Date; to: Date }) {
     await this._housekeeping();
 
     const locationId = (args.locationId ?? '').trim();
@@ -219,10 +274,7 @@ export class BookingsService {
     const windowStart = new Date(from.getTime() - 24 * 60 * 60 * 1000);
     const windowEnd = new Date(to.getTime() + 24 * 60 * 60 * 1000);
 
-    const busyStatuses: BookingStatus[] = [
-      BookingStatus.ACTIVE,
-      BookingStatus.PENDING_PAYMENT,
-    ];
+    const busyStatuses: BookingStatus[] = [BookingStatus.ACTIVE, BookingStatus.PENDING_PAYMENT];
 
     const rows = await this.prisma.booking.findMany({
       where: {
@@ -237,6 +289,7 @@ export class BookingsService {
         status: true,
         paymentDueAt: true,
         service: { select: { durationMin: true } },
+        addons: { select: { qty: true, durationMinSnapshot: true } },
       },
       orderBy: { dateTime: 'asc' },
     });
@@ -254,11 +307,9 @@ export class BookingsService {
       })
       .map((b) => {
         const base = this._serviceDurationOrDefault(b.service?.durationMin);
-        const raw = base + (b.bufferMin ?? 0);
-        const total = this._roundUpToStepMin(
-          raw,
-          BookingsService.SLOT_STEP_MIN,
-        );
+        const addonSum = this._addonDurSum(b.addons as any);
+        const raw = base + addonSum + (b.bufferMin ?? 0);
+        const total = this._roundUpToStepMin(raw, BookingsService.SLOT_STEP_MIN);
         const start = b.dateTime;
         const end = this._end(start, total);
         return { start, end };
@@ -271,13 +322,12 @@ export class BookingsService {
     }));
   }
 
+  /* ===================== LIST BOOKINGS ===================== */
+
   async findAll(includeCanceled: boolean, clientId?: string) {
     await this._housekeeping();
 
-    const where: any = includeCanceled
-      ? {}
-      : { status: { not: BookingStatus.CANCELED } };
-
+    const where: any = includeCanceled ? {} : { status: { not: BookingStatus.CANCELED } };
     if (clientId) where.clientId = clientId;
 
     return this.prisma.booking.findMany({
@@ -286,6 +336,110 @@ export class BookingsService {
       include: this._bookingInclude(),
     });
   }
+
+  /* ===================== CONFLICT CHECK (shared) ===================== */
+
+  private async _checkSlotFree(args: {
+    tx: Prisma.TransactionClient;
+    bookingIdToExclude?: string;
+    locationId: string;
+    bayId: number;
+    carId: string;
+    start: Date;
+    durationTotalMin: number;
+  }) {
+    const { tx, bookingIdToExclude, locationId, bayId, carId, start, durationTotalMin } = args;
+
+    const end = this._end(start, durationTotalMin);
+    const windowStart = new Date(start.getTime() - 24 * 60 * 60 * 1000);
+    const windowEnd = new Date(end.getTime() + 24 * 60 * 60 * 1000);
+
+    const busyStatuses: BookingStatus[] = [BookingStatus.ACTIVE, BookingStatus.PENDING_PAYMENT];
+    const now = new Date();
+
+    const whereBase: any = {
+      locationId,
+      bayId,
+      status: { in: busyStatuses },
+      dateTime: { gte: windowStart, lte: windowEnd },
+    };
+    if (bookingIdToExclude) whereBase.id = { not: bookingIdToExclude };
+
+    const nearby = await tx.booking.findMany({
+      where: whereBase,
+      select: {
+        id: true,
+        dateTime: true,
+        status: true,
+        paymentDueAt: true,
+        bufferMin: true,
+        service: { select: { durationMin: true } },
+        addons: { select: { qty: true, durationMinSnapshot: true } },
+      },
+    });
+
+    const relevant = nearby.filter((b) => {
+      if (b.status === BookingStatus.PENDING_PAYMENT) {
+        if (!b.paymentDueAt) return false;
+        return b.paymentDueAt.getTime() > now.getTime();
+      }
+      return true;
+    });
+
+    const overlap = relevant.find((b) => {
+      const base = this._serviceDurationOrDefault(b.service?.durationMin);
+      const addonSum = this._addonDurSum(b.addons as any);
+      const raw = base + addonSum + (b.bufferMin ?? 0);
+      const total = this._roundUpToStepMin(raw, BookingsService.SLOT_STEP_MIN);
+      const bStart = b.dateTime;
+      const bEnd = this._end(bStart, total);
+      return this._overlaps(start, end, bStart, bEnd);
+    });
+
+    if (overlap) throw new ConflictException('Selected time slot is already booked');
+
+    const whereCar: any = {
+      carId,
+      status: { in: busyStatuses },
+      dateTime: { gte: windowStart, lte: windowEnd },
+    };
+    if (bookingIdToExclude) whereCar.id = { not: bookingIdToExclude };
+
+    const carNearby = await tx.booking.findMany({
+      where: whereCar,
+      select: {
+        id: true,
+        dateTime: true,
+        status: true,
+        paymentDueAt: true,
+        bufferMin: true,
+        service: { select: { durationMin: true } },
+        addons: { select: { qty: true, durationMinSnapshot: true } },
+      },
+    });
+
+    const carRelevant = carNearby.filter((b) => {
+      if (b.status === BookingStatus.PENDING_PAYMENT) {
+        if (!b.paymentDueAt) return false;
+        return b.paymentDueAt.getTime() > now.getTime();
+      }
+      return true;
+    });
+
+    const carOverlap = carRelevant.find((b) => {
+      const base = this._serviceDurationOrDefault(b.service?.durationMin);
+      const addonSum = this._addonDurSum(b.addons as any);
+      const raw = base + addonSum + (b.bufferMin ?? 0);
+      const total = this._roundUpToStepMin(raw, BookingsService.SLOT_STEP_MIN);
+      const bStart = b.dateTime;
+      const bEnd = this._end(bStart, total);
+      return this._overlaps(start, end, bStart, bEnd);
+    });
+
+    if (carOverlap) throw new ConflictException('This car already has a booking at this time');
+  }
+
+  /* ===================== CREATE (+ addons) ===================== */
 
   async create(body: {
     carId: string;
@@ -297,22 +451,19 @@ export class BookingsService {
     bufferMin?: number;
     comment?: string;
     clientId?: string;
+    addons?: AddonInput[];
   }) {
     await this._housekeeping();
 
     if (!body || !body.carId || !body.serviceId || !body.dateTime) {
-      throw new BadRequestException(
-        'carId, serviceId and dateTime are required',
-      );
+      throw new BadRequestException('carId, serviceId and dateTime are required');
     }
 
     const clientId = (body.clientId ?? '').trim();
     if (!clientId) throw new BadRequestException('clientId is required');
 
     const dt = new Date(body.dateTime);
-    if (isNaN(dt.getTime())) {
-      throw new BadRequestException('dateTime must be ISO string');
-    }
+    if (isNaN(dt.getTime())) throw new BadRequestException('dateTime must be ISO string');
 
     const nowMs = Date.now();
     const graceMs = 30 * 1000;
@@ -338,9 +489,7 @@ export class BookingsService {
       select: { id: true, clientId: true },
     });
     if (!car) throw new BadRequestException('Car not found');
-    if (car.clientId && car.clientId !== clientId) {
-      throw new ForbiddenException('Not your car');
-    }
+    if (car.clientId && car.clientId !== clientId) throw new ForbiddenException('Not your car');
 
     const service = await this.prisma.service.findUnique({
       where: { id: body.serviceId },
@@ -348,7 +497,42 @@ export class BookingsService {
     });
     if (!service) throw new BadRequestException('Service not found');
 
-    // ✅ если ВСЕ посты закрыты — всегда waitlist
+    // ✅ addons validate + fetch services
+    const addonsInput = Array.isArray(body.addons) ? body.addons : [];
+    const addonPairs: Array<{ serviceId: string; qty: number }> = [];
+
+    for (const a of addonsInput) {
+      const sid = (a?.serviceId ?? '').toString().trim();
+      if (!sid) continue;
+
+      const qRaw = (a as any)?.qty;
+      const q = qRaw == null ? 1 : Math.trunc(Number(qRaw));
+      if (!Number.isFinite(q) || q <= 0) throw new BadRequestException('addons.qty must be > 0');
+
+      addonPairs.push({ serviceId: sid, qty: q });
+    }
+
+    const addonServicesById = new Map<
+      string,
+      { id: string; priceRub: number; durationMin: number }
+    >();
+
+    if (addonPairs.length > 0) {
+      const uniqueAddonIds = Array.from(new Set(addonPairs.map((x) => x.serviceId)));
+      const rows = await this.prisma.service.findMany({
+        where: { id: { in: uniqueAddonIds } },
+        select: { id: true, priceRub: true, durationMin: true },
+      });
+      for (const r of rows) addonServicesById.set(r.id, r);
+
+      for (const sid of uniqueAddonIds) {
+        if (!addonServicesById.has(sid)) {
+          throw new BadRequestException(`Addon service not found: ${sid}`);
+        }
+      }
+    }
+
+    // ✅ all bays closed => waitlist
     const anyBayActive = await this._isAnyBayActive(locationId);
     if (!anyBayActive) {
       await this.prisma.waitlistRequest.create({
@@ -369,7 +553,7 @@ export class BookingsService {
       throw new ConflictException('ALL_BAYS_CLOSED_WAITLISTED');
     }
 
-    // ✅ если выбранный пост закрыт — waitlist
+    // ✅ selected bay closed => waitlist
     const bay = await this._getBayOrThrow(locationId, bayId);
     if (bay.isActive !== true) {
       await this.prisma.waitlistRequest.create({
@@ -390,20 +574,18 @@ export class BookingsService {
       throw new ConflictException('BAY_CLOSED_WAITLISTED');
     }
 
+    // ✅ duration = base + addons + buffer => round up to 30
     const baseDur = this._serviceDurationOrDefault(service.durationMin);
-    const rawDur = baseDur + bufferMin;
-    const newDurTotal = this._roundUpToStepMin(
-      rawDur,
-      BookingsService.SLOT_STEP_MIN,
-    );
 
-    const newStart = dt;
-    const newEnd = this._end(newStart, newDurTotal);
+    let addonDurSum = 0;
+    for (const a of addonPairs) {
+      const svc = addonServicesById.get(a.serviceId)!;
+      const d = this._serviceDurationOrDefault(svc.durationMin);
+      addonDurSum += d * a.qty;
+    }
 
-    const busyStatuses: BookingStatus[] = [
-      BookingStatus.ACTIVE,
-      BookingStatus.PENDING_PAYMENT,
-    ];
+    const rawDur = baseDur + addonDurSum + bufferMin;
+    const totalMin = this._roundUpToStepMin(rawDur, BookingsService.SLOT_STEP_MIN);
 
     const dueAt = new Date(Date.now() + 10 * 60 * 1000);
 
@@ -425,119 +607,61 @@ export class BookingsService {
               throw new ForbiddenException('You are blocked for this location');
             }
 
-            const windowStart = new Date(
-              newStart.getTime() - 24 * 60 * 60 * 1000,
-            );
-            const windowEnd = new Date(
-              newEnd.getTime() + 24 * 60 * 60 * 1000,
-            );
-
-            const nearby = await tx.booking.findMany({
-              where: {
-                locationId,
-                status: { in: busyStatuses },
-                bayId,
-                dateTime: { gte: windowStart, lte: windowEnd },
-              },
-              select: {
-                id: true,
-                carId: true,
-                dateTime: true,
-                status: true,
-                paymentDueAt: true,
-                bufferMin: true,
-                service: { select: { durationMin: true } },
-              },
+            await this._checkSlotFree({
+              tx,
+              locationId,
+              bayId,
+              carId: body.carId,
+              start: dt,
+              durationTotalMin: totalMin,
             });
 
-            const relevant = nearby.filter((b) => {
-              if (b.status === BookingStatus.PENDING_PAYMENT) {
-                if (!b.paymentDueAt) return false;
-                return b.paymentDueAt.getTime() > now.getTime();
-              }
-              return true;
-            });
-
-            const anyOverlap = relevant.find((b) => {
-              const bBase = this._serviceDurationOrDefault(
-                b.service?.durationMin,
-              );
-              const bRaw = bBase + (b.bufferMin ?? 0);
-              const bTotal = this._roundUpToStepMin(
-                bRaw,
-                BookingsService.SLOT_STEP_MIN,
-              );
-              const bStart = b.dateTime;
-              const bEnd = this._end(bStart, bTotal);
-              return this._overlaps(newStart, newEnd, bStart, bEnd);
-            });
-
-            if (anyOverlap) {
-              throw new ConflictException('Selected time slot is already booked');
-            }
-
-            const carNearby = await tx.booking.findMany({
-              where: {
-                carId: body.carId,
-                status: { in: busyStatuses },
-                dateTime: { gte: windowStart, lte: windowEnd },
-              },
-              select: {
-                id: true,
-                dateTime: true,
-                status: true,
-                paymentDueAt: true,
-                bufferMin: true,
-                service: { select: { durationMin: true } },
-              },
-            });
-
-            const carRelevant = carNearby.filter((b) => {
-              if (b.status === BookingStatus.PENDING_PAYMENT) {
-                if (!b.paymentDueAt) return false;
-                return b.paymentDueAt.getTime() > now.getTime();
-              }
-              return true;
-            });
-
-            const carOverlap = carRelevant.find((b) => {
-              const bBase = this._serviceDurationOrDefault(
-                b.service?.durationMin,
-              );
-              const bRaw = bBase + (b.bufferMin ?? 0);
-              const bTotal = this._roundUpToStepMin(
-                bRaw,
-                BookingsService.SLOT_STEP_MIN,
-              );
-              const bStart = b.dateTime;
-              const bEnd = this._end(bStart, bTotal);
-              return this._overlaps(newStart, newEnd, bStart, bEnd);
-            });
-
-            if (carOverlap) {
-              throw new ConflictException(
-                'This car already has a booking at this time',
-              );
-            }
-
-            return tx.booking.create({
+            const booking = await tx.booking.create({
               data: {
                 carId: body.carId,
                 serviceId: body.serviceId,
                 dateTime: dt,
                 clientId,
-
                 locationId,
                 bayId,
                 bufferMin,
                 depositRub,
                 comment,
-
                 status: BookingStatus.PENDING_PAYMENT,
                 paymentDueAt: dueAt,
               },
               include: this._bookingInclude(),
             });
+
+            if (addonPairs.length > 0) {
+              for (const a of addonPairs) {
+                const svc = addonServicesById.get(a.serviceId)!;
+                await tx.bookingAddon.upsert({
+                  where: {
+                    bookingId_serviceId: { bookingId: booking.id, serviceId: svc.id },
+                  },
+                  update: {
+                    qty: { increment: a.qty },
+                    priceRubSnapshot: svc.priceRub,
+                    durationMinSnapshot: svc.durationMin,
+                  },
+                  create: {
+                    bookingId: booking.id,
+                    serviceId: svc.id,
+                    qty: a.qty,
+                    priceRubSnapshot: svc.priceRub,
+                    durationMinSnapshot: svc.durationMin,
+                  },
+                });
+              }
+
+              return tx.booking.findUnique({
+                where: { id: booking.id },
+                include: this._bookingInclude(),
+              });
+            }
+
+            return booking;
           },
           { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
         );
@@ -545,9 +669,7 @@ export class BookingsService {
         break;
       } catch (e: any) {
         if (e instanceof Prisma.PrismaClientKnownRequestError) {
-          if (e.code === 'P2002') {
-            throw new ConflictException('Selected time slot is already booked');
-          }
+          if (e.code === 'P2002') throw new ConflictException('Selected time slot is already booked');
           if (e.code === 'P2034') {
             if (attempt < 2) continue;
             throw new ConflictException('Selected time slot is already booked');
@@ -560,6 +682,116 @@ export class BookingsService {
     this.ws.emitBookingChanged(locationId, bayId);
     return created;
   }
+
+  /* ===================== ADDONS (client) ===================== */
+
+  async addAddonForBooking(bookingId: string, dto: { serviceId: string; qty?: number }) {
+    await this._housekeeping();
+
+    const bid = (bookingId ?? '').trim();
+    if (!bid) throw new BadRequestException('booking id is required');
+
+    const serviceId = (dto?.serviceId ?? '').toString().trim();
+    if (!serviceId) throw new BadRequestException('serviceId is required');
+
+    const qtyRaw = dto?.qty;
+    const qtyNum = qtyRaw == null ? 1 : Math.trunc(Number(qtyRaw));
+    if (!Number.isFinite(qtyNum) || qtyNum <= 0) {
+      throw new BadRequestException('qty must be > 0');
+    }
+
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: bid },
+      include: {
+        service: { select: { durationMin: true } },
+        addons: { select: { qty: true, durationMinSnapshot: true } },
+      },
+    });
+    if (!booking) throw new NotFoundException('Booking not found');
+    if (booking.status === BookingStatus.CANCELED) throw new ConflictException('Booking is canceled');
+    if (booking.status === BookingStatus.COMPLETED) throw new ConflictException('Booking is completed');
+
+    const addonSvc = await this.prisma.service.findUnique({
+      where: { id: serviceId },
+      select: { id: true, priceRub: true, durationMin: true },
+    });
+    if (!addonSvc) throw new NotFoundException('Service not found');
+
+    const base = this._serviceDurationOrDefault(booking.service?.durationMin);
+    const existingAddonSum = this._addonDurSum(booking.addons as any);
+    const addDur = this._serviceDurationOrDefault(addonSvc.durationMin) * qtyNum;
+
+    const raw = base + existingAddonSum + addDur + (booking.bufferMin ?? 0);
+    const totalMin = this._roundUpToStepMin(raw, BookingsService.SLOT_STEP_MIN);
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await this._checkSlotFree({
+        tx,
+        bookingIdToExclude: booking.id,
+        locationId: booking.locationId,
+        bayId: booking.bayId,
+        carId: booking.carId,
+        start: booking.dateTime,
+        durationTotalMin: totalMin,
+      });
+
+      await tx.bookingAddon.upsert({
+        where: {
+          bookingId_serviceId: { bookingId: booking.id, serviceId: addonSvc.id },
+        },
+        update: {
+          qty: { increment: qtyNum },
+          priceRubSnapshot: addonSvc.priceRub,
+          durationMinSnapshot: addonSvc.durationMin,
+        },
+        create: {
+          bookingId: booking.id,
+          serviceId: addonSvc.id,
+          qty: qtyNum,
+          priceRubSnapshot: addonSvc.priceRub,
+          durationMinSnapshot: addonSvc.durationMin,
+        },
+      });
+
+      return tx.booking.findUnique({
+        where: { id: booking.id },
+        include: this._bookingInclude(),
+      });
+    });
+
+    this.ws.emitBookingChanged(booking.locationId, booking.bayId ?? 1);
+    return updated;
+  }
+
+  async removeAddonForBooking(bookingId: string, serviceId: string) {
+    await this._housekeeping();
+
+    const bid = (bookingId ?? '').trim();
+    const sid = (serviceId ?? '').trim();
+    if (!bid) throw new BadRequestException('booking id is required');
+    if (!sid) throw new BadRequestException('serviceId is required');
+
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: bid },
+      select: { id: true, locationId: true, bayId: true, status: true },
+    });
+    if (!booking) throw new NotFoundException('Booking not found');
+    if (booking.status === BookingStatus.CANCELED) throw new ConflictException('Booking is canceled');
+    if (booking.status === BookingStatus.COMPLETED) throw new ConflictException('Booking is completed');
+
+    await this.prisma.bookingAddon.delete({
+      where: { bookingId_serviceId: { bookingId: bid, serviceId: sid } },
+    });
+
+    this.ws.emitBookingChanged(booking.locationId, booking.bayId ?? 1);
+
+    return this.prisma.booking.findUnique({
+      where: { id: bid },
+      include: this._bookingInclude(),
+    });
+  }
+
+  /* ===================== PAY ===================== */
 
   private _parsePayKind(raw?: string): PaymentKind {
     const v = (raw ?? 'DEPOSIT').toUpperCase().trim();
@@ -588,41 +820,36 @@ export class BookingsService {
   async pay(id: string, body?: PayBody) {
     await this._housekeeping();
 
+    const bid = (id ?? '').trim();
+    if (!bid) throw new BadRequestException('booking id is required');
+
     const kind = this._parsePayKind(body?.kind);
     const method = (body?.method ?? 'CARD').trim() || 'CARD';
     const methodType = this._parseMethodType(body?.methodType ?? body?.method);
 
     const booking = await this.prisma.booking.findUnique({
-      where: { id },
+      where: { id: bid },
       include: { service: { select: { priceRub: true } }, payments: true },
     });
     if (!booking) throw new NotFoundException('Booking not found');
 
     const now = new Date();
-    if (booking.status === BookingStatus.CANCELED) {
-      throw new ConflictException('Booking is canceled');
-    }
+    if (booking.status === BookingStatus.CANCELED) throw new ConflictException('Booking is canceled');
 
     if (kind === PaymentKind.DEPOSIT) {
-      if (booking.status === BookingStatus.COMPLETED) {
-        throw new ConflictException('Booking is completed');
-      }
+      if (booking.status === BookingStatus.COMPLETED) throw new ConflictException('Booking is completed');
 
       if (booking.status === BookingStatus.ACTIVE) {
         return this.prisma.booking.findUnique({
-          where: { id },
+          where: { id: bid },
           include: this._bookingInclude(),
         });
       }
 
       if (!booking.paymentDueAt || booking.paymentDueAt.getTime() <= now.getTime()) {
         await this.prisma.booking.update({
-          where: { id },
-          data: {
-            status: BookingStatus.CANCELED,
-            canceledAt: now,
-            cancelReason: 'PAYMENT_EXPIRED',
-          },
+          where: { id: bid },
+          data: { status: BookingStatus.CANCELED, canceledAt: now, cancelReason: 'PAYMENT_EXPIRED' },
         });
         throw new ConflictException('Payment deadline expired');
       }
@@ -631,12 +858,7 @@ export class BookingsService {
         throw new ConflictException('Booking already started');
       }
 
-      const amountRub = this._clampInt(
-        body?.amountRub,
-        booking.depositRub ?? 0,
-        0,
-        1_000_000,
-      );
+      const amountRub = this._clampInt(body?.amountRub, booking.depositRub ?? 0, 0, 1_000_000);
 
       await this.prisma.payment.create({
         data: {
@@ -650,11 +872,8 @@ export class BookingsService {
       });
 
       const updated = await this.prisma.booking.update({
-        where: { id },
-        data: {
-          status: BookingStatus.ACTIVE,
-          paymentDueAt: null,
-        },
+        where: { id: bid },
+        data: { status: BookingStatus.ACTIVE, paymentDueAt: null },
         include: this._bookingInclude(),
       });
 
@@ -676,27 +895,28 @@ export class BookingsService {
         },
       });
     } catch {
-      throw new ConflictException(
-        `Payment kind ${kind} already exists for this booking`,
-      );
+      throw new ConflictException(`Payment kind ${kind} already exists for this booking`);
     }
 
     const refreshed = await this.prisma.booking.findUnique({
-      where: { id },
+      where: { id: bid },
       include: this._bookingInclude(),
     });
 
-    if (refreshed) {
-      this.ws.emitBookingChanged(refreshed.locationId, refreshed.bayId ?? 1);
-    }
+    if (refreshed) this.ws.emitBookingChanged(refreshed.locationId, refreshed.bayId ?? 1);
     return refreshed;
   }
+
+  /* ===================== CANCEL ===================== */
 
   async cancel(id: string, clientId?: string) {
     await this._housekeeping();
 
+    const bid = (id ?? '').trim();
+    if (!bid) throw new BadRequestException('booking id is required');
+
     const existing = await this.prisma.booking.findUnique({
-      where: { id },
+      where: { id: bid },
       select: {
         id: true,
         status: true,
@@ -707,6 +927,7 @@ export class BookingsService {
         bayId: true,
         locationId: true,
         service: { select: { durationMin: true } },
+        addons: { select: { qty: true, durationMinSnapshot: true } },
       },
     });
     if (!existing) throw new NotFoundException('Booking not found');
@@ -717,38 +938,32 @@ export class BookingsService {
 
     if (existing.status === BookingStatus.CANCELED) {
       return this.prisma.booking.findUnique({
-        where: { id },
+        where: { id: bid },
         include: this._bookingInclude(),
       });
     }
 
     const base = this._serviceDurationOrDefault(existing.service?.durationMin);
-    const raw = base + (existing.bufferMin ?? 0);
+    const addonSum = this._addonDurSum(existing.addons as any);
+    const raw = base + addonSum + (existing.bufferMin ?? 0);
     const total = this._roundUpToStepMin(raw, BookingsService.SLOT_STEP_MIN);
 
     const end = this._end(existing.dateTime, total);
     const now = new Date();
 
-    if (
-      end.getTime() <= now.getTime() ||
-      existing.status === BookingStatus.COMPLETED
-    ) {
+    if (end.getTime() <= now.getTime() || existing.status === BookingStatus.COMPLETED) {
       throw new ConflictException('Cannot cancel a completed booking');
     }
-
     if (existing.dateTime.getTime() <= now.getTime()) {
       throw new BadRequestException('Cannot cancel a started booking');
     }
 
     const updated = await this.prisma.booking.update({
-      where: { id },
+      where: { id: bid },
       data: {
         status: BookingStatus.CANCELED,
         canceledAt: now,
-        cancelReason:
-          existing.status === BookingStatus.PENDING_PAYMENT
-            ? 'USER_CANCELED_PENDING'
-            : 'USER_CANCELED',
+        cancelReason: existing.status === BookingStatus.PENDING_PAYMENT ? 'USER_CANCELED_PENDING' : 'USER_CANCELED',
       },
       include: this._bookingInclude(),
     });

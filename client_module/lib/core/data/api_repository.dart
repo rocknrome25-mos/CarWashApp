@@ -14,8 +14,6 @@ import '../realtime/realtime_client.dart';
 class ApiRepository implements AppRepository {
   final ApiClient api;
   final MemoryCache cache;
-
-  /// ✅ realtime
   final RealtimeClient realtime;
 
   static const _kClient = 'current_client';
@@ -41,11 +39,9 @@ class ApiRepository implements AppRepository {
       final curLocId = currentLocation?.id;
       if (curLocId == null || curLocId.trim().isEmpty) return;
 
-      // ✅ only invalidate if event belongs to current location
       if (ev.locationId.trim().isEmpty) return;
       if (ev.locationId.trim() != curLocId.trim()) return;
 
-      // debounce invalidations (burst of events)
       _rtDebounce?.cancel();
       _rtDebounce = Timer(const Duration(milliseconds: 250), () {
         _invalidateBookingCaches();
@@ -93,8 +89,6 @@ class ApiRepository implements AppRepository {
     } else {
       cache.set(_kLocation, loc, ttl: const Duration(days: 365));
     }
-
-    // When location changes, invalidate availability + bookings caches
     cache.invalidatePrefix('busy_slots_');
     _invalidateBookingCaches();
   }
@@ -115,7 +109,6 @@ class ApiRepository implements AppRepository {
 
     cache.set(key, list, ttl: const Duration(minutes: 5));
 
-    // ✅ default location if not chosen yet
     if (currentLocation == null && list.isNotEmpty) {
       await setCurrentLocation(list.first);
     }
@@ -144,6 +137,8 @@ class ApiRepository implements AppRepository {
     cache.invalidate('bookings_all');
     cache.invalidate('bookings_active');
     cache.invalidatePrefix('busy_slots_');
+    cache.invalidate('waitlist_waiting');
+    cache.invalidate('waitlist_all');
   }
 
   // ---------------- AUTH / REGISTER ----------------
@@ -168,9 +163,7 @@ class ApiRepository implements AppRepository {
 
     final c = Client.fromJson(j);
     await setCurrentClient(c);
-
     await getLocations(forceRefresh: true);
-
     return c;
   }
 
@@ -181,9 +174,7 @@ class ApiRepository implements AppRepository {
     }
 
     final p = phone.trim();
-    if (p.isEmpty) {
-      throw Exception('Телефон обязателен для входа');
-    }
+    if (p.isEmpty) throw Exception('Телефон обязателен для входа');
 
     final j =
         await api.postJson('/clients/register', {'phone': p, 'gender': 'MALE'})
@@ -191,9 +182,7 @@ class ApiRepository implements AppRepository {
 
     final c = Client.fromJson(j);
     await setCurrentClient(c);
-
     await getLocations(forceRefresh: true);
-
     return c;
   }
 
@@ -229,8 +218,8 @@ class ApiRepository implements AppRepository {
     }
 
     final cid = _requireClientId();
-
     final data = await api.getJson('/cars', query: {'clientId': cid}) as List;
+
     final list = data
         .map((e) => Car.fromJson(e as Map<String, dynamic>))
         .toList();
@@ -271,7 +260,6 @@ class ApiRepository implements AppRepository {
   @override
   Future<void> deleteCar(String id) async {
     final cid = _requireClientId();
-
     await api.deleteJson('/cars/$id', query: {'clientId': cid});
 
     cache.invalidate('cars');
@@ -346,6 +334,35 @@ class ApiRepository implements AppRepository {
     return ranges;
   }
 
+  // ---------------- WAITLIST ----------------
+
+  @override
+  Future<List<Map<String, dynamic>>> getWaitlist({
+    required String clientId,
+    bool includeAll = false,
+  }) async {
+    final cid = (clientId).trim();
+    if (cid.isEmpty) throw Exception('clientId is required');
+
+    final key = includeAll ? 'waitlist_all' : 'waitlist_waiting';
+
+    final cached = cache.get<List<Map<String, dynamic>>>(key);
+    if (cached != null) return cached;
+
+    final query = <String, String>{
+      'clientId': cid,
+      if (includeAll) 'includeAll': 'true',
+    };
+
+    final data = await api.getJson('/bookings/waitlist', query: query) as List;
+    final list = data.map((e) => (e as Map).cast<String, dynamic>()).toList();
+
+    cache.set(key, list, ttl: const Duration(seconds: 15));
+    return list;
+  }
+
+  // ---------------- CREATE / PAY / CANCEL ----------------
+
   @override
   Future<Booking> createBooking({
     required String locationId,
@@ -356,6 +373,7 @@ class ApiRepository implements AppRepository {
     int? depositRub,
     int? bufferMin,
     String? comment,
+    List<Map<String, dynamic>>? addons,
   }) async {
     final cid = _requireClientId();
     final locId = _effectiveLocationIdOrThrow(locationId);
@@ -370,12 +388,12 @@ class ApiRepository implements AppRepository {
       if (depositRub != null) 'depositRub': depositRub,
       if (bufferMin != null) 'bufferMin': bufferMin,
       if (comment != null) 'comment': comment,
+      if (addons != null && addons.isNotEmpty) 'addons': addons,
     };
 
     final j = await api.postJson('/bookings', payload) as Map<String, dynamic>;
 
     _invalidateBookingCaches();
-
     return Booking.fromJson(j);
   }
 
@@ -391,20 +409,17 @@ class ApiRepository implements AppRepository {
             as Map<String, dynamic>;
 
     _invalidateBookingCaches();
-
     return Booking.fromJson(j);
   }
 
   @override
   Future<Booking> cancelBooking(String id) async {
     final cid = _requireClientId();
-
     final j =
         await api.deleteJson('/bookings/$id', query: {'clientId': cid})
             as Map<String, dynamic>;
 
     _invalidateBookingCaches();
-
     return Booking.fromJson(j);
   }
 
@@ -414,10 +429,8 @@ class ApiRepository implements AppRepository {
   Future<void> dispose() async {
     _rtDebounce?.cancel();
     _rtDebounce = null;
-
     await _rtSub?.cancel();
     _rtSub = null;
-
     await realtime.close();
   }
 }

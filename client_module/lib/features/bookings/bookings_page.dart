@@ -53,7 +53,6 @@ class _BookingsPageState extends State<BookingsPage> {
   void _subscribeRealtime() {
     _rtSub?.cancel();
     _rtSub = widget.repo.bookingEvents.listen((_) {
-      // Любое booking.changed → обновляем список, но с debounce
       _rtDebounce?.cancel();
       _rtDebounce = Timer(const Duration(milliseconds: 250), () {
         if (!mounted) return;
@@ -161,8 +160,9 @@ class _BookingsPageState extends State<BookingsPage> {
 
   String _serviceImage(Service? s) {
     final name = (s?.name ?? '').toLowerCase();
-    if (name.contains('комплекс'))
+    if (name.contains('комплекс')) {
       return 'assets/images/services/kompleks_512.jpg';
+    }
     if (name.contains('воск')) return 'assets/images/services/vosk_512.jpg';
     return 'assets/images/services/kuzov_512.jpg';
   }

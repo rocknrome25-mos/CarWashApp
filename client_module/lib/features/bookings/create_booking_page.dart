@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math';
+
 import 'package:flutter/material.dart';
 import '../../core/data/app_repository.dart';
 import '../../core/models/booking.dart';
@@ -31,27 +32,26 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
   static const int _openHour = 8;
   static const int _closeHour = 22;
 
-  // ✅ без скролла, всё влезает
   static const int _quickDaysTotal = 7;
 
-  // ✅ правила
+  // правила
   static const int _bufferMin = 15;
   static const int _depositRub = 500;
 
-  // ✅ цвета линий/постов — оставляем (идентификация)
+  // colors for lines
   static const Color _greenLine = Color(0xFF2DBD6E);
   static const Color _blueLine = Color(0xFF2D9CDB);
 
   final _formKey = GlobalKey<FormState>();
 
-  // ✅ locations
+  // locations
   List<LocationLite> _locations = const [];
   LocationLite? _location;
 
   List<Car> _cars = const [];
   List<Service> _services = const [];
 
-  // ✅ busy по каждому посту, чтобы any-mode был корректным для длительности
+  // busy by bay
   Map<int, List<DateTimeRange>> _busyByBay = const {1: [], 2: []};
 
   String? carId;
@@ -62,7 +62,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
   DateTime _selectedDate = _dateOnly(DateTime.now());
   DateTime? _selectedSlotStart;
 
-  // ✅ если режим "Любая линия" — при выборе слота запоминаем какая линия реально будет
+  // for any-line mode: which bay will be used
   int? _pickedBayIdForAny;
 
   final _commentCtrl = TextEditingController();
@@ -75,6 +75,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
   StreamSubscription<BookingRealtimeEvent>? _rtSub;
 
+  // ✅ Addons selection (toggle only)
+  final Set<String> _selectedAddonServiceIds = <String>{};
+
   @override
   void initState() {
     super.initState();
@@ -86,14 +89,12 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     _rtSub?.cancel();
     _rtSub = widget.repo.bookingEvents.listen((ev) async {
       if (!mounted) return;
+      if (ev.type != 'booking.changed') return;
 
-      final affected = ev.type == 'booking.changed';
-      if (!affected) return;
-
-      // ✅ всегда обновляем оба поста
+      // refresh both bays busy
       await _refreshBusy(force: true);
 
-      // если выбранный слот стал недоступен — сбрасываем выбор
+      // if selected slot became busy -> reset
       final cur = _selectedSlotStart;
       if (cur != null && _isBusySlot(cur)) {
         if (!mounted) return;
@@ -111,6 +112,8 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     _commentCtrl.dispose();
     super.dispose();
   }
+
+  // ---------------- helpers ----------------
 
   static DateTime _dateOnly(DateTime dt) => DateTime(dt.year, dt.month, dt.day);
 
@@ -134,10 +137,32 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     return q * stepMin;
   }
 
+  int _addonsTotalDurationMin() {
+    int sum = 0;
+    for (final sid in _selectedAddonServiceIds) {
+      final s = _findService(sid);
+      if (s == null) continue;
+      final d = s.durationMin;
+      if (d != null && d > 0) sum += d;
+    }
+    return sum;
+  }
+
+  int _addonsTotalPriceRub() {
+    int sum = 0;
+    for (final sid in _selectedAddonServiceIds) {
+      final s = _findService(sid);
+      if (s == null) continue;
+      sum += (s.priceRub);
+    }
+    return sum;
+  }
+
   int _effectiveBlockMinForSelectedService() {
-    // ✅ универсально: (durationMin + bufferMin) округлить вверх до 30
+    // duration = base + addons + buffer => ceil to 30
     final base = _serviceDurationOrDefault(serviceId);
-    final raw = base + _bufferMin;
+    final addon = _addonsTotalDurationMin();
+    final raw = base + addon + _bufferMin;
     return _roundUpToStepMin(raw, _slotStepMin);
   }
 
@@ -208,12 +233,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
   bool _isBusySlot(DateTime slotStart) {
     final bayId = _currentBayIdOrNull();
-
     if (bayId != null) {
       return _isBusySlotForBay(slotStart, bayId);
     }
-
-    // ✅ any-mode: busy только если оба поста busy на весь блок
     final busy1 = _isBusySlotForBay(slotStart, 1);
     final busy2 = _isBusySlotForBay(slotStart, 2);
     return busy1 && busy2;
@@ -290,30 +312,29 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     final from = DateTime(day.year, day.month, day.day, _openHour, 0);
     final to = DateTime(day.year, day.month, day.day, _closeHour, 0);
 
-    final List<List<DateTimeRange>> results =
-        await Future.wait<List<DateTimeRange>>([
-          widget.repo.getBusySlots(
-            locationId: locId,
-            bayId: 1,
-            from: from,
-            to: to,
-            forceRefresh: force,
-          ),
-          widget.repo.getBusySlots(
-            locationId: locId,
-            bayId: 2,
-            from: from,
-            to: to,
-            forceRefresh: force,
-          ),
-        ]);
+    final results = await Future.wait<List<DateTimeRange>>([
+      widget.repo.getBusySlots(
+        locationId: locId,
+        bayId: 1,
+        from: from,
+        to: to,
+        forceRefresh: force,
+      ),
+      widget.repo.getBusySlots(
+        locationId: locId,
+        bayId: 2,
+        from: from,
+        to: to,
+        forceRefresh: force,
+      ),
+    ]);
 
     if (!mounted) return;
     setState(() {
       _busyByBay = {1: results[0], 2: results[1]};
     });
 
-    if (_bayMode == _BayMode.any && _selectedSlotStart != null && mounted) {
+    if (_bayMode == _BayMode.any && _selectedSlotStart != null) {
       final bay = await _pickBayForSlotAny(_selectedSlotStart!);
       if (!mounted) return;
       setState(() => _pickedBayIdForAny = bay);
@@ -378,6 +399,8 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
         _selectedDate = _dateOnly(DateTime.now());
         _selectedSlotStart = null;
         _pickedBayIdForAny = null;
+
+        _selectedAddonServiceIds.clear();
 
         _loading = false;
       });
@@ -745,7 +768,93 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     );
   }
 
-  // ===== SAVE =====
+  // ---------------- Addons UI ----------------
+
+  List<Service> _addonCandidates() {
+    // simple default: show all services except primary service
+    final sid = serviceId;
+    return _services.where((s) => sid == null ? true : s.id != sid).toList();
+  }
+
+  List<Map<String, dynamic>> _addonsPayload() {
+    // toggle only => qty=1
+    final out = <Map<String, dynamic>>[];
+    for (final sid in _selectedAddonServiceIds) {
+      out.add({'serviceId': sid, 'qty': 1});
+    }
+    return out;
+  }
+
+  Widget _addonsSection() {
+    final cs = Theme.of(context).colorScheme;
+    final list = _addonCandidates();
+    if (list.isEmpty) return const SizedBox.shrink();
+
+    final totalDur = _addonsTotalDurationMin();
+    final totalPrice = _addonsTotalPriceRub();
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        color: Colors.black.withValues(alpha: 0.03),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'ДОП. УСЛУГИ',
+            style: TextStyle(fontWeight: FontWeight.w900, fontSize: 12),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: list.map((s) {
+              final selected = _selectedAddonServiceIds.contains(s.id);
+
+              final label =
+                  '${s.name} +${s.priceRub}₽ / +${max(s.durationMin ?? 0, 0)}м';
+              return FilterChip(
+                label: Text(label),
+                selected: selected,
+                onSelected: _saving
+                    ? null
+                    : (v) async {
+                        setState(() {
+                          if (v) {
+                            _selectedAddonServiceIds.add(s.id);
+                          } else {
+                            _selectedAddonServiceIds.remove(s.id);
+                          }
+                          // When duration changes -> clear chosen slot + recompute busy
+                          _selectedSlotStart = null;
+                          _pickedBayIdForAny = null;
+                        });
+                        await _refreshBusy(force: true);
+                      },
+              );
+            }).toList(),
+          ),
+          if (totalDur > 0 || totalPrice > 0) ...[
+            const SizedBox(height: 10),
+            Text(
+              'Выбрано: +$totalDur мин • +$totalPrice ₽',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w900,
+                color: cs.onSurface.withValues(alpha: 0.75),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // ---------------- SAVE ----------------
+
   Future<void> _save() async {
     if (_saving) return;
     if (!_formKey.currentState!.validate()) return;
@@ -768,8 +877,11 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
       bayIdToSend = _pickedBayIdForAny;
       bayIdToSend ??= await _pickBayForSlotAny(slot);
       if (bayIdToSend == null) {
-        final msg = e.toString();
-        messenger.showSnackBar(SnackBar(content: Text(msg)));
+        messenger.showSnackBar(
+          const SnackBar(
+            content: Text('Нет доступной линии на это время. Выбери другое.'),
+          ),
+        );
         return;
       }
     }
@@ -777,6 +889,8 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     setState(() => _saving = true);
 
     try {
+      final addonsPayload = _addonsPayload();
+
       final Booking booking = await widget.repo.createBooking(
         locationId: _location!.id,
         carId: carId!,
@@ -784,10 +898,11 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
         dateTime: slot,
         bayId: bayIdToSend,
         depositRub: _depositRub,
+        bufferMin: _bufferMin,
         comment: _commentCtrl.text.trim().isEmpty
             ? null
             : _commentCtrl.text.trim(),
-        bufferMin: _bufferMin,
+        addons: addonsPayload.isEmpty ? null : addonsPayload,
       );
 
       if (!mounted) return;
@@ -817,13 +932,15 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     } catch (e) {
       if (!mounted) return;
 
-      // ✅ ВАЖНО: если пост закрыт и сервер создал waitlist — показываем human message
-      final msg = e.toString().toLowerCase();
-      if (msg.contains('bay_closed_waitlisted')) {
+      final lower = e.toString().toLowerCase();
+
+      // WAITLIST human messages
+      if (lower.contains('all_bays_closed_waitlisted') ||
+          lower.contains('bay_closed_waitlisted')) {
         messenger.showSnackBar(
           const SnackBar(
             content: Text(
-              'Посты сейчас закрыты. Мы добавили вас в очередь ожидания и свяжемся, когда появится возможность.',
+              'Посты сейчас закрыты. Мы добавили вас в очередь ожидания.',
             ),
             duration: Duration(seconds: 4),
           ),
@@ -855,6 +972,8 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
     return true;
   }
+
+  // ---------------- UI ----------------
 
   @override
   Widget build(BuildContext context) {
@@ -903,10 +1022,11 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     final primary = cs.primary;
 
     final service = _findService(safeServiceId);
-    final priceRub = service?.priceRub ?? 0;
-    final remaining = (priceRub - _depositRub) > 0
-        ? (priceRub - _depositRub)
-        : 0;
+    final basePriceRub = service?.priceRub ?? 0;
+    final addonsPriceRub = _addonsTotalPriceRub();
+    final totalPriceRub = basePriceRub + addonsPriceRub;
+
+    final remaining = max(totalPriceRub - _depositRub, 0);
 
     final visibleSlots = _visibleSlotsForCurrentMode();
     final morningSlots = _filterByHourRange(visibleSlots, _openHour, 12);
@@ -936,7 +1056,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
           key: _formKey,
           child: ListView(
             children: [
-              // ✅ LOCATION SELECTOR
               if (_locations.isNotEmpty)
                 Container(
                   padding: const EdgeInsets.all(12),
@@ -1005,10 +1124,8 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                           });
                           await _refreshBusy(force: true);
                         },
-                        validator: (_) {
-                          if (_location == null) return 'Выбери локацию';
-                          return null;
-                        },
+                        validator: (_) =>
+                            _location == null ? 'Выбери локацию' : null,
                       ),
                       const SizedBox(height: 10),
                       Row(
@@ -1061,6 +1178,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                   return null;
                 },
               ),
+
               const SizedBox(height: 12),
 
               DropdownButtonFormField<String>(
@@ -1084,6 +1202,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                     serviceId = v;
                     _selectedSlotStart = null;
                     _pickedBayIdForAny = null;
+                    _selectedAddonServiceIds.clear();
                   });
                   await _refreshBusy(force: true);
                 },
@@ -1093,6 +1212,10 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                   return null;
                 },
               ),
+
+              const SizedBox(height: 12),
+
+              _addonsSection(),
 
               const SizedBox(height: 12),
 
@@ -1174,16 +1297,16 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'Оплата брони: $_depositRub ₽',
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontWeight: FontWeight.w900,
                         fontSize: 12,
                       ),
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Остаток к оплате на месте: $remaining ₽',
+                      'Стоимость: $totalPriceRub ₽ • Остаток на месте: $remaining ₽',
                       style: TextStyle(
                         fontWeight: FontWeight.w700,
                         fontSize: 12,
@@ -1211,6 +1334,15 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                           ),
                         ),
                       ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Длительность: ${_effectiveBlockMinForSelectedService()} мин (включая буфер)',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.black.withValues(alpha: 0.65),
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                   ],
                 ),
