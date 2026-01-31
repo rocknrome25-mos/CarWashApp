@@ -36,8 +36,10 @@ class _StartPageState extends State<StartPage> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(18),
@@ -45,16 +47,39 @@ class _StartPageState extends State<StartPage> {
             children: [
               const Spacer(flex: 2),
 
-              Image.asset(
-                'assets/images/logo/carwash_logo_512.png',
-                width: 160,
-                height: 160,
-                fit: BoxFit.contain,
+              // ✅ White logo card (no sharp corners)
+              Container(
+                width: 170,
+                height: 170,
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(34),
+                  border: Border.all(
+                    color: cs.outlineVariant.withValues(alpha: 0.35),
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      blurRadius: 18,
+                      offset: const Offset(0, 10),
+                      color: Colors.black.withValues(alpha: 0.20),
+                    ),
+                  ],
+                ),
+                child: Image.asset(
+                  'assets/images/logo/carwash_logo_512.png',
+                  fit: BoxFit.contain,
+                ),
               ),
+
               const SizedBox(height: 14),
-              const Text(
+
+              Text(
                 'Автомойка',
-                style: TextStyle(fontSize: 26, fontWeight: FontWeight.w900),
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w900,
+                  color: cs.onSurface.withValues(alpha: 0.95),
+                ),
               ),
 
               const Spacer(flex: 3),

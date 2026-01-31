@@ -1,5 +1,4 @@
 import 'dart:io' show Platform;
-
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
@@ -9,6 +8,7 @@ import 'core/cache/memory_cache.dart';
 import 'core/data/api_repository.dart';
 import 'core/data/app_repository.dart';
 import 'core/realtime/realtime_client.dart';
+import 'core/theme/app_theme.dart';
 import 'screens/start_page.dart';
 
 void main() {
@@ -33,15 +33,9 @@ class _RootState extends State<_Root> {
   }
 
   Uri _resolveWsUrl(String baseUrl) {
-    // http://host:3000 -> ws://host:3000/ws
     final u = Uri.parse(baseUrl);
     final scheme = u.scheme == 'https' ? 'wss' : 'ws';
-    return Uri(
-      scheme: scheme,
-      host: u.host,
-      port: u.port,
-      path: '/ws',
-    );
+    return Uri(scheme: scheme, host: u.host, port: u.port, path: '/ws');
   }
 
   @override
@@ -69,7 +63,7 @@ class _RootState extends State<_Root> {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.red),
+      theme: AppTheme.dark(), // ✅ единая тема тут
       home: _authed
           ? ClientModuleApp(
               repo: repo,

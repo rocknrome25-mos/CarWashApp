@@ -128,6 +128,35 @@ class ApiRepository implements AppRepository {
     );
   }
 
+  // ---------------- CONFIG (Variant B) ----------------
+
+  @override
+  Future<Map<String, dynamic>> getConfig({
+    required String locationId,
+    bool forceRefresh = false,
+  }) async {
+    final locId = _effectiveLocationIdOrThrow(locationId);
+    final key = 'config_$locId';
+
+    if (!forceRefresh) {
+      final cached = cache.get<Map<String, dynamic>>(key);
+      if (cached != null) return cached;
+    }
+
+    final j = await api.getJson('/config', query: {'locationId': locId});
+    if (j is Map<String, dynamic>) {
+      cache.set(key, j, ttl: const Duration(minutes: 5));
+      return j;
+    }
+    if (j is Map) {
+      final m = j.cast<String, dynamic>();
+      cache.set(key, m, ttl: const Duration(minutes: 5));
+      return m;
+    }
+
+    throw Exception('config: unexpected response');
+  }
+
   // ---------------- REALTIME ----------------
 
   @override
@@ -139,6 +168,11 @@ class ApiRepository implements AppRepository {
     cache.invalidatePrefix('busy_slots_');
     cache.invalidate('waitlist_waiting');
     cache.invalidate('waitlist_all');
+
+    final locId = currentLocation?.id;
+    if (locId != null && locId.trim().isNotEmpty) {
+      cache.invalidate('config_${locId.trim()}');
+    }
   }
 
   // ---------------- AUTH / REGISTER ----------------
@@ -341,7 +375,7 @@ class ApiRepository implements AppRepository {
     required String clientId,
     bool includeAll = false,
   }) async {
-    final cid = (clientId).trim();
+    final cid = clientId.trim();
     if (cid.isEmpty) throw Exception('clientId is required');
 
     final key = includeAll ? 'waitlist_all' : 'waitlist_waiting';

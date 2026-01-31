@@ -35,7 +35,6 @@ class ServiceDetailsPage extends StatelessWidget {
       return const AssetImage('assets/images/services/kuzov_1080.jpg');
     }
 
-    // fallback на существующий файл
     return const AssetImage('assets/images/services/kuzov_1080.jpg');
   }
 
@@ -55,6 +54,7 @@ class ServiceDetailsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     final bottomInset = MediaQuery.of(context).padding.bottom;
     final heroH = MediaQuery.of(context).size.width * 0.72;
 
@@ -79,24 +79,30 @@ class ServiceDetailsPage extends StatelessWidget {
                       errorBuilder: (_, __, ___) => Container(
                         height: heroH,
                         width: double.infinity,
-                        color: Colors.black.withValues(alpha: 0.06),
+                        color: cs.surfaceContainerHighest.withValues(
+                          alpha: 0.22,
+                        ),
                         child: const Center(
                           child: Icon(Icons.local_car_wash, size: 54),
                         ),
                       ),
                     ),
                   ),
+
+                  // ✅ Back button: теперь читабельный на тёмной теме
                   SafeArea(
                     child: Padding(
                       padding: const EdgeInsets.all(12),
                       child: Align(
                         alignment: Alignment.topLeft,
                         child: Material(
-                          color: Colors.white.withValues(alpha: 0.88),
+                          color: cs.surfaceContainerHighest.withValues(
+                            alpha: 0.70,
+                          ),
                           shape: const CircleBorder(),
                           child: IconButton(
                             onPressed: () => Navigator.of(context).pop(false),
-                            icon: const Icon(Icons.arrow_back),
+                            icon: Icon(Icons.arrow_back, color: cs.onSurface),
                           ),
                         ),
                       ),
@@ -105,14 +111,14 @@ class ServiceDetailsPage extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 14),
+
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Text(
                   service.name,
-                  style: const TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w900,
-                  ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
                 ),
               ),
               const SizedBox(height: 8),
@@ -120,38 +126,39 @@ class ServiceDetailsPage extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Text(
                   _priceLine(service),
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.black.withValues(alpha: 0.65),
+                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                    color: cs.onSurface.withValues(alpha: 0.75),
                     fontWeight: FontWeight.w800,
                   ),
                 ),
               ),
               const SizedBox(height: 18),
+
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Container(
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.04),
+                    color: cs.surfaceContainerHighest.withValues(alpha: 0.22),
                     borderRadius: BorderRadius.circular(18),
                     border: Border.all(
-                      color: Colors.black.withValues(alpha: 0.06),
+                      color: cs.outlineVariant.withValues(alpha: 0.6),
                     ),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
+                      Text(
                         'Описание',
-                        style: TextStyle(fontWeight: FontWeight.w900),
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w900,
+                        ),
                       ),
                       const SizedBox(height: 8),
                       Text(
                         'Описание услуги будет здесь. Что входит, ограничения, рекомендации.',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Colors.black.withValues(alpha: 0.70),
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: cs.onSurface.withValues(alpha: 0.75),
                           fontWeight: FontWeight.w600,
                           height: 1.35,
                         ),
@@ -176,6 +183,7 @@ class ServiceDetailsPage extends StatelessWidget {
               ),
             ],
           ),
+
           Positioned(
             left: 16,
             right: 16,
@@ -190,9 +198,12 @@ class ServiceDetailsPage extends StatelessWidget {
                     Navigator.of(context).pop(true);
                   }
                 },
-                child: const Text(
+                child: Text(
                   'Записаться',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w900,
+                  ),
                 ),
               ),
             ),
@@ -211,29 +222,32 @@ class _InfoChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
     return Expanded(
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: cs.surfaceContainerHigh.withValues(alpha: 0.55),
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+          border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               label,
-              style: TextStyle(
-                fontSize: 12,
-                color: Colors.black.withValues(alpha: 0.55),
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: cs.onSurface.withValues(alpha: 0.65),
                 fontWeight: FontWeight.w700,
               ),
             ),
             const SizedBox(height: 6),
             Text(
               value,
-              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900),
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900),
             ),
           ],
         ),

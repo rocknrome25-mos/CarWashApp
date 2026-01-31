@@ -129,6 +129,17 @@ class ApiClient {
       }
     }
 
+    // ✅ ДУБЛИКАТ по авто/времени (то самое сообщение, которое ты хотел)
+    // сервер: "This car already has a booking at this time"
+    if (code == 409 &&
+        (m.contains('this car already has a booking at this time') ||
+            (m.contains('car') &&
+                m.contains('already') &&
+                m.contains('booking') &&
+                m.contains('time')))) {
+      return 'У вас уже есть запись на это время. Выберите другое время или отмените текущую запись.';
+    }
+
     // ✅ Payment expired housekeeping
     if (code == 409 &&
         (m.contains('payment deadline expired') ||

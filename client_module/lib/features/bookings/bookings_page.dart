@@ -111,6 +111,15 @@ class _BookingsPageState extends State<BookingsPage> {
         '${x.minute.toString().padLeft(2, '0')}';
   }
 
+  int _addonsCountSafe(Booking b) {
+    try {
+      final dyn = b as dynamic;
+      final addons = dyn.addons;
+      if (addons is List) return addons.length;
+    } catch (_) {}
+    return 0;
+  }
+
   Color _statusColor(BuildContext ctx, Booking b) {
     if (b.isWashing) return Colors.blue;
     final cs = Theme.of(ctx).colorScheme;
@@ -195,6 +204,7 @@ class _BookingsPageState extends State<BookingsPage> {
   }
 
   Widget _bayBadge(BuildContext ctx, int? bayId) {
+    final cs = Theme.of(ctx).colorScheme;
     final color = _bayColor(ctx, bayId);
 
     return Row(
@@ -224,13 +234,18 @@ class _BookingsPageState extends State<BookingsPage> {
         const SizedBox(width: 8),
         Text(
           _bayText(bayId),
-          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w900),
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w900,
+            color: cs.onSurface.withValues(alpha: 0.90),
+          ),
         ),
       ],
     );
   }
 
   Widget _serviceThumb(Service? s) {
+    final cs = Theme.of(context).colorScheme;
     return ClipRRect(
       borderRadius: BorderRadius.circular(16),
       child: Image.asset(
@@ -243,10 +258,10 @@ class _BookingsPageState extends State<BookingsPage> {
           height: 56,
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.05),
+            color: cs.surfaceContainerHighest.withValues(alpha: 0.22),
             borderRadius: BorderRadius.circular(16),
           ),
-          child: const Icon(Icons.local_car_wash),
+          child: Icon(Icons.local_car_wash, color: cs.onSurface),
         ),
       ),
     );
@@ -258,9 +273,16 @@ class _BookingsPageState extends State<BookingsPage> {
     required Service? service,
     required VoidCallback onTap,
   }) {
+    final cs = Theme.of(context).colorScheme;
+
     final when = '${_dateHeader(b.dateTime)} • ${_time(b.dateTime)}';
     final total = _effectivePriceRub(service, b);
     final toPay = _toPayRub(service, b);
+
+    final addonsCount = _addonsCountSafe(b);
+
+    final secondaryText = cs.onSurface.withValues(alpha: 0.68);
+    final strongText = cs.onSurface.withValues(alpha: 0.86);
 
     return InkWell(
       borderRadius: BorderRadius.circular(18),
@@ -270,11 +292,14 @@ class _BookingsPageState extends State<BookingsPage> {
         decoration: BoxDecoration(
           color: Theme.of(context).cardColor,
           borderRadius: BorderRadius.circular(18),
-          border: Border.all(
-            color: Theme.of(
-              context,
-            ).colorScheme.outlineVariant.withValues(alpha: 0.6),
-          ),
+          border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
+          boxShadow: [
+            BoxShadow(
+              blurRadius: 16,
+              offset: const Offset(0, 10),
+              color: Colors.black.withValues(alpha: 0.22),
+            ),
+          ],
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -292,9 +317,10 @@ class _BookingsPageState extends State<BookingsPage> {
                           service?.name ?? 'Услуга удалена',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 15,
-                            fontWeight: FontWeight.w900,
+                            fontWeight: FontWeight.w800,
+                            color: cs.onSurface.withValues(alpha: 0.92),
                           ),
                         ),
                       ),
@@ -310,7 +336,7 @@ class _BookingsPageState extends State<BookingsPage> {
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w700,
-                      color: Colors.black.withValues(alpha: 0.65),
+                      color: secondaryText,
                     ),
                   ),
                   const SizedBox(height: 4),
@@ -319,9 +345,20 @@ class _BookingsPageState extends State<BookingsPage> {
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w700,
-                      color: Colors.black.withValues(alpha: 0.65),
+                      color: secondaryText,
                     ),
                   ),
+                  if (addonsCount > 0) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      'Доп. услуги: +$addonsCount',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w900,
+                        color: strongText,
+                      ),
+                    ),
+                  ],
                   if (b.discountRub > 0) ...[
                     const SizedBox(height: 4),
                     Text(
@@ -329,17 +366,17 @@ class _BookingsPageState extends State<BookingsPage> {
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w900,
-                        color: Colors.black.withValues(alpha: 0.75),
+                        color: strongText,
                       ),
                     ),
                   ],
                   const SizedBox(height: 4),
                   Text(
-                    'Стоимость: $total ₽ К оплате: $toPay ₽',
+                    'Стоимость: $total ₽   К оплате: $toPay ₽',
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w900,
-                      color: Colors.black.withValues(alpha: 0.75),
+                      color: strongText,
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -403,9 +440,12 @@ class _BookingsPageState extends State<BookingsPage> {
                 padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
                 child: Text(
                   _dateHeader(b.dateTime),
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w900,
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.onSurface.withValues(alpha: 0.92),
                   ),
                 ),
               ),

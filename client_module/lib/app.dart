@@ -38,7 +38,6 @@ class _ClientModuleAppState extends State<ClientModuleApp> {
   Future<void> _openProfile() async {
     final c = widget.repo.currentClient;
 
-    // показываем sheet и ждём результат: true = logout
     final didLogout = await showModalBottomSheet<bool>(
       context: context,
       showDragHandle: true,
@@ -61,8 +60,6 @@ class _ClientModuleAppState extends State<ClientModuleApp> {
                   child: OutlinedButton.icon(
                     onPressed: () async {
                       await widget.repo.logout();
-
-                      // закрываем только если sheet ещё в дереве
                       if (sheetContext.mounted) {
                         Navigator.of(sheetContext).pop(true);
                       }
@@ -79,12 +76,37 @@ class _ClientModuleAppState extends State<ClientModuleApp> {
       },
     );
 
-    // ✅ правильная проверка после async gap
     if (!context.mounted) return;
-
     if (didLogout == true) {
       widget.onLogout();
     }
+  }
+
+  Widget _brandTitle(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return Row(
+      children: [
+        Container(
+          width: 28,
+          height: 28,
+          padding: const EdgeInsets.all(4),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: cs.outlineVariant.withValues(alpha: 0.35),
+            ),
+          ),
+          child: Image.asset(
+            'assets/images/logo/carwash_logo_512.png',
+            fit: BoxFit.contain,
+          ),
+        ),
+        const SizedBox(width: 10),
+        const Text('Автомойка'),
+      ],
+    );
   }
 
   @override
@@ -97,14 +119,7 @@ class _ClientModuleAppState extends State<ClientModuleApp> {
         onBookingCreated: _onBookingCreated,
       ),
       BookingsPage(repo: widget.repo, refreshToken: refreshToken),
-      const ContactsPage(
-        title: 'Контакты',
-        address: 'Москва, бульвар Андрея Тарковского, 10',
-        phone: '+7-927-310-9336',
-        telegram: '@carwash_demo',
-        navigatorLink:
-            'https://www.google.com/maps/search/?api=1&query=Москва%2C%20бульвар%20Андрея%20Тарковского%2010',
-      ),
+      ContactsPage(repo: widget.repo), // from /config
     ];
 
     return MaterialApp(
@@ -117,21 +132,11 @@ class _ClientModuleAppState extends State<ClientModuleApp> {
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
-      theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.red),
+      // ВАЖНО: тему ты подключаешь снаружи (main.dart). Здесь оставим как есть.
+      theme: Theme.of(context),
       home: Scaffold(
         appBar: AppBar(
-          title: Row(
-            children: [
-              Image.asset(
-                'assets/images/logo/carwash_logo_512.png',
-                width: 26,
-                height: 26,
-                fit: BoxFit.contain,
-              ),
-              const SizedBox(width: 10),
-              const Text('Автомойка'),
-            ],
-          ),
+          title: _brandTitle(context),
           actions: [
             IconButton(
               tooltip: 'Профиль',

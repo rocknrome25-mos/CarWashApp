@@ -153,7 +153,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     for (final sid in _selectedAddonServiceIds) {
       final s = _findService(sid);
       if (s == null) continue;
-      sum += (s.priceRub);
+      sum += s.priceRub;
     }
     return sum;
   }
@@ -547,12 +547,12 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     );
   }
 
+  // ✅ FIX: responsive selector (removes overflow on narrow widths)
   Widget _lineSelectorAccordion() {
     final cs = Theme.of(context).colorScheme;
 
     const double h = 56;
     const double gap = 8;
-    const double smallW = 54;
 
     Widget item({
       required _BayMode mode,
@@ -602,7 +602,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontWeight: FontWeight.w900,
-                      color: Colors.black.withValues(alpha: 0.85),
+                      color: cs.onSurface.withValues(alpha: 0.92),
                     ),
                   ),
                 ),
@@ -614,36 +614,80 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
       );
     }
 
-    return SizedBox(
-      width: double.infinity,
-      child: Row(
-        children: [
-          Expanded(
-            child: item(
-              mode: _BayMode.any,
-              expanded: _bayMode == _BayMode.any,
-              title: 'Любая линия',
-              stripe: Theme.of(context).colorScheme.primary,
+    return LayoutBuilder(
+      builder: (context, c) {
+        final narrow = c.maxWidth < 360;
+
+        if (narrow) {
+          return Column(
+            children: [
+              SizedBox(
+                width: double.infinity,
+                child: item(
+                  mode: _BayMode.any,
+                  expanded: _bayMode == _BayMode.any,
+                  title: 'Любая линия',
+                  stripe: Theme.of(context).colorScheme.primary,
+                ),
+              ),
+              const SizedBox(height: gap),
+              Row(
+                children: [
+                  Expanded(
+                    child: item(
+                      mode: _BayMode.bay1,
+                      expanded: _bayMode == _BayMode.bay1,
+                      title: 'Зелёная линия',
+                      stripe: _greenLine,
+                    ),
+                  ),
+                  const SizedBox(width: gap),
+                  Expanded(
+                    child: item(
+                      mode: _BayMode.bay2,
+                      expanded: _bayMode == _BayMode.bay2,
+                      title: 'Синяя линия',
+                      stripe: _blueLine,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          );
+        }
+
+        // wide layout (old behavior)
+        const double smallW = 54;
+
+        return Row(
+          children: [
+            Expanded(
+              child: item(
+                mode: _BayMode.any,
+                expanded: _bayMode == _BayMode.any,
+                title: 'Любая линия',
+                stripe: Theme.of(context).colorScheme.primary,
+              ),
             ),
-          ),
-          const SizedBox(width: gap),
-          item(
-            mode: _BayMode.bay1,
-            expanded: _bayMode == _BayMode.bay1,
-            title: 'Зелёная линия',
-            stripe: _greenLine,
-            width: smallW,
-          ),
-          const SizedBox(width: gap),
-          item(
-            mode: _BayMode.bay2,
-            expanded: _bayMode == _BayMode.bay2,
-            title: 'Синяя линия',
-            stripe: _blueLine,
-            width: smallW,
-          ),
-        ],
-      ),
+            const SizedBox(width: gap),
+            item(
+              mode: _BayMode.bay1,
+              expanded: _bayMode == _BayMode.bay1,
+              title: 'Зелёная линия',
+              stripe: _greenLine,
+              width: smallW,
+            ),
+            const SizedBox(width: gap),
+            item(
+              mode: _BayMode.bay2,
+              expanded: _bayMode == _BayMode.bay2,
+              title: 'Синяя линия',
+              stripe: _blueLine,
+              width: smallW,
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -771,13 +815,11 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
   // ---------------- Addons UI ----------------
 
   List<Service> _addonCandidates() {
-    // simple default: show all services except primary service
     final sid = serviceId;
     return _services.where((s) => sid == null ? true : s.id != sid).toList();
   }
 
   List<Map<String, dynamic>> _addonsPayload() {
-    // toggle only => qty=1
     final out = <Map<String, dynamic>>[];
     for (final sid in _selectedAddonServiceIds) {
       out.add({'serviceId': sid, 'qty': 1});
@@ -797,15 +839,18 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(16),
-        color: Colors.black.withValues(alpha: 0.03),
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.18),
         border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'ДОП. УСЛУГИ',
-            style: TextStyle(fontWeight: FontWeight.w900, fontSize: 12),
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              fontWeight: FontWeight.w900,
+              color: cs.onSurface.withValues(alpha: 0.9),
+            ),
           ),
           const SizedBox(height: 10),
           Wrap(
@@ -813,9 +858,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
             runSpacing: 8,
             children: list.map((s) {
               final selected = _selectedAddonServiceIds.contains(s.id);
-
               final label =
-                  '${s.name} +${s.priceRub}₽ / +${max(s.durationMin ?? 0, 0)}м';
+                  '${s.name} +${s.priceRub}₽ • +${max(s.durationMin ?? 0, 0)} мин';
+
               return FilterChip(
                 label: Text(label),
                 selected: selected,
@@ -828,7 +873,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                           } else {
                             _selectedAddonServiceIds.remove(s.id);
                           }
-                          // When duration changes -> clear chosen slot + recompute busy
                           _selectedSlotStart = null;
                           _pickedBayIdForAny = null;
                         });
@@ -841,8 +885,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
             const SizedBox(height: 10),
             Text(
               'Выбрано: +$totalDur мин • +$totalPrice ₽',
-              style: TextStyle(
-                fontSize: 12,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 fontWeight: FontWeight.w900,
                 color: cs.onSurface.withValues(alpha: 0.75),
               ),
@@ -934,7 +977,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
       final lower = e.toString().toLowerCase();
 
-      // WAITLIST human messages
       if (lower.contains('all_bays_closed_waitlisted') ||
           lower.contains('bay_closed_waitlisted')) {
         messenger.showSnackBar(
@@ -977,6 +1019,8 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
     if (_loading) {
       return Scaffold(
         appBar: AppBar(title: const Text('Создать запись')),
@@ -1018,7 +1062,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     const chipLabelPadding = EdgeInsets.symmetric(horizontal: 10);
     const chipVD = VisualDensity(horizontal: -2, vertical: -2);
 
-    final cs = Theme.of(context).colorScheme;
     final primary = cs.primary;
 
     final service = _findService(safeServiceId);
@@ -1061,7 +1104,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(16),
-                    color: Colors.black.withValues(alpha: 0.03),
+                    color: cs.surfaceContainerHighest.withValues(alpha: 0.18),
                     border: Border.all(
                       color: cs.outlineVariant.withValues(alpha: 0.6),
                     ),
@@ -1069,12 +1112,13 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
+                      Text(
                         'МОЙКА / ЛОКАЦИЯ',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w900,
-                          fontSize: 12,
-                        ),
+                        style: Theme.of(context).textTheme.labelMedium
+                            ?.copyWith(
+                              fontWeight: FontWeight.w900,
+                              color: cs.onSurface.withValues(alpha: 0.9),
+                            ),
                       ),
                       const SizedBox(height: 8),
                       DropdownButtonFormField<String>(
@@ -1142,11 +1186,11 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                           Expanded(
                             child: Text(
                               'Убедись, что выбрана правильная мойка перед бронированием.',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.black.withValues(alpha: 0.7),
-                                fontWeight: FontWeight.w700,
-                              ),
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(
+                                    color: cs.onSurface.withValues(alpha: 0.7),
+                                    fontWeight: FontWeight.w700,
+                                  ),
                             ),
                           ),
                         ],
@@ -1289,7 +1333,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(16),
-                  color: Colors.black.withValues(alpha: 0.04),
+                  color: cs.surfaceContainerHighest.withValues(alpha: 0.18),
                   border: Border.all(
                     color: cs.outlineVariant.withValues(alpha: 0.6),
                   ),
@@ -1297,9 +1341,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
+                    const Text(
                       'Оплата брони: $_depositRub ₽',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontWeight: FontWeight.w900,
                         fontSize: 12,
                       ),
@@ -1307,10 +1351,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                     const SizedBox(height: 4),
                     Text(
                       'Стоимость: $totalPriceRub ₽ • Остаток на месте: $remaining ₽',
-                      style: TextStyle(
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         fontWeight: FontWeight.w700,
-                        fontSize: 12,
-                        color: Colors.black.withValues(alpha: 0.65),
+                        color: cs.onSurface.withValues(alpha: 0.7),
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -1325,12 +1368,16 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                           ),
                         ),
                         const SizedBox(width: 8),
-                        Text(
-                          pickedLineText,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.black.withValues(alpha: 0.75),
-                            fontWeight: FontWeight.w900,
+                        Expanded(
+                          child: Text(
+                            pickedLineText,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(
+                                  color: cs.onSurface.withValues(alpha: 0.85),
+                                  fontWeight: FontWeight.w900,
+                                ),
                           ),
                         ),
                       ],
@@ -1338,9 +1385,8 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                     const SizedBox(height: 6),
                     Text(
                       'Длительность: ${_effectiveBlockMinForSelectedService()} мин (включая буфер)',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.black.withValues(alpha: 0.65),
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: cs.onSurface.withValues(alpha: 0.7),
                         fontWeight: FontWeight.w800,
                       ),
                     ),

@@ -79,10 +79,6 @@ class _ServicesScreenState extends State<ServicesScreen> {
     if (n.contains('комплекс')) {
       return const AssetImage('assets/images/services/kompleks_1080.jpg');
     }
-    if (n.contains('кузов')) {
-      return const AssetImage('assets/images/services/kuzov_1080.jpg');
-    }
-
     return const AssetImage('assets/images/services/kuzov_1080.jpg');
   }
 
@@ -108,6 +104,8 @@ class _ServicesScreenState extends State<ServicesScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
     return FutureBuilder<_ServicesBundle>(
       future: _future,
       builder: (context, snapshot) {
@@ -122,7 +120,13 @@ class _ServicesScreenState extends State<ServicesScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text('Ошибка: ${snapshot.error}'),
+                  Text(
+                    'Ошибка: ${snapshot.error}',
+                    style: TextStyle(
+                      color: cs.onSurface.withValues(alpha: 0.9),
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
                   const SizedBox(height: 12),
                   FilledButton(
                     onPressed: () => _refreshSync(force: true),
@@ -149,23 +153,26 @@ class _ServicesScreenState extends State<ServicesScreen> {
           return const EmptyState(
             icon: Icons.local_car_wash,
             title: 'Нет услуг',
-            subtitle: 'Похоже, backend вернул пустой список услуг.',
+            subtitle: 'Backend вернул пустой список услуг.',
           );
         }
 
-        final primary = Theme.of(context).colorScheme.primary;
+        final primary = cs.primary;
 
         return RefreshIndicator(
           onRefresh: _pullToRefresh,
           child: ListView(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
             children: [
+              // top hint card
               Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: primary.withValues(alpha: 0.08),
+                  color: cs.surfaceContainerHighest.withValues(alpha: 0.22),
                   borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: primary.withValues(alpha: 0.15)),
+                  border: Border.all(
+                    color: cs.outlineVariant.withValues(alpha: 0.6),
+                  ),
                 ),
                 child: Row(
                   children: [
@@ -179,21 +186,26 @@ class _ServicesScreenState extends State<ServicesScreen> {
                       child: Icon(Icons.local_car_wash, color: primary),
                     ),
                     const SizedBox(width: 12),
-                    const Expanded(
+                    Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
                             'Выбери услугу и время',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w800,
-                            ),
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(
+                                  fontWeight: FontWeight.w900,
+                                  color: cs.onSurface.withValues(alpha: 0.95),
+                                ),
                           ),
-                          SizedBox(height: 4),
+                          const SizedBox(height: 4),
                           Text(
                             'Сначала открой услугу, затем нажми “Записаться”.',
-                            style: TextStyle(fontSize: 12),
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(
+                                  color: cs.onSurface.withValues(alpha: 0.70),
+                                  fontWeight: FontWeight.w600,
+                                ),
                           ),
                         ],
                       ),
@@ -201,16 +213,21 @@ class _ServicesScreenState extends State<ServicesScreen> {
                   ],
                 ),
               ),
+
               const SizedBox(height: 14),
-              const Text(
+
+              Text(
                 'Услуги',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w900,
+                  color: cs.onSurface.withValues(alpha: 0.95),
+                ),
               ),
               const SizedBox(height: 10),
 
-              // ✅ Карточки услуг: без кнопки "Записаться"
-              ...services.map((s) {
-                return Padding(
+              // cards
+              for (final s in services)
+                Padding(
                   padding: const EdgeInsets.only(bottom: 12),
                   child: InkWell(
                     borderRadius: BorderRadius.circular(18),
@@ -220,67 +237,87 @@ class _ServicesScreenState extends State<ServicesScreen> {
                         color: Theme.of(context).cardColor,
                         borderRadius: BorderRadius.circular(18),
                         border: Border.all(
-                          color: Colors.black.withValues(alpha: 0.06),
+                          color: cs.outlineVariant.withValues(alpha: 0.6),
                         ),
-                        boxShadow: [
-                          BoxShadow(
-                            blurRadius: 10,
-                            offset: const Offset(0, 6),
-                            color: Colors.black.withValues(alpha: 0.04),
-                          ),
-                        ],
                       ),
                       clipBehavior: Clip.antiAlias,
-                      child: IntrinsicHeight(
+                      child: SizedBox(
+                        height: 96, // ✅ фикс, чтобы не было overflow
                         child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             SizedBox(
                               width: 118,
+                              height: 96,
                               child: Image(
                                 image: _serviceThumb(s),
                                 fit: BoxFit.cover,
                                 errorBuilder: (_, __, ___) => Container(
-                                  color: Colors.black.withValues(alpha: 0.04),
-                                  child: const Center(
-                                    child: Icon(Icons.local_car_wash),
+                                  color: cs.surfaceContainerHighest.withValues(
+                                    alpha: 0.22,
+                                  ),
+                                  alignment: Alignment.center,
+                                  child: Icon(
+                                    Icons.local_car_wash,
+                                    color: cs.onSurface,
                                   ),
                                 ),
                               ),
                             ),
                             Expanded(
                               child: Padding(
-                                padding: const EdgeInsets.all(14),
+                                padding: const EdgeInsets.fromLTRB(
+                                  14,
+                                  12,
+                                  14,
+                                  12,
+                                ),
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
                                     Text(
                                       s.name,
-                                      style: const TextStyle(
-                                        fontSize: 15,
-                                        fontWeight: FontWeight.w900,
-                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .titleSmall
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w900,
+                                            color: cs.onSurface.withValues(
+                                              alpha: 0.95,
+                                            ),
+                                          ),
                                     ),
                                     const SizedBox(height: 6),
                                     Text(
                                       _priceLine(s),
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: Colors.black.withValues(
-                                          alpha: 0.65,
-                                        ),
-                                        fontWeight: FontWeight.w700,
-                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.copyWith(
+                                            color: cs.onSurface.withValues(
+                                              alpha: 0.72,
+                                            ),
+                                            fontWeight: FontWeight.w700,
+                                          ),
                                     ),
                                     const SizedBox(height: 8),
                                     Text(
-                                      'Посмотреть > ',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: primary.withValues(alpha: 0.85),
-                                        fontWeight: FontWeight.w900,
-                                      ),
+                                      'Посмотреть →',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .labelLarge
+                                          ?.copyWith(
+                                            color: primary.withValues(
+                                              alpha: 0.92,
+                                            ),
+                                            fontWeight: FontWeight.w900,
+                                          ),
                                     ),
                                   ],
                                 ),
@@ -291,8 +328,7 @@ class _ServicesScreenState extends State<ServicesScreen> {
                       ),
                     ),
                   ),
-                );
-              }),
+                ),
             ],
           ),
         );
@@ -304,5 +340,6 @@ class _ServicesScreenState extends State<ServicesScreen> {
 class _ServicesBundle {
   final int carsCount;
   final List<Service> services;
+
   const _ServicesBundle({required this.carsCount, required this.services});
 }

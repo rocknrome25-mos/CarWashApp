@@ -88,6 +88,82 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
     return _Details(booking: booking, car: car, service: service);
   }
 
+  // ===== addons safe reader (works even if Booking model doesn't have addons) =====
+
+  List<Map<String, dynamic>> _addonsSafe(Booking b) {
+    try {
+      final dyn = b as dynamic;
+      final addons = dyn.addons;
+      if (addons is List) {
+        final out = <Map<String, dynamic>>[];
+        for (final x in addons) {
+          if (x is Map) {
+            out.add(x.cast<String, dynamic>());
+            continue;
+          }
+          try {
+            final dx = x as dynamic;
+            out.add(<String, dynamic>{
+              'qty': dx.qty,
+              'priceRubSnapshot': dx.priceRubSnapshot,
+              'durationMinSnapshot': dx.durationMinSnapshot,
+              'service': dx.service,
+              'serviceId': dx.serviceId,
+            });
+          } catch (_) {}
+        }
+        return out;
+      }
+    } catch (_) {}
+    return const [];
+  }
+
+  String _addonName(Map<String, dynamic> a) {
+    final s = a['service'];
+    if (s is Map) {
+      final name = (s['name'] ?? '').toString().trim();
+      if (name.isNotEmpty) return name;
+    }
+    final sid = (a['serviceId'] ?? '').toString().trim();
+    return sid.isNotEmpty ? 'Услуга ($sid)' : 'Доп. услуга';
+  }
+
+  int _addonQty(Map<String, dynamic> a) {
+    final q = a['qty'];
+    if (q is num) return max(q.toInt(), 1);
+    return 1;
+  }
+
+  int _addonPrice(Map<String, dynamic> a) {
+    final p = a['priceRubSnapshot'];
+    if (p is num) return max(p.toInt(), 0);
+    return 0;
+  }
+
+  int _addonDur(Map<String, dynamic> a) {
+    final d = a['durationMinSnapshot'];
+    if (d is num) return max(d.toInt(), 0);
+    return 0;
+  }
+
+  int _addonsTotalPriceRub(List<Map<String, dynamic>> addons) {
+    int sum = 0;
+    for (final a in addons) {
+      sum += _addonQty(a) * _addonPrice(a);
+    }
+    return sum;
+  }
+
+  int _addonsTotalDurationMin(List<Map<String, dynamic>> addons) {
+    int sum = 0;
+    for (final a in addons) {
+      sum += _addonQty(a) * _addonDur(a);
+    }
+    return sum;
+  }
+
+  // ===== helpers =====
+
   String _dtText(DateTime dt) {
     final x = dt.toLocal();
     String two(int n) => n.toString().padLeft(2, '0');
@@ -97,9 +173,7 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
   String _carTitleForUi(Car c) {
     final make = c.make.trim();
     final model = c.model.trim();
-    if (model.isEmpty || model == '—') {
-      return '$make (${c.plateDisplay})';
-    }
+    if (model.isEmpty || model == '—') return '$make (${c.plateDisplay})';
     return '$make $model (${c.plateDisplay})';
   }
 
@@ -186,11 +260,6 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
     );
   }
 
-  Widget _statusBadge(Booking b) {
-    final c = _statusColor(context, b);
-    return _badge(text: _statusText(b).toUpperCase(), color: c);
-  }
-
   bool _canPayDeposit(Booking b) {
     if (b.status != BookingStatus.pendingPayment) return false;
     final due = b.paymentDueAt;
@@ -198,15 +267,17 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
     return due.isAfter(DateTime.now());
   }
 
-  int _effectivePriceRub(Service? service, Booking b) {
-    final price = service?.priceRub ?? 0;
-    return max(price - b.discountRub, 0);
+  int _effectivePriceRub(Service? service, Booking b, int addonsPriceRub) {
+    final base = service?.priceRub ?? 0;
+    return max(base + addonsPriceRub - b.discountRub, 0);
   }
 
-  int _toPayRub(Service? service, Booking b) {
-    final total = _effectivePriceRub(service, b);
+  int _toPayRub(Service? service, Booking b, int addonsPriceRub) {
+    final total = _effectivePriceRub(service, b, addonsPriceRub);
     return max(total - b.paidTotalRub, 0);
   }
+
+  // ===== actions =====
 
   Future<void> _payNow({
     required Booking booking,
@@ -245,9 +316,7 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
         messenger.showSnackBar(
           const SnackBar(content: Text('Оплата прошла. Запись подтверждена.')),
         );
-        setState(() {
-          _future = _load(forceRefresh: true);
-        });
+        setState(() => _future = _load(forceRefresh: true));
       } else {
         messenger.showSnackBar(
           const SnackBar(content: Text('Оплата не завершена.')),
@@ -293,7 +362,6 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
       if (!mounted) return;
 
       messenger.showSnackBar(const SnackBar(content: Text('Запись отменена')));
-
       setState(() {
         _canceling = false;
         _future = _load(forceRefresh: true);
@@ -307,6 +375,8 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
     }
   }
 
+  // ===== UI blocks =====
+
   Widget _card({required Widget child}) {
     final cs = Theme.of(context).colorScheme;
     return Container(
@@ -315,19 +385,13 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
         color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
-        boxShadow: [
-          BoxShadow(
-            blurRadius: 10,
-            offset: const Offset(0, 6),
-            color: Colors.black.withValues(alpha: 0.04),
-          ),
-        ],
       ),
       child: child,
     );
   }
 
   Widget _hero(Service? service) {
+    final cs = Theme.of(context).colorScheme;
     return ClipRRect(
       borderRadius: BorderRadius.circular(18),
       child: AspectRatio(
@@ -336,9 +400,9 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
           image: _serviceHero(service),
           fit: BoxFit.cover,
           errorBuilder: (_, __, ___) => Container(
-            color: Colors.black.withValues(alpha: 0.04),
+            color: cs.surfaceContainerHighest.withValues(alpha: 0.22),
             alignment: Alignment.center,
-            child: const Icon(Icons.local_car_wash, size: 36),
+            child: Icon(Icons.local_car_wash, size: 36, color: cs.onSurface),
           ),
         ),
       ),
@@ -374,16 +438,14 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
             width: 22,
             height: 22,
             fit: BoxFit.contain,
-            errorBuilder: (_, __, ___) {
-              return Container(
-                width: 10,
-                height: 10,
-                decoration: BoxDecoration(
-                  color: stripe,
-                  borderRadius: BorderRadius.circular(999),
-                ),
-              );
-            },
+            errorBuilder: (_, __, ___) => Container(
+              width: 10,
+              height: 10,
+              decoration: BoxDecoration(
+                color: stripe,
+                borderRadius: BorderRadius.circular(999),
+              ),
+            ),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -391,7 +453,7 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
               label,
               style: TextStyle(
                 fontSize: 12,
-                color: Colors.black.withValues(alpha: 0.80),
+                color: cs.onSurface.withValues(alpha: 0.88),
                 fontWeight: FontWeight.w900,
               ),
             ),
@@ -401,9 +463,89 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
     );
   }
 
+  Widget _addonsCard(List<Map<String, dynamic>> addons) {
+    if (addons.isEmpty) return const SizedBox.shrink();
+
+    final cs = Theme.of(context).colorScheme;
+    final sumRub = _addonsTotalPriceRub(addons);
+    final sumMin = _addonsTotalDurationMin(addons);
+
+    return _card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Дополнительные услуги',
+            style: TextStyle(
+              fontWeight: FontWeight.w900,
+              color: cs.onSurface.withValues(alpha: 0.92),
+            ),
+          ),
+          const SizedBox(height: 10),
+          ...addons.map((a) {
+            final name = _addonName(a);
+            final qty = _addonQty(a);
+            final price = _addonPrice(a);
+            final dur = _addonDur(a);
+
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          qty > 1 ? '$name × $qty' : name,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w800,
+                            color: cs.onSurface.withValues(alpha: 0.88),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        '+$price ₽',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w900,
+                          color: cs.onSurface.withValues(alpha: 0.92),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '+$dur мин',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: cs.onSurface.withValues(alpha: 0.65),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }).toList(),
+          Divider(color: cs.outlineVariant.withValues(alpha: 0.5)),
+          const SizedBox(height: 8),
+          Text(
+            'Итого по доп. услугам: $sumRub ₽ • +$sumMin мин',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w900,
+              color: cs.onSurface.withValues(alpha: 0.82),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final primary = Theme.of(context).colorScheme.primary;
+    final cs = Theme.of(context).colorScheme;
+    final primary = cs.primary;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Детали записи')),
@@ -424,9 +566,8 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                     Text('Ошибка: ${snapshot.error}'),
                     const SizedBox(height: 12),
                     FilledButton(
-                      onPressed: () {
-                        setState(() => _future = _load(forceRefresh: true));
-                      },
+                      onPressed: () =>
+                          setState(() => _future = _load(forceRefresh: true)),
                       child: const Text('Повторить'),
                     ),
                   ],
@@ -444,23 +585,32 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
           final car = data?.car;
           final service = data?.service;
 
+          final addons = _addonsSafe(booking);
+          final addonsPriceRub = _addonsTotalPriceRub(addons);
+
           final isCanceled = booking.status == BookingStatus.canceled;
           final isCompleted = booking.status == BookingStatus.completed;
           final canCancel = !(isCanceled || isCompleted);
 
           final showPayButton = _canPayDeposit(booking);
-          final badge = _statusBadge(booking);
 
           final depositRub = booking.depositRub > 0
               ? booking.depositRub
               : _depositRubFallback;
 
-          final total = _effectivePriceRub(service, booking);
+          final total = _effectivePriceRub(service, booking, addonsPriceRub);
           final paidTotal = booking.paidTotalRub;
-          final toPay = _toPayRub(service, booking);
+          final toPay = _toPayRub(service, booking, addonsPriceRub);
 
-          final discountReason =
-              (booking.discountNote ?? '').trim().isEmpty ? null : booking.discountNote!.trim();
+          final discountReason = (booking.discountNote ?? '').trim().isEmpty
+              ? null
+              : booking.discountNote!.trim();
+
+          final badgeColor = _statusColor(context, booking);
+          final badge = _badge(
+            text: _statusText(booking).toUpperCase(),
+            color: badgeColor,
+          );
 
           return ListView(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
@@ -478,9 +628,10 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                         Expanded(
                           child: Text(
                             service?.name ?? 'Услуга удалена',
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w900,
+                              color: cs.onSurface.withValues(alpha: 0.92),
                             ),
                           ),
                         ),
@@ -494,7 +645,7 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                       _dtText(booking.dateTime),
                       style: TextStyle(
                         fontSize: 12,
-                        color: Colors.black.withValues(alpha: 0.65),
+                        color: cs.onSurface.withValues(alpha: 0.68),
                         fontWeight: FontWeight.w700,
                       ),
                     ),
@@ -508,10 +659,22 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                       'Стоимость: $total ₽',
                       style: TextStyle(
                         fontSize: 12,
-                        color: Colors.black.withValues(alpha: 0.85),
+                        color: cs.onSurface.withValues(alpha: 0.88),
                         fontWeight: FontWeight.w900,
                       ),
                     ),
+
+                    if (addons.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        'Доп. услуги: +${addons.length} (на ${_addonsTotalPriceRub(addons)} ₽)',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: cs.onSurface.withValues(alpha: 0.78),
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ],
 
                     if (booking.discountRub > 0) ...[
                       const SizedBox(height: 6),
@@ -519,7 +682,7 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                         'Скидка: ${booking.discountRub} ₽',
                         style: TextStyle(
                           fontSize: 12,
-                          color: Colors.black.withValues(alpha: 0.70),
+                          color: cs.onSurface.withValues(alpha: 0.78),
                           fontWeight: FontWeight.w900,
                         ),
                       ),
@@ -529,7 +692,7 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                           'Причина скидки: $discountReason',
                           style: TextStyle(
                             fontSize: 12,
-                            color: Colors.black.withValues(alpha: 0.70),
+                            color: cs.onSurface.withValues(alpha: 0.68),
                             fontWeight: FontWeight.w800,
                           ),
                         ),
@@ -541,7 +704,7 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                       'Оплачено: $paidTotal ₽   К оплате: $toPay ₽',
                       style: TextStyle(
                         fontSize: 12,
-                        color: Colors.black.withValues(alpha: 0.75),
+                        color: cs.onSurface.withValues(alpha: 0.82),
                         fontWeight: FontWeight.w900,
                       ),
                     ),
@@ -552,7 +715,7 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                         'Последний платёж: ${_dtText(booking.lastPaidAt!)}',
                         style: TextStyle(
                           fontSize: 12,
-                          color: Colors.black.withValues(alpha: 0.65),
+                          color: cs.onSurface.withValues(alpha: 0.68),
                           fontWeight: FontWeight.w800,
                         ),
                       ),
@@ -565,7 +728,7 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                         'Оплатить до: ${_dtText(booking.paymentDueAt!)}',
                         style: TextStyle(
                           fontSize: 12,
-                          color: Colors.black.withValues(alpha: 0.75),
+                          color: cs.onSurface.withValues(alpha: 0.80),
                           fontWeight: FontWeight.w900,
                         ),
                       ),
@@ -576,7 +739,7 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                       'Оплата брони: $depositRub ₽',
                       style: TextStyle(
                         fontSize: 12,
-                        color: Colors.black.withValues(alpha: 0.80),
+                        color: cs.onSurface.withValues(alpha: 0.80),
                         fontWeight: FontWeight.w900,
                       ),
                     ),
@@ -584,20 +747,31 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                 ),
               ),
 
+              if (addons.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                _addonsCard(addons),
+              ],
+
               if ((booking.comment ?? '').trim().isNotEmpty) ...[
                 const SizedBox(height: 12),
                 _card(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
+                      Text(
                         'Комментарий',
-                        style: TextStyle(fontWeight: FontWeight.w900),
+                        style: TextStyle(
+                          fontWeight: FontWeight.w900,
+                          color: cs.onSurface.withValues(alpha: 0.92),
+                        ),
                       ),
                       const SizedBox(height: 8),
                       Text(
                         booking.comment!.trim(),
-                        style: const TextStyle(fontWeight: FontWeight.w700),
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: cs.onSurface.withValues(alpha: 0.82),
+                        ),
                       ),
                     ],
                   ),
@@ -610,18 +784,27 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Авто', style: TextStyle(fontWeight: FontWeight.w900)),
+                    Text(
+                      'Авто',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w900,
+                        color: cs.onSurface.withValues(alpha: 0.92),
+                      ),
+                    ),
                     const SizedBox(height: 8),
                     Text(
                       car == null ? 'Авто удалено' : _carTitleForUi(car),
-                      style: const TextStyle(fontWeight: FontWeight.w800),
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        color: cs.onSurface.withValues(alpha: 0.88),
+                      ),
                     ),
                     if (car != null) ...[
                       const SizedBox(height: 4),
                       Text(
                         car.subtitle,
                         style: TextStyle(
-                          color: Colors.black.withValues(alpha: 0.65),
+                          color: cs.onSurface.withValues(alpha: 0.68),
                           fontWeight: FontWeight.w600,
                           fontSize: 12,
                         ),
@@ -636,16 +819,16 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton.icon(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: primary,
-                      foregroundColor: Colors.white,
-                    ),
                     onPressed: _paying
                         ? null
                         : () => _payNow(booking: booking, service: service),
                     icon: const Icon(Icons.credit_card),
                     label: Text(
                       _paying ? 'Оплачиваю...' : 'Оплатить $depositRub ₽',
+                    ),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: primary,
+                      foregroundColor: Colors.white,
                     ),
                   ),
                 ),

@@ -71,6 +71,13 @@ abstract class AppRepository {
   /// ✅ null = сброс выбора
   Future<void> setCurrentLocation(LocationLite? loc);
 
+  /// ✅ NEW (Variant B): location config from server (/config)
+  /// Expected fields (пример): phone, whatsapp, telegram, address, etc.
+  Future<Map<String, dynamic>> getConfig({
+    required String locationId,
+    bool forceRefresh = false,
+  });
+
   // --- SERVICES ---
   Future<List<Service>> getServices({bool forceRefresh = false});
 
@@ -109,7 +116,7 @@ abstract class AppRepository {
     bool includeAll = false,
   });
 
-  /// ✅ NEW: addons supported (toggle only on UI, but payload is list)
+  /// ✅ NEW: addons supported
   Future<Booking> createBooking({
     required String locationId,
     required String carId,
