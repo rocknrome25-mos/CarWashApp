@@ -1,6 +1,8 @@
 import 'dart:io' show Platform;
+
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'app.dart';
 import 'core/api/api_client.dart';
@@ -63,7 +65,15 @@ class _RootState extends State<_Root> {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.dark(), // ✅ единая тема тут
+      title: 'Автомойка',
+      locale: const Locale('ru', 'RU'),
+      supportedLocales: const [Locale('ru', 'RU'), Locale('en', 'US')],
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      theme: AppTheme.dark(fontMode: null),
       home: _authed
           ? ClientModuleApp(
               repo: repo,
@@ -75,4 +85,7 @@ class _RootState extends State<_Root> {
             ),
     );
   }
+}
+
+class AppFontMode {
 }

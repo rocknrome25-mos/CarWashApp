@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'core/data/app_repository.dart';
 
@@ -31,7 +30,7 @@ class _ClientModuleAppState extends State<ClientModuleApp> {
   void _onBookingCreated() {
     setState(() {
       refreshToken++;
-      index = 2;
+      index = 2; // "Записи"
     });
   }
 
@@ -76,7 +75,7 @@ class _ClientModuleAppState extends State<ClientModuleApp> {
       },
     );
 
-    if (!context.mounted) return;
+    if (!mounted) return;
     if (didLogout == true) {
       widget.onLogout();
     }
@@ -92,8 +91,8 @@ class _ClientModuleAppState extends State<ClientModuleApp> {
           height: 28,
           padding: const EdgeInsets.all(4),
           decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(10),
+            color: Colors.white, // ✅ белая плашка под лого
+            borderRadius: BorderRadius.circular(10), // ✅ без острых углов
             border: Border.all(
               color: cs.outlineVariant.withValues(alpha: 0.35),
             ),
@@ -119,52 +118,39 @@ class _ClientModuleAppState extends State<ClientModuleApp> {
         onBookingCreated: _onBookingCreated,
       ),
       BookingsPage(repo: widget.repo, refreshToken: refreshToken),
-      ContactsPage(repo: widget.repo), // from /config
+      ContactsPage(repo: widget.repo),
     ];
 
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'Автомойка',
-      locale: const Locale('ru', 'RU'),
-      supportedLocales: const [Locale('ru', 'RU'), Locale('en', 'US')],
-      localizationsDelegates: const [
-        GlobalMaterialLocalizations.delegate,
-        GlobalWidgetsLocalizations.delegate,
-        GlobalCupertinoLocalizations.delegate,
-      ],
-      // ВАЖНО: тему ты подключаешь снаружи (main.dart). Здесь оставим как есть.
-      theme: Theme.of(context),
-      home: Scaffold(
-        appBar: AppBar(
-          title: _brandTitle(context),
-          actions: [
-            IconButton(
-              tooltip: 'Профиль',
-              onPressed: _openProfile,
-              icon: const Icon(Icons.account_circle),
-            ),
-          ],
-        ),
-        body: pages[index],
-        bottomNavigationBar: NavigationBar(
-          selectedIndex: index,
-          onDestinationSelected: (v) => setState(() => index = v),
-          destinations: const [
-            NavigationDestination(
-              icon: Icon(Icons.directions_car),
-              label: 'Авто',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.local_car_wash),
-              label: 'Услуги',
-            ),
-            NavigationDestination(icon: Icon(Icons.event), label: 'Записи'),
-            NavigationDestination(
-              icon: Icon(Icons.contact_phone),
-              label: 'Контакты',
-            ),
-          ],
-        ),
+    return Scaffold(
+      appBar: AppBar(
+        title: _brandTitle(context),
+        actions: [
+          IconButton(
+            tooltip: 'Профиль',
+            onPressed: _openProfile,
+            icon: const Icon(Icons.account_circle),
+          ),
+        ],
+      ),
+      body: pages[index],
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: index,
+        onDestinationSelected: (v) => setState(() => index = v),
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.directions_car),
+            label: 'Авто',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.local_car_wash),
+            label: 'Услуги',
+          ),
+          NavigationDestination(icon: Icon(Icons.event), label: 'Записи'),
+          NavigationDestination(
+            icon: Icon(Icons.contact_phone),
+            label: 'Контакты',
+          ),
+        ],
       ),
     );
   }
