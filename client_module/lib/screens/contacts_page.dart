@@ -71,8 +71,10 @@ class _ContactsPageState extends State<ContactsPage> {
   Future<void> _copy(String label, String value) async {
     final v = value.trim();
     if (v.isEmpty) return;
+
     await Clipboard.setData(ClipboardData(text: v));
     if (!mounted) return;
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text('$label скопирован'),
@@ -196,7 +198,6 @@ class _ContactsPageState extends State<ContactsPage> {
                     : null,
               ),
               const SizedBox(height: 10),
-
               _ActionTile(
                 icon: Icons.telegram,
                 title: hasTg ? '@$tgUser' : 'Telegram не указан',
@@ -218,10 +219,8 @@ class _ContactsPageState extends State<ContactsPage> {
                     : null,
               ),
               const SizedBox(height: 10),
-
               _ActionTile(
-                icon:
-                    Icons.chat_bubble, // ✅ WhatsApp icon without extra packages
+                icon: Icons.chat_bubble,
                 title: hasWa
                     ? (whatsapp.isNotEmpty ? whatsapp : phone)
                     : 'WhatsApp не указан',
@@ -249,9 +248,7 @@ class _ContactsPageState extends State<ContactsPage> {
               ),
             ],
           ),
-
           const SizedBox(height: 14),
-
           _CardSection(
             title: 'Адрес',
             children: [
@@ -273,15 +270,14 @@ class _ContactsPageState extends State<ContactsPage> {
               ),
             ],
           ),
-
           const SizedBox(height: 18),
-
           Text(
             'Подсказка: долгое нажатие копирует телефон/ссылку/адрес.',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: cs.onSurface.withValues(alpha: 0.65),
-              fontWeight: FontWeight.w600,
-            ),
+            style: (Theme.of(context).textTheme.bodySmall ?? const TextStyle())
+                .copyWith(
+                  color: cs.onSurface.withValues(alpha: 0.65),
+                  fontWeight: FontWeight.w600,
+                ),
           ),
         ],
       ),
@@ -311,9 +307,11 @@ class _CardSection extends StatelessWidget {
         children: [
           Text(
             title,
-            style: Theme.of(
-              context,
-            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900),
+            style: (Theme.of(context).textTheme.titleSmall ?? const TextStyle())
+                .copyWith(
+                  fontWeight: FontWeight.w900,
+                  color: cs.onSurface.withValues(alpha: 0.95),
+                ),
           ),
           const SizedBox(height: 10),
           ...children,
@@ -374,19 +372,25 @@ class _ActionTile extends StatelessWidget {
                 children: [
                   Text(
                     title,
-                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      fontWeight: FontWeight.w900,
-                      color: cs.onSurface,
-                    ),
+                    style:
+                        (Theme.of(context).textTheme.bodyLarge ??
+                                const TextStyle())
+                            .copyWith(
+                              fontWeight: FontWeight.w900,
+                              color: cs.onSurface.withValues(alpha: 0.95),
+                            ),
                   ),
                   if (subtitle != null) ...[
                     const SizedBox(height: 4),
                     Text(
                       subtitle!,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: cs.onSurface.withValues(alpha: 0.70),
-                        fontWeight: FontWeight.w600,
-                      ),
+                      style:
+                          (Theme.of(context).textTheme.bodySmall ??
+                                  const TextStyle())
+                              .copyWith(
+                                color: cs.onSurface.withValues(alpha: 0.70),
+                                fontWeight: FontWeight.w600,
+                              ),
                     ),
                   ],
                 ],

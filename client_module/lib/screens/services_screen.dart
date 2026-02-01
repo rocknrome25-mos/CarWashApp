@@ -102,6 +102,20 @@ class _ServicesScreenState extends State<ServicesScreen> {
     }
   }
 
+  Widget _viewButton(VoidCallback onPressed) {
+    // “Яндекс-подобная” пилюля
+    return OutlinedButton.icon(
+      onPressed: onPressed,
+      icon: const Icon(Icons.chevron_right, size: 18),
+      label: const Text('Посмотреть'),
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        visualDensity: const VisualDensity(horizontal: -3, vertical: -3),
+        shape: const StadiumBorder(),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -242,12 +256,12 @@ class _ServicesScreenState extends State<ServicesScreen> {
                       ),
                       clipBehavior: Clip.antiAlias,
                       child: SizedBox(
-                        height: 96, // ✅ фикс, чтобы не было overflow
+                        height: 104, // ✅ чтобы точно не было overflow
                         child: Row(
                           children: [
                             SizedBox(
                               width: 118,
-                              height: 96,
+                              height: 104,
                               child: Image(
                                 image: _serviceThumb(s),
                                 fit: BoxFit.cover,
@@ -273,7 +287,6 @@ class _ServicesScreenState extends State<ServicesScreen> {
                                 ),
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
-                                  mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
                                     Text(
                                       s.name,
@@ -304,20 +317,10 @@ class _ServicesScreenState extends State<ServicesScreen> {
                                             fontWeight: FontWeight.w700,
                                           ),
                                     ),
-                                    const SizedBox(height: 8),
-                                    Text(
-                                      'Посмотреть →',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .labelLarge
-                                          ?.copyWith(
-                                            color: primary.withValues(
-                                              alpha: 0.92,
-                                            ),
-                                            fontWeight: FontWeight.w900,
-                                          ),
+                                    const Spacer(),
+                                    Align(
+                                      alignment: Alignment.centerLeft,
+                                      child: _viewButton(() => _openDetails(s)),
                                     ),
                                   ],
                                 ),

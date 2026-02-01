@@ -5,13 +5,14 @@ publish_to: none
 version: 0.1.0+1
 
 environment:
-  sdk: ^3.10.0
+  sdk: '^3.10.0'
 
 dependencies:
   flutter:
     sdk: flutter
   flutter_localizations:
     sdk: flutter
+
   http: ^1.2.2
   url_launcher: ^6.3.0
   intl: ^0.20.2
@@ -27,16 +28,18 @@ flutter:
   uses-material-design: true
 
   assets:
+    - assets/fonts/
     - assets/images/services/
     - assets/images/logo/
     - assets/images/cars/
     - assets/images/body/
     - assets/images/posts/
-    - assets/fonts/
 
   fonts:
     - family: Inter
       fonts:
+        - asset: assets/fonts/Inter-Regular.ttf
+          weight: 400
         - asset: assets/fonts/Inter-Medium.ttf
           weight: 500
         - asset: assets/fonts/Inter-SemiBold.ttf

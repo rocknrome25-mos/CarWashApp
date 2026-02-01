@@ -23,14 +23,12 @@ class ClientModuleApp extends StatefulWidget {
 
 class _ClientModuleAppState extends State<ClientModuleApp> {
   int index = 0;
-
-  /// Общий триггер обновлений для вкладок Services/Bookings.
   int refreshToken = 0;
 
   void _onBookingCreated() {
     setState(() {
       refreshToken++;
-      index = 2; // "Записи"
+      index = 2;
     });
   }
 
@@ -91,8 +89,8 @@ class _ClientModuleAppState extends State<ClientModuleApp> {
           height: 28,
           padding: const EdgeInsets.all(4),
           decoration: BoxDecoration(
-            color: Colors.white, // ✅ белая плашка под лого
-            borderRadius: BorderRadius.circular(10), // ✅ без острых углов
+            color: cs.surfaceContainerHighest.withValues(alpha: 0.35),
+            borderRadius: BorderRadius.circular(10),
             border: Border.all(
               color: cs.outlineVariant.withValues(alpha: 0.35),
             ),

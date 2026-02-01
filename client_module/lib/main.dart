@@ -73,7 +73,7 @@ class _RootState extends State<_Root> {
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
-      theme: AppTheme.dark(fontMode: null),
+      theme: AppTheme.dark(),
       home: _authed
           ? ClientModuleApp(
               repo: repo,
@@ -87,5 +87,4 @@ class _RootState extends State<_Root> {
   }
 }
 
-class AppFontMode {
-}
+class AppFontMode {}

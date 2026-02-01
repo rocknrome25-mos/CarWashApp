@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 class AppTheme {
-  // Палитра “Yandex-like”
   static const _bg = Color(0xFF0B0F14);
   static const _surface = Color(0xFF141926);
   static const _card = Color(0xFF242B3A);
@@ -10,7 +9,7 @@ class AppTheme {
   static const _accent = Color(0xFF4DA3FF);
   static const _danger = Color(0xFFE5484D);
 
-  static ThemeData dark({required fontMode}) {
+  static ThemeData dark() {
     final scheme = ColorScheme.fromSeed(
       seedColor: _accent,
       brightness: Brightness.dark,
@@ -23,40 +22,49 @@ class AppTheme {
       primary: _accent,
     );
 
-    // ✅ БАЗОВЫЕ “разлипляющие” параметры:
-    // - letterSpacing слегка положительный
-    // - height чуть выше
-    // - body вес пониже (600 вместо 700)
-    TextStyle base({
-      required double size,
-      required FontWeight weight,
-      double height = 1.22,
-      double letter = 0.15,
-    }) {
+    // ВАЖНО для web-чёткости:
+    // - только целые размеры
+    // - веса 400/500/600/700 (без 800)
+    // - letterSpacing 0 (почти везде)
+    TextStyle inter(double size, FontWeight weight, {double height = 1.22}) {
       return TextStyle(
-        fontFamily: 'Manrope',
+        fontFamily: 'Inter',
+        fontFamilyFallback: const ['Roboto', 'Segoe UI', 'Arial'],
         fontSize: size,
         fontWeight: weight,
         height: height,
-        letterSpacing: letter,
+        letterSpacing: 0,
       );
     }
 
-    final text = Typography.material2021().white.copyWith(
-      // Заголовки — жирные, но с умеренным letterSpacing
-      titleLarge: base(size: 21, weight: FontWeight.w800, height: 1.12, letter: 0.05),
-      titleMedium: base(size: 17, weight: FontWeight.w800, height: 1.14, letter: 0.06),
-      titleSmall: base(size: 15, weight: FontWeight.w800, height: 1.16, letter: 0.06),
+    TextStyle manrope(double size, FontWeight weight, {double height = 1.12}) {
+      return TextStyle(
+        fontFamily: 'Manrope',
+        fontFamilyFallback: const ['Inter', 'Roboto', 'Segoe UI', 'Arial'],
+        fontSize: size,
+        fontWeight: weight,
+        height: height,
+        letterSpacing: 0,
+      );
+    }
 
-      // Тело — ключевое: делаем легче и “воздушнее”
-      bodyLarge: base(size: 15, weight: FontWeight.w600, height: 1.26, letter: 0.18),
-      bodyMedium: base(size: 13.5, weight: FontWeight.w600, height: 1.28, letter: 0.18),
-      bodySmall: base(size: 12.5, weight: FontWeight.w600, height: 1.28, letter: 0.18),
+    final base = Typography.material2021().white;
 
-      // Лейблы/кнопки — чуть плотнее, но не слипшиеся
-      labelLarge: base(size: 13.5, weight: FontWeight.w700, height: 1.16, letter: 0.10),
-      labelMedium: base(size: 12.5, weight: FontWeight.w700, height: 1.16, letter: 0.10),
-      labelSmall: base(size: 11.5, weight: FontWeight.w700, height: 1.16, letter: 0.10),
+    final text = base.copyWith(
+      // Заголовки — Manrope (но без 800)
+      titleLarge: manrope(22, FontWeight.w700, height: 1.10),
+      titleMedium: manrope(18, FontWeight.w700, height: 1.12),
+      titleSmall: manrope(15, FontWeight.w600, height: 1.14),
+
+      // Тело — Inter (максимальная читабельность)
+      bodyLarge: inter(15, FontWeight.w400, height: 1.28),
+      bodyMedium: inter(14, FontWeight.w400, height: 1.28),
+      bodySmall: inter(12, FontWeight.w400, height: 1.26),
+
+      // Кнопки/лейблы
+      labelLarge: inter(14, FontWeight.w600, height: 1.14),
+      labelMedium: inter(12, FontWeight.w600, height: 1.14),
+      labelSmall: inter(11, FontWeight.w600, height: 1.12),
     );
 
     return ThemeData(
@@ -66,9 +74,6 @@ class AppTheme {
       scaffoldBackgroundColor: _bg,
       canvasColor: _bg,
       textTheme: text,
-
-      // ✅ глобально задаём fontFamily тоже (некоторые виджеты берут отсюда)
-      fontFamily: 'Manrope',
 
       appBarTheme: const AppBarTheme(
         elevation: 0,
@@ -112,7 +117,7 @@ class AppTheme {
           borderSide: BorderSide(color: scheme.primary, width: 1.2),
         ),
         hintStyle: TextStyle(color: scheme.onSurface.withValues(alpha: 0.55)),
-        labelStyle: TextStyle(color: scheme.onSurface.withValues(alpha: 0.80)),
+        labelStyle: TextStyle(color: scheme.onSurface.withValues(alpha: 0.85)),
       ),
 
       filledButtonTheme: FilledButtonThemeData(
@@ -144,14 +149,14 @@ class AppTheme {
         indicatorColor: scheme.primary.withValues(alpha: 0.18),
         labelTextStyle: WidgetStatePropertyAll(
           TextStyle(
-            fontFamily: 'Manrope',
-            fontWeight: FontWeight.w700,
-            letterSpacing: 0.08,
-            color: scheme.onSurface.withValues(alpha: 0.80),
+            fontFamily: 'Inter',
+            fontFamilyFallback: const ['Roboto', 'Segoe UI', 'Arial'],
+            fontWeight: FontWeight.w600,
+            color: scheme.onSurface.withValues(alpha: 0.85),
           ),
         ),
         iconTheme: WidgetStatePropertyAll(
-          IconThemeData(color: scheme.onSurface.withValues(alpha: 0.80)),
+          IconThemeData(color: scheme.onSurface.withValues(alpha: 0.85)),
         ),
       ),
 
@@ -159,16 +164,16 @@ class AppTheme {
         backgroundColor: _card2,
         selectedColor: scheme.primary.withValues(alpha: 0.22),
         labelStyle: TextStyle(
-          fontFamily: 'Manrope',
-          fontWeight: FontWeight.w700,
-          letterSpacing: 0.10,
+          fontFamily: 'Inter',
+          fontFamilyFallback: const ['Roboto', 'Segoe UI', 'Arial'],
+          fontWeight: FontWeight.w600,
           color: scheme.onSurface.withValues(alpha: 0.90),
         ),
         side: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.6)),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       ),
 
-      iconTheme: IconThemeData(color: scheme.onSurface.withValues(alpha: 0.85)),
+      iconTheme: IconThemeData(color: scheme.onSurface.withValues(alpha: 0.9)),
       dividerTheme: DividerThemeData(
         color: scheme.outlineVariant.withValues(alpha: 0.5),
       ),

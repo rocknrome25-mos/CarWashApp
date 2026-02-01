@@ -20,9 +20,7 @@ class ServiceDetailsPage extends StatelessWidget {
 
   ImageProvider _heroImageProvider() {
     final url = service.imageUrl;
-    if (url != null && url.isNotEmpty) {
-      return NetworkImage(url);
-    }
+    if (url != null && url.isNotEmpty) return NetworkImage(url);
 
     final n = service.name.toLowerCase();
     if (n.contains('воск')) {
@@ -34,7 +32,6 @@ class ServiceDetailsPage extends StatelessWidget {
     if (n.contains('кузов')) {
       return const AssetImage('assets/images/services/kuzov_1080.jpg');
     }
-
     return const AssetImage('assets/images/services/kuzov_1080.jpg');
   }
 
@@ -88,8 +85,6 @@ class ServiceDetailsPage extends StatelessWidget {
                       ),
                     ),
                   ),
-
-                  // ✅ Back button: теперь читабельный на тёмной теме
                   SafeArea(
                     child: Padding(
                       padding: const EdgeInsets.all(12),
@@ -111,14 +106,14 @@ class ServiceDetailsPage extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 14),
-
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Text(
                   service.name,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: cs.onSurface.withValues(alpha: 0.95),
+                  ),
                 ),
               ),
               const SizedBox(height: 8),
@@ -128,12 +123,11 @@ class ServiceDetailsPage extends StatelessWidget {
                   _priceLine(service),
                   style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                     color: cs.onSurface.withValues(alpha: 0.75),
-                    fontWeight: FontWeight.w800,
+                    fontWeight: FontWeight.w500,
                   ),
                 ),
               ),
               const SizedBox(height: 18),
-
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Container(
@@ -151,7 +145,8 @@ class ServiceDetailsPage extends StatelessWidget {
                       Text(
                         'Описание',
                         style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w900,
+                          fontWeight: FontWeight.w800,
+                          color: cs.onSurface.withValues(alpha: 0.95),
                         ),
                       ),
                       const SizedBox(height: 8),
@@ -159,7 +154,7 @@ class ServiceDetailsPage extends StatelessWidget {
                         'Описание услуги будет здесь. Что входит, ограничения, рекомендации.',
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           color: cs.onSurface.withValues(alpha: 0.75),
-                          fontWeight: FontWeight.w600,
+                          fontWeight: FontWeight.w400,
                           height: 1.35,
                         ),
                       ),
@@ -183,7 +178,6 @@ class ServiceDetailsPage extends StatelessWidget {
               ),
             ],
           ),
-
           Positioned(
             left: 16,
             right: 16,
@@ -194,15 +188,13 @@ class ServiceDetailsPage extends StatelessWidget {
                 onPressed: () async {
                   final ok = await _bookNow(context);
                   if (!context.mounted) return;
-                  if (ok) {
-                    Navigator.of(context).pop(true);
-                  }
+                  if (ok) Navigator.of(context).pop(true);
                 },
                 child: Text(
                   'Записаться',
                   style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w900,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
                   ),
                 ),
               ),
@@ -239,15 +231,16 @@ class _InfoChip extends StatelessWidget {
               label,
               style: Theme.of(context).textTheme.labelMedium?.copyWith(
                 color: cs.onSurface.withValues(alpha: 0.65),
-                fontWeight: FontWeight.w700,
+                fontWeight: FontWeight.w600,
               ),
             ),
             const SizedBox(height: 6),
             Text(
               value,
-              style: Theme.of(
-                context,
-              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900),
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w800,
+                color: cs.onSurface.withValues(alpha: 0.95),
+              ),
             ),
           ],
         ),

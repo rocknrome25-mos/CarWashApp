@@ -34,24 +34,20 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
   static const int _quickDaysTotal = 7;
 
-  // правила
   static const int _bufferMin = 15;
   static const int _depositRub = 500;
 
-  // colors for lines
   static const Color _greenLine = Color(0xFF2DBD6E);
   static const Color _blueLine = Color(0xFF2D9CDB);
 
   final _formKey = GlobalKey<FormState>();
 
-  // locations
   List<LocationLite> _locations = const [];
   LocationLite? _location;
 
   List<Car> _cars = const [];
   List<Service> _services = const [];
 
-  // busy by bay
   Map<int, List<DateTimeRange>> _busyByBay = const {1: [], 2: []};
 
   String? carId;
@@ -62,7 +58,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
   DateTime _selectedDate = _dateOnly(DateTime.now());
   DateTime? _selectedSlotStart;
 
-  // for any-line mode: which bay will be used
   int? _pickedBayIdForAny;
 
   final _commentCtrl = TextEditingController();
@@ -75,7 +70,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
   StreamSubscription<BookingRealtimeEvent>? _rtSub;
 
-  // ✅ Addons selection (toggle only)
+  // Addons selection (toggle only)
   final Set<String> _selectedAddonServiceIds = <String>{};
 
   @override
@@ -91,10 +86,8 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
       if (!mounted) return;
       if (ev.type != 'booking.changed') return;
 
-      // refresh both bays busy
       await _refreshBusy(force: true);
 
-      // if selected slot became busy -> reset
       final cur = _selectedSlotStart;
       if (cur != null && _isBusySlot(cur)) {
         if (!mounted) return;
@@ -159,7 +152,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
   }
 
   int _effectiveBlockMinForSelectedService() {
-    // duration = base + addons + buffer => ceil to 30
     final base = _serviceDurationOrDefault(serviceId);
     final addon = _addonsTotalDurationMin();
     final raw = base + addon + _bufferMin;
@@ -531,165 +523,108 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
   Widget _bayIcon(_BayMode mode, Color fallbackColor) {
     return Image.asset(
       _bayIconAsset(mode),
-      width: 24,
-      height: 24,
+      width: 22,
+      height: 22,
       fit: BoxFit.contain,
-      errorBuilder: (_, __, ___) {
-        return Container(
-          width: 10,
-          height: 10,
-          decoration: BoxDecoration(
-            color: fallbackColor,
-            borderRadius: BorderRadius.circular(999),
-          ),
-        );
-      },
+      errorBuilder: (_, __, ___) => Container(
+        width: 10,
+        height: 10,
+        decoration: BoxDecoration(
+          color: fallbackColor,
+          borderRadius: BorderRadius.circular(999),
+        ),
+      ),
     );
   }
 
-  // ✅ FIX: responsive selector (removes overflow on narrow widths)
+  // ---------------- Bay selector (wrap to avoid overflow) ----------------
+
   Widget _lineSelectorAccordion() {
     final cs = Theme.of(context).colorScheme;
 
-    const double h = 56;
-    const double gap = 8;
-
     Widget item({
       required _BayMode mode,
-      required bool expanded,
+      required bool selected,
       required String title,
       required Color stripe,
-      double? width,
     }) {
       return InkWell(
         borderRadius: BorderRadius.circular(16),
         onTap: () => _selectBay(mode),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 220),
-          curve: Curves.easeOutCubic,
-          width: width,
-          height: h,
-          padding: EdgeInsets.symmetric(horizontal: expanded ? 10 : 8),
+        child: Container(
+          constraints: const BoxConstraints(minWidth: 170),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
           decoration: BoxDecoration(
-            color: expanded
+            color: selected
                 ? stripe.withValues(alpha: 0.10)
                 : Theme.of(context).cardColor,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
-              color: expanded
+              color: selected
                   ? stripe.withValues(alpha: 0.55)
                   : cs.outlineVariant.withValues(alpha: 0.6),
             ),
           ),
           child: Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
               Container(
                 width: 4,
-                height: 28,
+                height: 26,
                 decoration: BoxDecoration(
                   color: stripe,
                   borderRadius: BorderRadius.circular(999),
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 10),
               _bayIcon(mode, stripe),
-              if (expanded) ...[
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    title.toUpperCase(),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w900,
-                      color: cs.onSurface.withValues(alpha: 0.92),
-                    ),
+              const SizedBox(width: 10),
+              Flexible(
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    color: cs.onSurface.withValues(alpha: 0.92),
                   ),
                 ),
-                Icon(Icons.check_circle, color: stripe, size: 18),
-              ],
+              ),
+              const SizedBox(width: 10),
+              if (selected) Icon(Icons.check_circle, color: stripe, size: 18),
             ],
           ),
         ),
       );
     }
 
-    return LayoutBuilder(
-      builder: (context, c) {
-        final narrow = c.maxWidth < 360;
-
-        if (narrow) {
-          return Column(
-            children: [
-              SizedBox(
-                width: double.infinity,
-                child: item(
-                  mode: _BayMode.any,
-                  expanded: _bayMode == _BayMode.any,
-                  title: 'Любая линия',
-                  stripe: Theme.of(context).colorScheme.primary,
-                ),
-              ),
-              const SizedBox(height: gap),
-              Row(
-                children: [
-                  Expanded(
-                    child: item(
-                      mode: _BayMode.bay1,
-                      expanded: _bayMode == _BayMode.bay1,
-                      title: 'Зелёная линия',
-                      stripe: _greenLine,
-                    ),
-                  ),
-                  const SizedBox(width: gap),
-                  Expanded(
-                    child: item(
-                      mode: _BayMode.bay2,
-                      expanded: _bayMode == _BayMode.bay2,
-                      title: 'Синяя линия',
-                      stripe: _blueLine,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          );
-        }
-
-        // wide layout (old behavior)
-        const double smallW = 54;
-
-        return Row(
-          children: [
-            Expanded(
-              child: item(
-                mode: _BayMode.any,
-                expanded: _bayMode == _BayMode.any,
-                title: 'Любая линия',
-                stripe: Theme.of(context).colorScheme.primary,
-              ),
-            ),
-            const SizedBox(width: gap),
-            item(
-              mode: _BayMode.bay1,
-              expanded: _bayMode == _BayMode.bay1,
-              title: 'Зелёная линия',
-              stripe: _greenLine,
-              width: smallW,
-            ),
-            const SizedBox(width: gap),
-            item(
-              mode: _BayMode.bay2,
-              expanded: _bayMode == _BayMode.bay2,
-              title: 'Синяя линия',
-              stripe: _blueLine,
-              width: smallW,
-            ),
-          ],
-        );
-      },
+    return Wrap(
+      spacing: 10,
+      runSpacing: 10,
+      children: [
+        item(
+          mode: _BayMode.any,
+          selected: _bayMode == _BayMode.any,
+          title: 'Любая линия',
+          stripe: Theme.of(context).colorScheme.primary,
+        ),
+        item(
+          mode: _BayMode.bay1,
+          selected: _bayMode == _BayMode.bay1,
+          title: 'Зелёная линия',
+          stripe: _greenLine,
+        ),
+        item(
+          mode: _BayMode.bay2,
+          selected: _bayMode == _BayMode.bay2,
+          title: 'Синяя линия',
+          stripe: _blueLine,
+        ),
+      ],
     );
   }
+
+  // ---------------- Slots ----------------
 
   List<DateTime> _visibleSlotsForCurrentMode() {
     final allSlots = _buildSlotsForDay(_selectedDate);
@@ -812,11 +747,17 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     );
   }
 
-  // ---------------- Addons UI ----------------
+  // ---------------- Addons UI (Yandex-like) ----------------
 
   List<Service> _addonCandidates() {
     final sid = serviceId;
-    return _services.where((s) => sid == null ? true : s.id != sid).toList();
+    // TODO позже: отдельный признак “addonOnly”
+    final list = _services
+        .where((s) => sid == null ? true : s.id != sid)
+        .toList();
+    // стабильный порядок
+    list.sort((a, b) => a.priceRub.compareTo(b.priceRub));
+    return list;
   }
 
   List<Map<String, dynamic>> _addonsPayload() {
@@ -827,10 +768,158 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     return out;
   }
 
+  Future<void> _toggleAddon(Service s, bool value) async {
+    setState(() {
+      if (value) {
+        _selectedAddonServiceIds.add(s.id);
+      } else {
+        _selectedAddonServiceIds.remove(s.id);
+      }
+      // duration changed -> clear chosen slot + recompute busy
+      _selectedSlotStart = null;
+      _pickedBayIdForAny = null;
+    });
+    await _refreshBusy(force: true);
+  }
+
+  Widget _addonRow(Service s, {bool dense = false}) {
+    final cs = Theme.of(context).colorScheme;
+    final selected = _selectedAddonServiceIds.contains(s.id);
+
+    final dur = (s.durationMin ?? 0);
+    final price = s.priceRub;
+
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: 12, vertical: dense ? 10 : 12),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  s.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    color: cs.onSurface.withValues(alpha: 0.95),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: cs.surfaceContainerHigh.withValues(alpha: 0.55),
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(
+                          color: cs.outlineVariant.withValues(alpha: 0.55),
+                        ),
+                      ),
+                      child: Text(
+                        '$price ₽',
+                        style: Theme.of(context).textTheme.labelMedium
+                            ?.copyWith(
+                              fontWeight: FontWeight.w900,
+                              color: cs.onSurface.withValues(alpha: 0.90),
+                            ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      '+$dur мин',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: cs.onSurface.withValues(alpha: 0.70),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          Switch(
+            value: selected,
+            onChanged: _saving ? null : (v) => _toggleAddon(s, v),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openAllAddonsSheet() async {
+    final list = _addonCandidates();
+    if (list.isEmpty) return;
+
+    await showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (_) {
+        final cs = Theme.of(context).colorScheme;
+
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Дополнительные услуги',
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(
+                              fontWeight: FontWeight.w900,
+                              color: cs.onSurface.withValues(alpha: 0.95),
+                            ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Flexible(
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: list.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 10),
+                    itemBuilder: (_, i) => _addonRow(list[i]),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Text('Готово'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Widget _addonsSection() {
     final cs = Theme.of(context).colorScheme;
     final list = _addonCandidates();
     if (list.isEmpty) return const SizedBox.shrink();
+
+    final preview = list.take(2).toList();
 
     final totalDur = _addonsTotalDurationMin();
     final totalPrice = _addonsTotalPriceRub();
@@ -838,56 +927,42 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        color: cs.surfaceContainerHighest.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(18),
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.16),
         border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'ДОП. УСЛУГИ',
-            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+            'Дополнительные услуги',
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
               fontWeight: FontWeight.w900,
-              color: cs.onSurface.withValues(alpha: 0.9),
+              color: cs.onSurface.withValues(alpha: 0.95),
             ),
           ),
           const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: list.map((s) {
-              final selected = _selectedAddonServiceIds.contains(s.id);
-              final label =
-                  '${s.name} +${s.priceRub}₽ • +${max(s.durationMin ?? 0, 0)} мин';
 
-              return FilterChip(
-                label: Text(label),
-                selected: selected,
-                onSelected: _saving
-                    ? null
-                    : (v) async {
-                        setState(() {
-                          if (v) {
-                            _selectedAddonServiceIds.add(s.id);
-                          } else {
-                            _selectedAddonServiceIds.remove(s.id);
-                          }
-                          _selectedSlotStart = null;
-                          _pickedBayIdForAny = null;
-                        });
-                        await _refreshBusy(force: true);
-                      },
-              );
-            }).toList(),
-          ),
-          if (totalDur > 0 || totalPrice > 0) ...[
+          for (final s in preview) ...[
+            _addonRow(s, dense: true),
             const SizedBox(height: 10),
+          ],
+
+          if (list.length > 2)
+            Center(
+              child: TextButton(
+                onPressed: _saving ? null : _openAllAddonsSheet,
+                child: const Text('Посмотреть все'),
+              ),
+            ),
+
+          if (totalDur > 0 || totalPrice > 0) ...[
+            const SizedBox(height: 6),
             Text(
               'Выбрано: +$totalDur мин • +$totalPrice ₽',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                fontWeight: FontWeight.w900,
                 color: cs.onSurface.withValues(alpha: 0.75),
+                fontWeight: FontWeight.w800,
               ),
             ),
           ],
@@ -976,7 +1051,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
       if (!mounted) return;
 
       final lower = e.toString().toLowerCase();
-
       if (lower.contains('all_bays_closed_waitlisted') ||
           lower.contains('bay_closed_waitlisted')) {
         messenger.showSnackBar(
@@ -1019,8 +1093,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-
     if (_loading) {
       return Scaffold(
         appBar: AppBar(title: const Text('Создать запись')),
@@ -1062,6 +1134,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     const chipLabelPadding = EdgeInsets.symmetric(horizontal: 10);
     const chipVD = VisualDensity(horizontal: -2, vertical: -2);
 
+    final cs = Theme.of(context).colorScheme;
     final primary = cs.primary;
 
     final service = _findService(safeServiceId);
@@ -1103,8 +1176,8 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(16),
-                    color: cs.surfaceContainerHighest.withValues(alpha: 0.18),
+                    borderRadius: BorderRadius.circular(18),
+                    color: cs.surfaceContainerHighest.withValues(alpha: 0.16),
                     border: Border.all(
                       color: cs.outlineVariant.withValues(alpha: 0.6),
                     ),
@@ -1117,7 +1190,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                         style: Theme.of(context).textTheme.labelMedium
                             ?.copyWith(
                               fontWeight: FontWeight.w900,
-                              color: cs.onSurface.withValues(alpha: 0.9),
+                              color: cs.onSurface.withValues(alpha: 0.85),
                             ),
                       ),
                       const SizedBox(height: 8),
@@ -1188,7 +1261,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                               'Убедись, что выбрана правильная мойка перед бронированием.',
                               style: Theme.of(context).textTheme.bodySmall
                                   ?.copyWith(
-                                    color: cs.onSurface.withValues(alpha: 0.7),
+                                    color: cs.onSurface.withValues(alpha: 0.70),
                                     fontWeight: FontWeight.w700,
                                   ),
                             ),
@@ -1332,8 +1405,8 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(16),
-                  color: cs.surfaceContainerHighest.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(18),
+                  color: cs.surfaceContainerHighest.withValues(alpha: 0.16),
                   border: Border.all(
                     color: cs.outlineVariant.withValues(alpha: 0.6),
                   ),
@@ -1341,19 +1414,19 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'Оплата брони: $_depositRub ₽',
-                      style: TextStyle(
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
                         fontWeight: FontWeight.w900,
-                        fontSize: 12,
+                        color: cs.onSurface.withValues(alpha: 0.92),
                       ),
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 6),
                     Text(
                       'Стоимость: $totalPriceRub ₽ • Остаток на месте: $remaining ₽',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: cs.onSurface.withValues(alpha: 0.72),
                         fontWeight: FontWeight.w700,
-                        color: cs.onSurface.withValues(alpha: 0.7),
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -1373,10 +1446,10 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                             pickedLineText,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.bodySmall
+                            style: Theme.of(context).textTheme.bodyMedium
                                 ?.copyWith(
-                                  color: cs.onSurface.withValues(alpha: 0.85),
                                   fontWeight: FontWeight.w900,
+                                  color: cs.onSurface.withValues(alpha: 0.85),
                                 ),
                           ),
                         ),
@@ -1386,8 +1459,8 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                     Text(
                       'Длительность: ${_effectiveBlockMinForSelectedService()} мин (включая буфер)',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: cs.onSurface.withValues(alpha: 0.7),
-                        fontWeight: FontWeight.w800,
+                        color: cs.onSurface.withValues(alpha: 0.70),
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
                   ],
@@ -1399,10 +1472,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: primary,
-                    foregroundColor: Colors.white,
-                  ),
                   onPressed: canProceed ? _save : null,
                   icon: const Icon(Icons.credit_card),
                   label: Text(_saving ? 'Сохраняю...' : 'Продолжить к оплате'),

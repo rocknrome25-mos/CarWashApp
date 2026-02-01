@@ -526,7 +526,7 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                 ],
               ),
             );
-          }).toList(),
+          }),
           Divider(color: cs.outlineVariant.withValues(alpha: 0.5)),
           const SizedBox(height: 8),
           Text(
