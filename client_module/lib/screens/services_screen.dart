@@ -21,6 +21,10 @@ class ServicesScreen extends StatefulWidget {
 }
 
 class _ServicesScreenState extends State<ServicesScreen> {
+  // ✅ Web-safe height (removes 1px overflow on Chrome)
+  static const double _cardH = 100;
+  static const double _thumbW = 118;
+
   late Future<_ServicesBundle> _future;
 
   @override
@@ -62,6 +66,11 @@ class _ServicesScreenState extends State<ServicesScreen> {
     } catch (_) {}
   }
 
+  String _priceLine(Service s) {
+    final dur = s.durationMin ?? 30;
+    return '${s.priceRub} ₽  •  $dur мин';
+  }
+
   ImageProvider _serviceThumb(Service s) {
     if (s.imageUrl != null && s.imageUrl!.isNotEmpty) {
       return NetworkImage(s.imageUrl!);
@@ -78,9 +87,7 @@ class _ServicesScreenState extends State<ServicesScreen> {
   }
 
   Future<void> _openDetails(Service s) async {
-    final nav = Navigator.of(context);
-
-    final booked = await nav.push<bool>(
+    final booked = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
         builder: (_) => ServiceDetailsPage(repo: widget.repo, service: s),
       ),
@@ -97,21 +104,20 @@ class _ServicesScreenState extends State<ServicesScreen> {
     }
   }
 
-  Widget _pricePill(BuildContext context, int priceRub) {
+  Widget _priceChip(BuildContext context, Service s) {
     final cs = Theme.of(context).colorScheme;
-
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: cs.primary.withValues(alpha: 0.22), // ✅ “яндекс-похожая” заливка
+        color: cs.surfaceContainerHigh.withValues(alpha: 0.55),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: cs.primary.withValues(alpha: 0.35)),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
       ),
       child: Text(
-        '$priceRub ₽',
+        '${s.priceRub} ₽',
         style: Theme.of(context).textTheme.labelMedium?.copyWith(
-          fontWeight: FontWeight.w700,
-          color: cs.onSurface.withValues(alpha: 0.95),
+          fontWeight: FontWeight.w900,
+          color: cs.onSurface.withValues(alpha: 0.92),
         ),
       ),
     );
@@ -179,7 +185,7 @@ class _ServicesScreenState extends State<ServicesScreen> {
           child: ListView(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
             children: [
-              // top hint card
+              // hint card
               Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
@@ -209,13 +215,13 @@ class _ServicesScreenState extends State<ServicesScreen> {
                             'Выбери услугу и время',
                             style: Theme.of(context).textTheme.titleMedium
                                 ?.copyWith(
-                                  fontWeight: FontWeight.w700,
+                                  fontWeight: FontWeight.w900,
                                   color: cs.onSurface.withValues(alpha: 0.95),
                                 ),
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            'Открой услугу и выбери слот.',
+                            'Открой услугу — затем нажми “Записаться”.',
                             style: Theme.of(context).textTheme.bodySmall
                                 ?.copyWith(
                                   color: cs.onSurface.withValues(alpha: 0.70),
@@ -234,7 +240,7 @@ class _ServicesScreenState extends State<ServicesScreen> {
               Text(
                 'Услуги',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
+                  fontWeight: FontWeight.w900,
                   color: cs.onSurface.withValues(alpha: 0.95),
                 ),
               ),
@@ -256,12 +262,12 @@ class _ServicesScreenState extends State<ServicesScreen> {
                       ),
                       clipBehavior: Clip.antiAlias,
                       child: SizedBox(
-                        height: 96, // ✅ фикс высоты => нет overflow
+                        height: _cardH, // ✅ increased height fixes 1px overflow
                         child: Row(
                           children: [
                             SizedBox(
-                              width: 118,
-                              height: 96,
+                              width: _thumbW,
+                              height: _cardH,
                               child: Image(
                                 image: _serviceThumb(s),
                                 fit: BoxFit.cover,
@@ -281,13 +287,14 @@ class _ServicesScreenState extends State<ServicesScreen> {
                               child: Padding(
                                 padding: const EdgeInsets.fromLTRB(
                                   14,
-                                  12,
+                                  10,
                                   14,
-                                  12,
+                                  10,
                                 ),
                                 child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
                                   crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  mainAxisSize: MainAxisSize.min,
                                   children: [
                                     Text(
                                       s.name,
@@ -297,34 +304,29 @@ class _ServicesScreenState extends State<ServicesScreen> {
                                           .textTheme
                                           .titleSmall
                                           ?.copyWith(
-                                            fontWeight: FontWeight.w700,
+                                            fontWeight: FontWeight.w900,
                                             color: cs.onSurface.withValues(
                                               alpha: 0.95,
                                             ),
                                           ),
                                     ),
-                                    const SizedBox(height: 8),
-                                    Row(
-                                      children: [
-                                        _pricePill(context, s.priceRub),
-                                        const SizedBox(width: 10),
-                                        Expanded(
-                                          child: Text(
-                                            '${s.durationMin ?? 30} мин',
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: Theme.of(context)
-                                                .textTheme
-                                                .bodySmall
-                                                ?.copyWith(
-                                                  color: cs.onSurface
-                                                      .withValues(alpha: 0.72),
-                                                  fontWeight: FontWeight.w600,
-                                                ),
+                                    const SizedBox(height: 5),
+                                    Text(
+                                      _priceLine(s),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.copyWith(
+                                            color: cs.onSurface.withValues(
+                                              alpha: 0.72,
+                                            ),
+                                            fontWeight: FontWeight.w700,
                                           ),
-                                        ),
-                                      ],
                                     ),
+                                    const SizedBox(height: 6),
+                                    _priceChip(context, s),
                                   ],
                                 ),
                               ),

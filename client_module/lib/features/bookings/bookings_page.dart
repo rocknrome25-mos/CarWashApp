@@ -8,6 +8,7 @@ import '../../core/models/car.dart';
 import '../../core/models/service.dart';
 import '../../widgets/empty_state.dart';
 import 'booking_details_page.dart';
+import 'waitlist_page.dart';
 
 class BookingsPage extends StatefulWidget {
   final AppRepository repo;
@@ -43,10 +44,8 @@ class _BookingsPageState extends State<BookingsPage> {
   void dispose() {
     _rtDebounce?.cancel();
     _rtDebounce = null;
-
     _rtSub?.cancel();
     _rtSub = null;
-
     super.dispose();
   }
 
@@ -74,13 +73,22 @@ class _BookingsPageState extends State<BookingsPage> {
       widget.repo.getBookings(includeCanceled: true, forceRefresh: force),
       widget.repo.getCars(forceRefresh: force),
       widget.repo.getServices(forceRefresh: force),
+      _loadWaitlist(),
     ]);
 
     return _BookingsBundle(
       bookings: res[0] as List<Booking>,
       cars: res[1] as List<Car>,
       services: res[2] as List<Service>,
+      waitlist: res[3] as List<Map<String, dynamic>>,
     );
+  }
+
+  Future<List<Map<String, dynamic>>> _loadWaitlist() async {
+    final cid = widget.repo.currentClient?.id.trim() ?? '';
+    if (cid.isEmpty) return const [];
+    // cache/refresh контролируется в репозитории
+    return widget.repo.getWaitlist(clientId: cid, includeAll: false);
   }
 
   void _refresh() {
@@ -169,9 +177,8 @@ class _BookingsPageState extends State<BookingsPage> {
 
   String _serviceImage(Service? s) {
     final name = (s?.name ?? '').toLowerCase();
-    if (name.contains('комплекс')) {
+    if (name.contains('комплекс'))
       return 'assets/images/services/kompleks_512.jpg';
-    }
     if (name.contains('воск')) return 'assets/images/services/vosk_512.jpg';
     return 'assets/images/services/kuzov_512.jpg';
   }
@@ -186,7 +193,7 @@ class _BookingsPageState extends State<BookingsPage> {
     return max(total - b.paidTotalRub, 0);
   }
 
-  // ================= widgets =================
+  // ================= UI pieces =================
 
   Widget _statusBadge(BuildContext ctx, Booking b) {
     final c = _statusColor(ctx, b);
@@ -195,10 +202,11 @@ class _BookingsPageState extends State<BookingsPage> {
       decoration: BoxDecoration(
         color: c.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: c.withValues(alpha: 0.20)),
       ),
       child: Text(
         _statusText(b),
-        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w900, color: c),
+        style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w900, color: c),
       ),
     );
   }
@@ -208,10 +216,11 @@ class _BookingsPageState extends State<BookingsPage> {
     final color = _bayColor(ctx, bayId);
 
     return Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
         Container(
           width: 4,
-          height: 24,
+          height: 18,
           decoration: BoxDecoration(
             color: color,
             borderRadius: BorderRadius.circular(4),
@@ -220,8 +229,8 @@ class _BookingsPageState extends State<BookingsPage> {
         const SizedBox(width: 8),
         Image.asset(
           _bayIcon(bayId),
-          width: 18,
-          height: 18,
+          width: 16,
+          height: 16,
           errorBuilder: (_, __, ___) => Container(
             width: 10,
             height: 10,
@@ -232,12 +241,15 @@ class _BookingsPageState extends State<BookingsPage> {
           ),
         ),
         const SizedBox(width: 8),
-        Text(
-          _bayText(bayId),
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w900,
-            color: cs.onSurface.withValues(alpha: 0.90),
+        Flexible(
+          child: Text(
+            _bayText(bayId),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+              fontWeight: FontWeight.w900,
+              color: cs.onSurface.withValues(alpha: 0.90),
+            ),
           ),
         ),
       ],
@@ -267,6 +279,46 @@ class _BookingsPageState extends State<BookingsPage> {
     );
   }
 
+  Widget _pill({
+    required String text,
+    Color? bg,
+    Color? border,
+    Color? fg,
+    IconData? icon,
+  }) {
+    final cs = Theme.of(context).colorScheme;
+    final bgc = bg ?? cs.surfaceContainerHigh.withValues(alpha: 0.45);
+    final brc = border ?? cs.outlineVariant.withValues(alpha: 0.55);
+    final fgc = fg ?? cs.onSurface.withValues(alpha: 0.92);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: bgc,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: brc),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(icon, size: 14, color: fgc),
+            const SizedBox(width: 6),
+          ],
+          Text(
+            text,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              fontWeight: FontWeight.w900,
+              color: fgc,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _bookingCard({
     required Booking b,
     required Car? car,
@@ -278,11 +330,9 @@ class _BookingsPageState extends State<BookingsPage> {
     final when = '${_dateHeader(b.dateTime)} • ${_time(b.dateTime)}';
     final total = _effectivePriceRub(service, b);
     final toPay = _toPayRub(service, b);
-
     final addonsCount = _addonsCountSafe(b);
 
     final secondaryText = cs.onSurface.withValues(alpha: 0.68);
-    final strongText = cs.onSurface.withValues(alpha: 0.86);
 
     return InkWell(
       borderRadius: BorderRadius.circular(18),
@@ -302,7 +352,6 @@ class _BookingsPageState extends State<BookingsPage> {
           ],
         ),
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _serviceThumb(service),
             const SizedBox(width: 12),
@@ -310,6 +359,7 @@ class _BookingsPageState extends State<BookingsPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // name + status
                   Row(
                     children: [
                       Expanded(
@@ -317,11 +367,11 @@ class _BookingsPageState extends State<BookingsPage> {
                           service?.name ?? 'Услуга удалена',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w800,
-                            color: cs.onSurface.withValues(alpha: 0.92),
-                          ),
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(
+                                fontWeight: FontWeight.w900,
+                                color: cs.onSurface.withValues(alpha: 0.92),
+                              ),
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -329,63 +379,101 @@ class _BookingsPageState extends State<BookingsPage> {
                     ],
                   ),
                   const SizedBox(height: 6),
+
+                  // car
                   Text(
                     car == null
                         ? 'Авто удалено'
                         : '${car.make} ${car.model} (${car.plateDisplay})',
-                    style: TextStyle(
-                      fontSize: 12,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       fontWeight: FontWeight.w700,
                       color: secondaryText,
                     ),
                   ),
                   const SizedBox(height: 4),
+
+                  // datetime
                   Text(
                     when,
-                    style: TextStyle(
-                      fontSize: 12,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       fontWeight: FontWeight.w700,
                       color: secondaryText,
                     ),
                   ),
-                  if (addonsCount > 0) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      'Доп. услуги: +$addonsCount',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w900,
-                        color: strongText,
+
+                  const SizedBox(height: 10),
+
+                  // money pills
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: [
+                      _pill(text: '$total ₽', icon: Icons.payments_outlined),
+                      _pill(
+                        text: 'К оплате: $toPay ₽',
+                        icon: Icons.credit_card,
+                        bg: cs.primary.withValues(alpha: 0.12),
+                        border: cs.primary.withValues(alpha: 0.22),
+                        fg: cs.onSurface.withValues(alpha: 0.95),
                       ),
-                    ),
-                  ],
-                  if (b.discountRub > 0) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      'Скидка: ${b.discountRub} ₽',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w900,
-                        color: strongText,
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 4),
-                  Text(
-                    'Стоимость: $total ₽   К оплате: $toPay ₽',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w900,
-                      color: strongText,
-                    ),
+                      if (addonsCount > 0)
+                        _pill(
+                          text: '+$addonsCount доп.',
+                          icon: Icons.add_circle_outline,
+                        ),
+                    ],
                   ),
-                  const SizedBox(height: 8),
+
+                  const SizedBox(height: 10),
                   _bayBadge(context, b.bayId),
                 ],
               ),
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _waitlistTopCard(int count) {
+    final cs = Theme.of(context).colorScheme;
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.22),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.hourglass_bottom, color: cs.primary),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Ожидание: $count',
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w900,
+                color: cs.onSurface.withValues(alpha: 0.95),
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => WaitlistPage(repo: widget.repo),
+                ),
+              );
+            },
+            child: const Text('Показать'),
+          ),
+        ],
       ),
     );
   }
@@ -420,28 +508,38 @@ class _BookingsPageState extends State<BookingsPage> {
         final bookings = [...data.bookings]
           ..sort((a, b) => b.dateTime.compareTo(a.dateTime));
 
-        if (bookings.isEmpty) {
-          return const EmptyState(
-            icon: Icons.event_busy,
-            title: 'Нет записей',
-            subtitle: 'Создай запись — она появится здесь',
-          );
+        final listChildren = <Widget>[];
+
+        if (data.waitlist.isNotEmpty) {
+          listChildren.add(_waitlistTopCard(data.waitlist.length));
+          listChildren.add(const SizedBox(height: 12));
         }
 
-        final rows = <Widget>[];
-        String? lastDay;
+        if (bookings.isEmpty) {
+          listChildren.add(
+            const Padding(
+              padding: EdgeInsets.only(top: 24),
+              child: EmptyState(
+                icon: Icons.event_busy,
+                title: 'Нет записей',
+                subtitle: 'Создай запись — она появится здесь',
+              ),
+            ),
+          );
+          return ListView(children: listChildren);
+        }
 
+        String? lastDay;
         for (final b in bookings) {
           final day = _dateKey(b.dateTime);
           if (day != lastDay) {
             lastDay = day;
-            rows.add(
+            listChildren.add(
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
                 child: Text(
                   _dateHeader(b.dateTime),
-                  style: TextStyle(
-                    fontSize: 14,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
                     fontWeight: FontWeight.w900,
                     color: Theme.of(
                       context,
@@ -452,7 +550,7 @@ class _BookingsPageState extends State<BookingsPage> {
             );
           }
 
-          rows.add(
+          listChildren.add(
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
               child: _bookingCard(
@@ -475,7 +573,7 @@ class _BookingsPageState extends State<BookingsPage> {
           );
         }
 
-        return ListView(children: rows);
+        return ListView(children: listChildren);
       },
     );
   }
@@ -485,10 +583,12 @@ class _BookingsBundle {
   final List<Booking> bookings;
   final List<Car> cars;
   final List<Service> services;
+  final List<Map<String, dynamic>> waitlist;
 
   const _BookingsBundle({
     required this.bookings,
     required this.cars,
     required this.services,
+    required this.waitlist,
   });
 }

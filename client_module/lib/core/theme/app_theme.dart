@@ -9,51 +9,56 @@ class AppTheme {
   static const _accent = Color(0xFF4DA3FF);
   static const _danger = Color(0xFFE5484D);
 
+  // ✅ snackbar: мягкий “blue-gray” но контрастный
+  static const _snackBg = Color(0xFF1B2A3A); // темнее карточек, не как кнопка
+
   static ThemeData dark() {
-    final scheme = ColorScheme.fromSeed(
-      seedColor: _accent,
-      brightness: Brightness.dark,
-    ).copyWith(
-      surface: _surface,
-      surfaceContainerHighest: _card,
-      surfaceContainerHigh: _card2,
-      surfaceContainer: _card,
-      error: _danger,
-      primary: _accent,
-    );
+    final scheme =
+        ColorScheme.fromSeed(
+          seedColor: _accent,
+          brightness: Brightness.dark,
+        ).copyWith(
+          surface: _surface,
+          surfaceContainerHighest: _card,
+          surfaceContainerHigh: _card2,
+          surfaceContainer: _card,
+          error: _danger,
+          primary: _accent,
+        );
 
     TextStyle inter({
       required double size,
       required FontWeight weight,
-      double height = 1.20,
+      double height = 1.22,
+      double letter = 0.0,
     }) {
       return TextStyle(
         fontFamily: 'Inter',
         fontSize: size,
         fontWeight: weight,
         height: height,
-        // ВАЖНО для web: без letterSpacing (часто даёт “мыло”)
-        letterSpacing: 0,
+        letterSpacing: letter,
       );
     }
 
     final base = Typography.material2021().white;
 
     final text = base.copyWith(
-      // Заголовки — 600/700, без 800/900
-      titleLarge: inter(size: 22, weight: FontWeight.w700, height: 1.12),
-      titleMedium: inter(size: 18, weight: FontWeight.w700, height: 1.14),
-      titleSmall: inter(size: 15, weight: FontWeight.w600, height: 1.16),
+      titleLarge: inter(size: 22, weight: FontWeight.w800, height: 1.12),
+      titleMedium: inter(size: 18, weight: FontWeight.w800, height: 1.14),
+      titleSmall: inter(size: 15, weight: FontWeight.w700, height: 1.18),
+      bodyLarge: inter(size: 15, weight: FontWeight.w400, height: 1.30),
+      bodyMedium: inter(size: 13.5, weight: FontWeight.w400, height: 1.30),
+      bodySmall: inter(size: 12.5, weight: FontWeight.w400, height: 1.30),
+      labelLarge: inter(size: 13.5, weight: FontWeight.w600, height: 1.14),
+      labelMedium: inter(size: 12.5, weight: FontWeight.w600, height: 1.14),
+      labelSmall: inter(size: 11.5, weight: FontWeight.w600, height: 1.14),
+    );
 
-      // Тело — 400/500
-      bodyLarge: inter(size: 15, weight: FontWeight.w400, height: 1.26),
-      bodyMedium: inter(size: 14, weight: FontWeight.w400, height: 1.26),
-      bodySmall: inter(size: 12, weight: FontWeight.w400, height: 1.26),
-
-      // Лейблы/кнопки — 600
-      labelLarge: inter(size: 14, weight: FontWeight.w600, height: 1.10),
-      labelMedium: inter(size: 12, weight: FontWeight.w600, height: 1.10),
-      labelSmall: inter(size: 11, weight: FontWeight.w600, height: 1.10),
+    // ✅ no nullable copyWith warning
+    final snackText = (text.bodyMedium ?? const TextStyle()).copyWith(
+      color: Colors.white.withValues(alpha: 0.95),
+      fontWeight: FontWeight.w700,
     );
 
     return ThemeData(
@@ -62,6 +67,7 @@ class AppTheme {
       colorScheme: scheme,
       scaffoldBackgroundColor: _bg,
       canvasColor: _bg,
+      fontFamily: 'Inter',
       textTheme: text,
 
       appBarTheme: const AppBarTheme(
@@ -91,11 +97,15 @@ class AppTheme {
         fillColor: _card2,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(18),
-          borderSide: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.6)),
+          borderSide: BorderSide(
+            color: scheme.outlineVariant.withValues(alpha: 0.6),
+          ),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(18),
-          borderSide: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.45)),
+          borderSide: BorderSide(
+            color: scheme.outlineVariant.withValues(alpha: 0.45),
+          ),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(18),
@@ -109,7 +119,9 @@ class AppTheme {
         style: FilledButton.styleFrom(
           backgroundColor: scheme.primary,
           foregroundColor: Colors.white,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
           textStyle: text.labelLarge,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         ),
@@ -119,7 +131,9 @@ class AppTheme {
         style: OutlinedButton.styleFrom(
           foregroundColor: scheme.onSurface,
           side: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.7)),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
           textStyle: text.labelLarge,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         ),
@@ -129,7 +143,9 @@ class AppTheme {
         backgroundColor: _bg,
         indicatorColor: scheme.primary.withValues(alpha: 0.18),
         labelTextStyle: WidgetStatePropertyAll(
-          inter(size: 12, weight: FontWeight.w600, height: 1.0).copyWith(
+          TextStyle(
+            fontFamily: 'Inter',
+            fontWeight: FontWeight.w600,
             color: scheme.onSurface.withValues(alpha: 0.85),
           ),
         ),
@@ -141,7 +157,9 @@ class AppTheme {
       chipTheme: ChipThemeData(
         backgroundColor: _card2,
         selectedColor: scheme.primary.withValues(alpha: 0.22),
-        labelStyle: inter(size: 12, weight: FontWeight.w600, height: 1.0).copyWith(
+        labelStyle: TextStyle(
+          fontFamily: 'Inter',
+          fontWeight: FontWeight.w600,
           color: scheme.onSurface.withValues(alpha: 0.90),
         ),
         side: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.6)),
@@ -149,14 +167,24 @@ class AppTheme {
       ),
 
       iconTheme: IconThemeData(color: scheme.onSurface.withValues(alpha: 0.9)),
-      dividerTheme: DividerThemeData(color: scheme.outlineVariant.withValues(alpha: 0.5)),
+      dividerTheme: DividerThemeData(
+        color: scheme.outlineVariant.withValues(alpha: 0.5),
+      ),
 
-      // Сделаем snackbar заметнее (как ты хотел)
+      // ✅ SnackBar: контрастный, читаемый, мягкий
       snackBarTheme: SnackBarThemeData(
-        backgroundColor: scheme.surfaceContainerHighest.withValues(alpha: 0.95),
-        contentTextStyle: text.bodyMedium?.copyWith(color: scheme.onSurface),
+        backgroundColor: _snackBg.withValues(alpha: 0.92),
+        contentTextStyle: snackText,
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(
+            color: scheme.primary.withValues(
+              alpha: 0.18,
+            ), // лёгкая “синяя” рамка
+          ),
+        ),
       ),
     );
   }

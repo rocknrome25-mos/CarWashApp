@@ -87,6 +87,7 @@ class _ClientModuleAppState extends State<ClientModuleApp> {
         Container(
           width: 28,
           height: 28,
+          padding: const EdgeInsets.all(4),
           decoration: BoxDecoration(
             color: cs.surfaceContainerHighest.withValues(alpha: 0.35),
             borderRadius: BorderRadius.circular(10),
@@ -94,10 +95,9 @@ class _ClientModuleAppState extends State<ClientModuleApp> {
               color: cs.outlineVariant.withValues(alpha: 0.35),
             ),
           ),
-          clipBehavior: Clip.antiAlias,
           child: Image.asset(
             'assets/images/logo/carwash_logo_512.png',
-            fit: BoxFit.cover, // ✅ заполняет без “квадрата внутри”
+            fit: BoxFit.contain,
           ),
         ),
         const SizedBox(width: 10),

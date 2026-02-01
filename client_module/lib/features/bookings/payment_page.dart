@@ -62,6 +62,56 @@ class _PaymentPageState extends State<PaymentPage> {
     super.dispose();
   }
 
+  // -------- addons helpers --------
+
+  List<Map<String, dynamic>> _addonsSafe(Booking b) => b.addons;
+
+  int _qty(Map<String, dynamic> a) {
+    final q = a['qty'];
+    if (q is num) return max(q.toInt(), 1);
+    return 1;
+  }
+
+  int _price(Map<String, dynamic> a) {
+    final p = a['priceRubSnapshot'];
+    if (p is num) return max(p.toInt(), 0);
+    return 0;
+  }
+
+  int _dur(Map<String, dynamic> a) {
+    final d = a['durationMinSnapshot'];
+    if (d is num) return max(d.toInt(), 0);
+    return 0;
+  }
+
+  String _addonName(Map<String, dynamic> a) {
+    final s = a['service'];
+    if (s is Map) {
+      final name = (s['name'] ?? '').toString().trim();
+      if (name.isNotEmpty) return name;
+    }
+    final sid = (a['serviceId'] ?? '').toString().trim();
+    return sid.isNotEmpty ? 'Услуга ($sid)' : 'Доп. услуга';
+  }
+
+  int _addonsSumRub(List<Map<String, dynamic>> addons) {
+    int sum = 0;
+    for (final a in addons) {
+      sum += _qty(a) * _price(a);
+    }
+    return sum;
+  }
+
+  int _addonsSumMin(List<Map<String, dynamic>> addons) {
+    int sum = 0;
+    for (final a in addons) {
+      sum += _qty(a) * _dur(a);
+    }
+    return sum;
+  }
+
+  // -------- logic --------
+
   void _close(bool result, {String? toast}) {
     if (_closing) return;
     _closing = true;
@@ -109,9 +159,14 @@ class _PaymentPageState extends State<PaymentPage> {
         forceRefresh: true,
       );
 
-      final fresh = list
-          .where((b) => b.id == (_booking ?? widget.booking).id)
-          .firstOrNull;
+      final id = (_booking ?? widget.booking).id;
+      Booking? fresh;
+      for (final b in list) {
+        if (b.id == id) {
+          fresh = b;
+          break;
+        }
+      }
 
       if (!mounted || _closing) return;
 
@@ -136,7 +191,7 @@ class _PaymentPageState extends State<PaymentPage> {
         return;
       }
     } catch (_) {
-      // silently
+      // silent
     } finally {
       _syncing = false;
     }
@@ -147,57 +202,6 @@ class _PaymentPageState extends State<PaymentPage> {
     final m = d.inMinutes;
     final s = d.inSeconds % 60;
     return '${two(m)}:${two(s)}';
-  }
-
-  // ---- addons safe ----
-  List<Map<String, dynamic>> _addonsSafe(Booking b) {
-    try {
-      final dyn = b as dynamic;
-      final addons = dyn.addons;
-      if (addons is List) {
-        final out = <Map<String, dynamic>>[];
-        for (final x in addons) {
-          if (x is Map) {
-            out.add(x.cast<String, dynamic>());
-          } else {
-            try {
-              final dx = x as dynamic;
-              out.add({
-                'qty': dx.qty,
-                'priceRubSnapshot': dx.priceRubSnapshot,
-                'durationMinSnapshot': dx.durationMinSnapshot,
-                'service': dx.service,
-                'serviceId': dx.serviceId,
-              });
-            } catch (_) {}
-          }
-        }
-        return out;
-      }
-    } catch (_) {}
-    return const [];
-  }
-
-  String _addonName(Map<String, dynamic> a) {
-    final s = a['service'];
-    if (s is Map) {
-      final name = (s['name'] ?? '').toString().trim();
-      if (name.isNotEmpty) return name;
-    }
-    final sid = (a['serviceId'] ?? '').toString().trim();
-    return sid.isNotEmpty ? 'Услуга ($sid)' : 'Доп. услуга';
-  }
-
-  int _addonsTotalPriceRub(List<Map<String, dynamic>> addons) {
-    int sum = 0;
-    for (final a in addons) {
-      final qty = (a['qty'] is num) ? (a['qty'] as num).toInt() : 1;
-      final price = (a['priceRubSnapshot'] is num)
-          ? (a['priceRubSnapshot'] as num).toInt()
-          : 0;
-      sum += max(qty, 1) * max(price, 0);
-    }
-    return sum;
   }
 
   Future<void> _pay() async {
@@ -218,26 +222,22 @@ class _PaymentPageState extends State<PaymentPage> {
 
     try {
       final current = _booking ?? widget.booking;
-
       await widget.repo.payBooking(bookingId: current.id, method: 'CARD_TEST');
 
       if (!mounted || _closing) return;
-
       _close(true, toast: 'Бронирование оплачено. Запись подтверждена.');
     } catch (e) {
       if (!mounted || _closing) return;
-
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Ошибка оплаты: $e')));
-
       await _syncBooking();
     } finally {
       if (mounted && !_closing) setState(() => _paying = false);
     }
   }
 
-  Widget _card(BuildContext context, {required Widget child}) {
+  Widget _card(Widget child) {
     final cs = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.all(14),
@@ -253,22 +253,21 @@ class _PaymentPageState extends State<PaymentPage> {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final b = _booking ?? widget.booking;
 
+    final b = _booking ?? widget.booking;
     final service = widget.service;
     final title = service?.name ?? 'Услуга';
 
     final addons = _addonsSafe(b);
-    final addonsPrice = _addonsTotalPriceRub(addons);
+    final addonsRub = _addonsSumRub(addons);
+    final addonsMin = _addonsSumMin(addons);
 
     final baseTotal = service?.priceRub ?? 0;
-    final total = baseTotal + addonsPrice;
-
-    final remaining = max(total - widget.depositRub, 0);
+    final totalWithAddons = baseTotal + addonsRub;
+    final remaining = max(totalWithAddons - widget.depositRub, 0);
 
     final isPending = b.status == BookingStatus.pendingPayment;
     final hasDue = _dueAt != null;
-
     final canPay =
         isPending &&
         (!hasDue || _left != Duration.zero) &&
@@ -276,79 +275,47 @@ class _PaymentPageState extends State<PaymentPage> {
         !_closing;
 
     return Scaffold(
-      appBar: AppBar(title: Text('Бронирование ${widget.depositRub} ₽')),
+      appBar: AppBar(title: const Text('Забронировать')),
       body: Padding(
         padding: const EdgeInsets.all(16),
-        child: Column(
+        child: ListView(
           children: [
             _card(
-              context,
-              child: Column(
+              Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
                     title,
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      color: cs.onSurface.withValues(alpha: 0.95),
+                      fontWeight: FontWeight.w900,
+                      color: cs.onSurface.withValues(alpha: 0.92),
                     ),
                   ),
                   const SizedBox(height: 10),
-
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'Бронирование (депозит)',
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(
-                                color: cs.onSurface.withValues(alpha: 0.75),
-                                fontWeight: FontWeight.w600,
-                              ),
-                        ),
-                      ),
-                      Text(
-                        '${widget.depositRub} ₽',
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w700,
-                          color: cs.onSurface,
-                        ),
-                      ),
-                    ],
+                  Text(
+                    'Оплата брони: ${widget.depositRub} ₽',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w900,
+                      color: cs.onSurface.withValues(alpha: 0.9),
+                    ),
                   ),
-                  const SizedBox(height: 8),
-
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'Остаток на месте',
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(
-                                color: cs.onSurface.withValues(alpha: 0.75),
-                                fontWeight: FontWeight.w600,
-                              ),
-                        ),
-                      ),
-                      Text(
-                        '$remaining ₽',
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w700,
-                          color: cs.onSurface,
-                        ),
-                      ),
-                    ],
+                  const SizedBox(height: 6),
+                  Text(
+                    'Стоимость: $totalWithAddons ₽  •  Остаток на месте: $remaining ₽',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: cs.onSurface.withValues(alpha: 0.70),
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
-
                   if (addons.isNotEmpty) ...[
                     const SizedBox(height: 12),
-                    Divider(color: cs.outlineVariant.withValues(alpha: 0.55)),
+                    Divider(color: cs.outlineVariant.withValues(alpha: 0.5)),
                     const SizedBox(height: 10),
                     Text(
-                      'Доп. услуги',
+                      'Дополнительные услуги',
                       style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        color: cs.onSurface.withValues(alpha: 0.95),
+                        fontWeight: FontWeight.w900,
+                        color: cs.onSurface.withValues(alpha: 0.9),
                       ),
                     ),
                     const SizedBox(height: 10),
@@ -357,47 +324,63 @@ class _PaymentPageState extends State<PaymentPage> {
                         children: [
                           Expanded(
                             child: Text(
-                              _addonName(a),
+                              _qty(a) > 1
+                                  ? '${_addonName(a)} × ${_qty(a)}'
+                                  : _addonName(a),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: Theme.of(context).textTheme.bodyMedium
                                   ?.copyWith(
-                                    fontWeight: FontWeight.w600,
-                                    color: cs.onSurface.withValues(alpha: 0.9),
+                                    fontWeight: FontWeight.w800,
+                                    color: cs.onSurface.withValues(alpha: 0.86),
                                   ),
                             ),
                           ),
                           const SizedBox(width: 10),
                           Text(
-                            '+${(a['priceRubSnapshot'] is num) ? (a['priceRubSnapshot'] as num).toInt() : 0} ₽',
+                            '+${_price(a)} ₽',
                             style: Theme.of(context).textTheme.bodyMedium
                                 ?.copyWith(
-                                  fontWeight: FontWeight.w700,
-                                  color: cs.onSurface.withValues(alpha: 0.9),
+                                  fontWeight: FontWeight.w900,
+                                  color: cs.onSurface.withValues(alpha: 0.92),
                                 ),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 4),
+                      Text(
+                        '+${_dur(a)} мин',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: cs.onSurface.withValues(alpha: 0.65),
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
                     ],
-                    const SizedBox(height: 6),
                     Text(
-                      'Итого по доп. услугам: +$addonsPrice ₽',
+                      'Итого: +$addonsRub ₽ • +$addonsMin мин',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: cs.onSurface.withValues(alpha: 0.75),
-                        fontWeight: FontWeight.w600,
+                        color: cs.onSurface.withValues(alpha: 0.78),
+                        fontWeight: FontWeight.w900,
                       ),
                     ),
                   ],
-
-                  const SizedBox(height: 12),
-
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+            _card(
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                   if (_dueAt != null) ...[
                     Text(
                       'Осталось на оплату: ${_fmt(_left)}',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        color: _left == Duration.zero ? cs.error : cs.onSurface,
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        color: _left == Duration.zero
+                            ? Colors.red
+                            : cs.onSurface.withValues(alpha: 0.92),
                       ),
                     ),
                     const SizedBox(height: 6),
@@ -406,7 +389,7 @@ class _PaymentPageState extends State<PaymentPage> {
                           ? 'Дедлайн прошёл — запись отменится автоматически.'
                           : 'Если не оплатить вовремя — запись отменится автоматически.',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: cs.onSurface.withValues(alpha: 0.75),
+                        color: cs.onSurface.withValues(alpha: 0.70),
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -414,7 +397,7 @@ class _PaymentPageState extends State<PaymentPage> {
                     Text(
                       'Дедлайн оплаты не задан.',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: cs.onSurface.withValues(alpha: 0.75),
+                        color: cs.onSurface.withValues(alpha: 0.70),
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -422,9 +405,7 @@ class _PaymentPageState extends State<PaymentPage> {
                 ],
               ),
             ),
-
-            const Spacer(),
-
+            const SizedBox(height: 14),
             SizedBox(
               width: double.infinity,
               child: FilledButton.icon(
@@ -438,7 +419,6 @@ class _PaymentPageState extends State<PaymentPage> {
               ),
             ),
             const SizedBox(height: 10),
-
             SizedBox(
               width: double.infinity,
               child: OutlinedButton(
@@ -450,12 +430,5 @@ class _PaymentPageState extends State<PaymentPage> {
         ),
       ),
     );
-  }
-}
-
-extension _FirstOrNullExt<T> on Iterable<T> {
-  T? get firstOrNull {
-    final it = iterator;
-    return it.moveNext() ? it.current : null;
   }
 }

@@ -1,203 +1,141 @@
-import 'payment.dart';
+import 'dart:convert';
 
-enum BookingStatus { pendingPayment, active, canceled, completed }
+enum BookingStatus { active, pendingPayment, completed, canceled }
 
-BookingStatus bookingStatusFromJson(String v) {
-  switch (v.toUpperCase()) {
-    case 'PENDING_PAYMENT':
-      return BookingStatus.pendingPayment;
-    case 'ACTIVE':
+BookingStatus _parseStatus(dynamic v) {
+  final s = (v ?? '').toString().toLowerCase().trim();
+  switch (s) {
+    case 'active':
       return BookingStatus.active;
-    case 'CANCELED':
-      return BookingStatus.canceled;
-    case 'COMPLETED':
+    case 'pending_payment':
+    case 'pendingpayment':
+    case 'pending':
+      return BookingStatus.pendingPayment;
+    case 'completed':
       return BookingStatus.completed;
+    case 'canceled':
+    case 'cancelled':
+      return BookingStatus.canceled;
     default:
+      // безопасный дефолт
       return BookingStatus.active;
   }
 }
 
-String bookingStatusToJson(BookingStatus s) {
-  switch (s) {
-    case BookingStatus.pendingPayment:
-      return 'PENDING_PAYMENT';
-    case BookingStatus.active:
-      return 'ACTIVE';
-    case BookingStatus.canceled:
-      return 'CANCELED';
-    case BookingStatus.completed:
-      return 'COMPLETED';
+int _int(dynamic v, {int fallback = 0}) {
+  if (v is num) return v.toInt();
+  return int.tryParse((v ?? '').toString()) ?? fallback;
+}
+
+bool _bool(dynamic v, {bool fallback = false}) {
+  if (v is bool) return v;
+  final s = (v ?? '').toString().toLowerCase().trim();
+  if (s == 'true' || s == '1') return true;
+  if (s == 'false' || s == '0') return false;
+  return fallback;
+}
+
+DateTime? _dt(dynamic v) {
+  if (v == null) return null;
+  final s = v.toString().trim();
+  if (s.isEmpty) return null;
+  try {
+    return DateTime.parse(s).toLocal();
+  } catch (_) {
+    return null;
   }
+}
+
+List<Map<String, dynamic>> _parseAddons(dynamic v) {
+  if (v == null) return const [];
+  if (v is List) {
+    return v.where((e) => e != null).map((e) {
+      if (e is Map) return e.cast<String, dynamic>();
+      try {
+        final m = jsonDecode(e.toString());
+        if (m is Map) return m.cast<String, dynamic>();
+      } catch (_) {}
+      return <String, dynamic>{'raw': e.toString()};
+    }).toList();
+  }
+  if (v is Map) {
+    // на всякий случай, если сервер отдаст объект вместо массива
+    return [v.cast<String, dynamic>()];
+  }
+  return const [];
 }
 
 class Booking {
   final String id;
-  final DateTime createdAt;
-  final DateTime updatedAt;
-
-  final String locationId;
-
-  final DateTime dateTime;
-  final BookingStatus status;
-
-  final DateTime? startedAt;
-  final DateTime? finishedAt;
-
-  final DateTime? canceledAt;
-  final String? cancelReason;
-
-  final DateTime? paymentDueAt;
 
   final String carId;
   final String serviceId;
+  final DateTime dateTime;
 
+  final String? locationId;
   final int? bayId;
 
-  final String? comment;
+  final BookingStatus status;
+  final bool isWashing;
 
-  // ✅ из API
   final int depositRub;
-  final int bufferMin;
-
-  // ✅ скидка (из admin)
+  final int paidTotalRub;
   final int discountRub;
   final String? discountNote;
 
-  // ✅ платежи
-  final List<Payment> payments;
+  final String? comment;
 
-  Booking({
+  final DateTime? paymentDueAt;
+  final DateTime? lastPaidAt;
+
+  /// ✅ NEW: addons as returned by backend
+  /// Example item:
+  /// { serviceId, qty, priceRubSnapshot, durationMinSnapshot, service?: {name,...} }
+  final List<Map<String, dynamic>> addons;
+
+  const Booking({
     required this.id,
-    required this.createdAt,
-    required this.updatedAt,
-    required this.locationId,
-    required this.dateTime,
-    required this.status,
     required this.carId,
     required this.serviceId,
-    required this.depositRub,
-    required this.bufferMin,
-    this.startedAt,
-    this.finishedAt,
-    this.canceledAt,
-    this.cancelReason,
-    this.paymentDueAt,
+    required this.dateTime,
+    this.locationId,
     this.bayId,
-    this.comment,
-    this.discountRub = 0,
+    required this.status,
+    required this.isWashing,
+    required this.depositRub,
+    required this.paidTotalRub,
+    required this.discountRub,
     this.discountNote,
-    this.payments = const [],
+    this.comment,
+    this.paymentDueAt,
+    this.lastPaidAt,
+    this.addons = const [],
   });
 
-  bool get isWashing =>
-      status == BookingStatus.active && startedAt != null && finishedAt == null;
-
-  int get paidTotalRub {
-    var sum = 0;
-    for (final p in payments) {
-      if (p.kind == PaymentKind.refund) {
-        sum -= p.amountRub;
-      } else {
-        sum += p.amountRub;
-      }
-    }
-    return sum;
-  }
-
-  DateTime? get lastPaidAt {
-    if (payments.isEmpty) return null;
-    final sorted = [...payments]..sort((a, b) => a.paidAt.compareTo(b.paidAt));
-    return sorted.last.paidAt;
-  }
-
-  bool get isDepositPaid =>
-      payments.any((p) => p.kind == PaymentKind.deposit && p.amountRub > 0);
-
-  factory Booking.fromJson(Map<String, dynamic> json) {
-    final cancelReasonRaw = (json['cancelReason'] as String?)?.trim();
-    final cancelReason =
-        (cancelReasonRaw?.isEmpty ?? true) ? null : cancelReasonRaw;
-
-    String? comment =
-        (json['comment'] as String?) ??
-        (json['clientComment'] as String?) ??
-        (json['customerComment'] as String?) ??
-        (json['notes'] as String?);
-    comment = comment?.trim();
-    if (comment != null && comment.isEmpty) comment = null;
-
-    final rawPayments = (json['payments'] as List?) ?? const [];
-    final payments = rawPayments
-        .whereType<Map<String, dynamic>>()
-        .map((e) => Payment.fromJson(e))
-        .toList();
-
-    final discountRub = json['discountRub'] is int
-        ? json['discountRub'] as int
-        : int.tryParse('${json['discountRub']}') ?? 0;
-
-    final discountNoteRaw = (json['discountNote'] as String?)?.trim();
-    final discountNote =
-        (discountNoteRaw?.isEmpty ?? true) ? null : discountNoteRaw;
-
+  factory Booking.fromJson(Map<String, dynamic> j) {
     return Booking(
-      id: json['id'] as String,
-      createdAt: DateTime.parse(json['createdAt'] as String),
-      updatedAt: DateTime.parse(json['updatedAt'] as String),
-      locationId: (json['locationId'] ?? '').toString(),
-      dateTime: DateTime.parse(json['dateTime'] as String),
-      status: bookingStatusFromJson((json['status'] ?? 'ACTIVE') as String),
-      startedAt: json['startedAt'] == null
+      id: (j['id'] ?? '').toString(),
+      carId: (j['carId'] ?? j['car_id'] ?? '').toString(),
+      serviceId: (j['serviceId'] ?? j['service_id'] ?? '').toString(),
+      dateTime: DateTime.parse(
+        (j['dateTime'] ?? j['date_time']).toString(),
+      ).toLocal(),
+      locationId: (j['locationId'] ?? j['location_id'])?.toString(),
+      bayId: j['bayId'] == null ? null : _int(j['bayId']),
+      status: _parseStatus(j['status']),
+      isWashing: _bool(j['isWashing']),
+      depositRub: _int(j['depositRub']),
+      paidTotalRub: _int(j['paidTotalRub']),
+      discountRub: _int(j['discountRub']),
+      discountNote: (j['discountNote'] ?? '').toString().trim().isEmpty
           ? null
-          : DateTime.parse(json['startedAt'] as String),
-      finishedAt: json['finishedAt'] == null
+          : (j['discountNote'] ?? '').toString(),
+      comment: (j['comment'] ?? '').toString().trim().isEmpty
           ? null
-          : DateTime.parse(json['finishedAt'] as String),
-      canceledAt: json['canceledAt'] == null
-          ? null
-          : DateTime.parse(json['canceledAt'] as String),
-      cancelReason: cancelReason,
-      paymentDueAt: json['paymentDueAt'] == null
-          ? null
-          : DateTime.parse(json['paymentDueAt'] as String),
-      carId: json['carId'] as String,
-      serviceId: json['serviceId'] as String,
-      bayId: json['bayId'] is int
-          ? json['bayId'] as int
-          : int.tryParse('${json['bayId']}'),
-      comment: comment,
-      depositRub: json['depositRub'] is int
-          ? json['depositRub'] as int
-          : int.tryParse('${json['depositRub']}') ?? 0,
-      bufferMin: json['bufferMin'] is int
-          ? json['bufferMin'] as int
-          : int.tryParse('${json['bufferMin']}') ?? 0,
-      discountRub: discountRub,
-      discountNote: discountNote,
-      payments: payments,
+          : (j['comment'] ?? '').toString(),
+      paymentDueAt: _dt(j['paymentDueAt']),
+      lastPaidAt: _dt(j['lastPaidAt']),
+      addons: _parseAddons(j['addons']),
     );
   }
-
-  Map<String, dynamic> toJson() => {
-        'id': id,
-        'createdAt': createdAt.toIso8601String(),
-        'updatedAt': updatedAt.toIso8601String(),
-        'locationId': locationId,
-        'dateTime': dateTime.toIso8601String(),
-        'status': bookingStatusToJson(status),
-        'startedAt': startedAt?.toIso8601String(),
-        'finishedAt': finishedAt?.toIso8601String(),
-        'canceledAt': canceledAt?.toIso8601String(),
-        'cancelReason': cancelReason,
-        'paymentDueAt': paymentDueAt?.toIso8601String(),
-        'carId': carId,
-        'serviceId': serviceId,
-        'bayId': bayId,
-        'comment': comment,
-        'depositRub': depositRub,
-        'bufferMin': bufferMin,
-        'discountRub': discountRub,
-        'discountNote': discountNote,
-        'payments': payments.map((p) => p.toJson()).toList(),
-      };
 }

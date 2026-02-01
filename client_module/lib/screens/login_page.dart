@@ -82,9 +82,6 @@ class _LoginPageState extends State<LoginPage> {
         return;
       }
 
-      // ✅ “правильный” прототипный вход:
-      // используем idempotent register (создаст/обновит клиента по телефону),
-      // и имя будет реальным, не “Demo”
       await widget.repo.registerClient(
         phone: phone,
         name: name,
@@ -131,7 +128,8 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
-    final primary = Theme.of(context).colorScheme.primary;
+    final cs = Theme.of(context).colorScheme;
+    final primary = cs.primary;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Вход')),
@@ -142,20 +140,23 @@ class _LoginPageState extends State<LoginPage> {
             Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: primary.withValues(alpha: 0.08),
+                color: cs.surfaceContainerHighest.withValues(alpha: 0.22),
                 borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: primary.withValues(alpha: 0.15)),
+                border: Border.all(
+                  color: cs.outlineVariant.withValues(alpha: 0.6),
+                ),
               ),
-              child: const Row(
+              child: Row(
                 children: [
-                  Icon(Icons.lock_outline),
-                  SizedBox(width: 12),
+                  Icon(Icons.lock_outline, color: primary),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Text(
                       'Прототипный вход\nТелефон + имя + пароль 1234',
-                      style: TextStyle(
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
                         fontWeight: FontWeight.w800,
                         height: 1.2,
+                        color: cs.onSurface.withValues(alpha: 0.92),
                       ),
                     ),
                   ),
@@ -187,11 +188,17 @@ class _LoginPageState extends State<LoginPage> {
             ),
             const SizedBox(height: 12),
 
+            // ✅ FIX: "Пол" не должен быть жирным
             DropdownButtonFormField<String>(
               initialValue: _gender,
               decoration: const InputDecoration(
                 labelText: 'Пол',
                 border: OutlineInputBorder(),
+              ),
+              isExpanded: true,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w500, // было ощущение "жирно"
+                color: cs.onSurface.withValues(alpha: 0.92),
               ),
               items: const [
                 DropdownMenuItem(value: 'MALE', child: Text('Мужской')),

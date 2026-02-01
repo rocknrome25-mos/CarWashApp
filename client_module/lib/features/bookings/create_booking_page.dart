@@ -66,6 +66,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
   Object? _error;
   bool _saving = false;
 
+  // used only for first auto-pick
+  bool _didInitialAutoPick = false;
+
   StreamSubscription<BookingRealtimeEvent>? _rtSub;
 
   // Addons selection (toggle only)
@@ -85,10 +88,17 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
       if (ev.type != 'booking.changed') return;
 
       await _refreshBusy(force: true);
+      if (!mounted) return;
 
       final cur = _selectedSlotStart;
       if (cur != null && _isBusySlot(cur)) {
-        await _autoPickBestSlot(forceBusyRefresh: false);
+        setState(() {
+          _selectedSlotStart = null;
+          _pickedBayIdForAny = null;
+        });
+
+        // slot became busy -> auto-pick new immediately
+        await _autoPickBestSlotForCurrentState(forceBusyRefresh: false);
       }
     });
   }
@@ -161,9 +171,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     final make = c.make.trim();
     final model = c.model.trim();
     if (model.isEmpty || model == '—') {
-      return '$make (${c.plateDisplay})';
+      return make.isEmpty ? 'Авто' : make;
     }
-    return '$make $model (${c.plateDisplay})';
+    return '$make $model';
   }
 
   DateTime _ceilToStep(DateTime dt, int stepMin) {
@@ -219,8 +229,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
   bool _isBusySlot(DateTime slotStart) {
     final bayId = _currentBayIdOrNull();
-    if (bayId != null) return _isBusySlotForBay(slotStart, bayId);
-
+    if (bayId != null) {
+      return _isBusySlotForBay(slotStart, bayId);
+    }
     final busy1 = _isBusySlotForBay(slotStart, 1);
     final busy2 = _isBusySlotForBay(slotStart, 2);
     return busy1 && busy2;
@@ -245,6 +256,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
     final slots = <DateTime>[];
     var cur = start;
+
     while (cur.isBefore(end)) {
       if (_endsBeforeClose(cur)) slots.add(cur);
       cur = cur.add(const Duration(minutes: _slotStepMin));
@@ -252,55 +264,26 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     return slots;
   }
 
-  Future<int?> _pickBayForSlotAny(DateTime slotStart) async {
-    final busy1 = _isBusySlotForBay(slotStart, 1);
-    final busy2 = _isBusySlotForBay(slotStart, 2);
-    if (!busy1) return 1;
-    if (!busy2) return 2;
-    return null;
-  }
-
-  Future<void> _autoPickBestSlot({required bool forceBusyRefresh}) async {
-    if (!mounted) return;
-
-    if (forceBusyRefresh) {
-      await _refreshBusy(force: true);
-      if (!mounted) return;
-    }
-
-    final slots = _buildSlotsForDay(_selectedDate);
+  DateTime? _firstFreeSlotForDay(DateTime day) {
+    final slots = _buildSlotsForDay(day);
     final minNow = _minSelectableNowLocal();
-    final isToday = _dateOnly(_selectedDate) == _dateOnly(DateTime.now());
+    final isToday = _dateOnly(day) == _dateOnly(DateTime.now());
 
-    DateTime? picked;
     for (final s in slots) {
       if (isToday && s.isBefore(minNow)) continue;
       if (_isBusySlot(s)) continue;
-      picked = s;
-      break;
+      return s;
     }
+    return null;
+  }
 
-    if (!mounted) return;
+  Future<int?> _pickBayForSlotAny(DateTime slotStart) async {
+    final busy1 = _isBusySlotForBay(slotStart, 1);
+    final busy2 = _isBusySlotForBay(slotStart, 2);
 
-    if (picked == null) {
-      setState(() {
-        _selectedSlotStart = null;
-        _pickedBayIdForAny = null;
-      });
-      return;
-    }
-
-    int? pickedBay;
-    if (_bayMode == _BayMode.any) {
-      pickedBay = await _pickBayForSlotAny(picked);
-    }
-
-    if (!mounted) return;
-
-    setState(() {
-      _selectedSlotStart = picked;
-      _pickedBayIdForAny = pickedBay;
-    });
+    if (!busy1) return 1;
+    if (!busy2) return 2;
+    return null;
   }
 
   Color _hexToColorSafe(
@@ -316,6 +299,45 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     if (v == null) return fallback;
     return Color(v);
   }
+
+  // ---------------- auto-pick slot logic ----------------
+
+  Future<void> _autoPickBestSlotForCurrentState({
+    required bool forceBusyRefresh,
+  }) async {
+    if (_location == null) return;
+
+    if (forceBusyRefresh) {
+      await _refreshBusy(force: true);
+      if (!mounted) return;
+    }
+
+    final cur = _selectedSlotStart;
+    if (cur != null && !_isBusySlot(cur) && _endsBeforeClose(cur)) {
+      if (_bayMode == _BayMode.any) {
+        final bay = await _pickBayForSlotAny(cur);
+        if (!mounted) return;
+        setState(() => _pickedBayIdForAny = bay);
+      }
+      return;
+    }
+
+    final picked = _firstFreeSlotForDay(_selectedDate);
+    if (!mounted) return;
+
+    setState(() {
+      _selectedSlotStart = picked;
+      _pickedBayIdForAny = null;
+    });
+
+    if (picked != null && _bayMode == _BayMode.any) {
+      final bay = await _pickBayForSlotAny(picked);
+      if (!mounted) return;
+      setState(() => _pickedBayIdForAny = bay);
+    }
+  }
+
+  // ---------------- data loads ----------------
 
   Future<void> _refreshBusy({bool force = false}) async {
     final locId = _location?.id;
@@ -343,13 +365,13 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     ]);
 
     if (!mounted) return;
-
     setState(() {
       _busyByBay = {1: results[0], 2: results[1]};
     });
 
-    if (_bayMode == _BayMode.any && _selectedSlotStart != null) {
-      final bay = await _pickBayForSlotAny(_selectedSlotStart!);
+    final cur = _selectedSlotStart;
+    if (cur != null && _bayMode == _BayMode.any && !_isBusySlot(cur)) {
+      final bay = await _pickBayForSlotAny(cur);
       if (!mounted) return;
       setState(() => _pickedBayIdForAny = bay);
     }
@@ -392,7 +414,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
       String? selectedServiceId =
           widget.preselectedServiceId ??
           (services.isNotEmpty ? services.first.id : null);
-
       if (widget.preselectedServiceId != null &&
           !services.any((s) => s.id == widget.preselectedServiceId)) {
         selectedServiceId = services.isNotEmpty ? services.first.id : null;
@@ -420,7 +441,11 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
       });
 
       await _refreshBusy(force: true);
-      await _autoPickBestSlot(forceBusyRefresh: false);
+
+      if (!_didInitialAutoPick) {
+        _didInitialAutoPick = true;
+        await _autoPickBestSlotForCurrentState(forceBusyRefresh: false);
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -438,7 +463,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     });
 
     await _refreshBusy(force: true);
-    await _autoPickBestSlot(forceBusyRefresh: false);
+    await _autoPickBestSlotForCurrentState(forceBusyRefresh: false);
   }
 
   List<DateTime> _quickDates() {
@@ -512,12 +537,10 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
   Future<void> _selectBay(_BayMode mode) async {
     setState(() {
       _bayMode = mode;
-      _selectedSlotStart = null;
       _pickedBayIdForAny = null;
     });
 
-    await _refreshBusy(force: true);
-    await _autoPickBestSlot(forceBusyRefresh: false);
+    await _autoPickBestSlotForCurrentState(forceBusyRefresh: false);
   }
 
   String _bayIconAsset(_BayMode mode) {
@@ -548,7 +571,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     );
   }
 
-  // ---------------- Bay selector (3 cards, no overflow) ----------------
+  // ---------------- Bay selector ----------------
 
   Widget _lineSelectorAccordion() {
     final cs = Theme.of(context).colorScheme;
@@ -563,6 +586,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
         borderRadius: BorderRadius.circular(16),
         onTap: () => _selectBay(mode),
         child: Container(
+          constraints: const BoxConstraints(minWidth: 150),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
           decoration: BoxDecoration(
             color: selected
@@ -576,6 +600,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
             ),
           ),
           child: Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
               Container(
                 width: 4,
@@ -588,54 +613,46 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
               const SizedBox(width: 10),
               _bayIcon(mode, stripe),
               const SizedBox(width: 10),
-              Expanded(
+              Flexible(
                 child: Text(
                   title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w900,
                     color: cs.onSurface.withValues(alpha: 0.92),
                   ),
                 ),
               ),
-              if (selected) ...[
-                const SizedBox(width: 8),
-                Icon(Icons.check_circle, color: stripe, size: 18),
-              ],
+              const SizedBox(width: 10),
+              if (selected) Icon(Icons.check_circle, color: stripe, size: 18),
             ],
           ),
         ),
       );
     }
 
-    return Row(
+    return Wrap(
+      spacing: 10,
+      runSpacing: 10,
       children: [
-        Expanded(
-          child: item(
-            mode: _BayMode.any,
-            selected: _bayMode == _BayMode.any,
-            title: 'Любая линия',
-            stripe: Theme.of(context).colorScheme.primary,
-          ),
+        item(
+          mode: _BayMode.any,
+          selected: _bayMode == _BayMode.any,
+          title: 'Любая линия',
+          stripe: Theme.of(context).colorScheme.primary,
         ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: item(
-            mode: _BayMode.bay1,
-            selected: _bayMode == _BayMode.bay1,
-            title: 'Зелёная линия',
-            stripe: _greenLine,
-          ),
+        item(
+          mode: _BayMode.bay1,
+          selected: _bayMode == _BayMode.bay1,
+          title: 'Зелёная линия',
+          stripe: _greenLine,
         ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: item(
-            mode: _BayMode.bay2,
-            selected: _bayMode == _BayMode.bay2,
-            title: 'Синяя линия',
-            stripe: _blueLine,
-          ),
+        item(
+          mode: _BayMode.bay2,
+          selected: _bayMode == _BayMode.bay2,
+          title: 'Синяя линия',
+          stripe: _blueLine,
         ),
       ],
     );
@@ -672,7 +689,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     final cs = Theme.of(context).colorScheme;
     return OutlinedButton.styleFrom(
       side: BorderSide(color: cs.outlineVariant.withValues(alpha: 0.8)),
-      backgroundColor: cs.surfaceContainerHighest.withValues(alpha: 0.10),
+      backgroundColor: Colors.black.withValues(alpha: 0.03),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       shape: const StadiumBorder(),
       visualDensity: const VisualDensity(horizontal: -2, vertical: -2),
@@ -713,7 +730,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
             onPressed: select,
             child: Text(
               label,
-              style: const TextStyle(fontWeight: FontWeight.w700),
+              style: const TextStyle(fontWeight: FontWeight.w900),
             ),
           )
         : OutlinedButton(
@@ -721,7 +738,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
             onPressed: select,
             child: Text(
               label,
-              style: const TextStyle(fontWeight: FontWeight.w700),
+              style: const TextStyle(fontWeight: FontWeight.w900),
             ),
           );
   }
@@ -749,10 +766,8 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
           tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
           childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
           title: Text(
-            title,
-            style: Theme.of(
-              context,
-            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+            title.toUpperCase(),
+            style: const TextStyle(fontWeight: FontWeight.w900),
           ),
           children: [
             Wrap(
@@ -766,7 +781,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     );
   }
 
-  // ---------------- Addons UI (preview + sheet) ----------------
+  // ---------------- Addons UI ----------------
 
   List<Service> _addonCandidates() {
     final sid = serviceId;
@@ -792,12 +807,10 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
       } else {
         _selectedAddonServiceIds.remove(s.id);
       }
-      _selectedSlotStart = null;
-      _pickedBayIdForAny = null;
     });
 
     await _refreshBusy(force: true);
-    await _autoPickBestSlot(forceBusyRefresh: false);
+    await _autoPickBestSlotForCurrentState(forceBusyRefresh: false);
   }
 
   Widget _addonRow(Service s, {bool dense = false}) {
@@ -825,7 +838,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w900,
                     color: cs.onSurface.withValues(alpha: 0.95),
                   ),
                 ),
@@ -848,8 +861,8 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                         '$price ₽',
                         style: Theme.of(context).textTheme.labelMedium
                             ?.copyWith(
-                              fontWeight: FontWeight.w700,
-                              color: cs.onSurface.withValues(alpha: 0.92),
+                              fontWeight: FontWeight.w900,
+                              color: cs.onSurface.withValues(alpha: 0.90),
                             ),
                       ),
                     ),
@@ -858,7 +871,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                       '+$dur мин',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: cs.onSurface.withValues(alpha: 0.70),
-                        fontWeight: FontWeight.w600,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
                   ],
@@ -900,7 +913,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                         'Дополнительные услуги',
                         style: Theme.of(context).textTheme.titleMedium
                             ?.copyWith(
-                              fontWeight: FontWeight.w700,
+                              fontWeight: FontWeight.w900,
                               color: cs.onSurface.withValues(alpha: 0.95),
                             ),
                       ),
@@ -954,7 +967,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
           Text(
             'Дополнительные услуги',
             style: Theme.of(context).textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w700,
+              fontWeight: FontWeight.w900,
               color: cs.onSurface.withValues(alpha: 0.95),
             ),
           ),
@@ -976,12 +989,171 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
               'Выбрано: +$totalDur мин • +$totalPrice ₽',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: cs.onSurface.withValues(alpha: 0.75),
-                fontWeight: FontWeight.w700,
+                fontWeight: FontWeight.w800,
               ),
             ),
           ],
         ],
       ),
+    );
+  }
+
+  // ---------------- car tiles (Yandex-like) ----------------
+
+  String _carTileAsset(Car c) {
+    final body = (c.bodyType ?? '').toLowerCase().trim();
+    final sub = c.subtitle.toLowerCase();
+
+    bool isSuv() =>
+        body.contains('suv') || body.contains('внед') || sub.contains('внед');
+    bool isSedan() =>
+        body.contains('sedan') ||
+        body.contains('седан') ||
+        sub.contains('седан');
+
+    if (isSuv()) return 'assets/cars/suv.png';
+    if (isSedan()) return 'assets/cars/sedan.png';
+    return 'assets/cars/incognito.png';
+  }
+
+  Widget _carTile(Car c, bool selected) {
+    final cs = Theme.of(context).colorScheme;
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(18),
+      onTap: _saving
+          ? null
+          : () async {
+              setState(() => carId = c.id);
+              // ничего не сбрасываем — выбор авто не должен рушить слот
+              await _autoPickBestSlotForCurrentState(forceBusyRefresh: false);
+            },
+      child: Container(
+        width: 148,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: selected
+              ? cs.primary.withValues(alpha: 0.12)
+              : cs.surfaceContainerHighest.withValues(alpha: 0.16),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: selected
+                ? cs.primary.withValues(alpha: 0.35)
+                : cs.outlineVariant.withValues(alpha: 0.6),
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // image box
+            Container(
+              height: 76,
+              width: double.infinity,
+              decoration: BoxDecoration(
+                color: cs.surfaceContainerHigh.withValues(alpha: 0.45),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: cs.outlineVariant.withValues(alpha: 0.55),
+                ),
+              ),
+              alignment: Alignment.center,
+              child: Image.asset(
+                _carTileAsset(c),
+                height: 70,
+                fit: BoxFit.contain,
+                errorBuilder: (_, __, ___) => Icon(
+                  Icons.directions_car,
+                  color: cs.onSurface.withValues(alpha: 0.85),
+                  size: 34,
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              _carTitleForUi(c).toUpperCase(),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                fontWeight: FontWeight.w900,
+                color: cs.onSurface.withValues(alpha: 0.95),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              c.plateDisplay.trim().isEmpty
+                  ? c.subtitle
+                  : '${c.plateDisplay} • ${c.subtitle}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: cs.onSurface.withValues(alpha: 0.70),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _carsPicker() {
+    final cs = Theme.of(context).colorScheme;
+
+    if (_cars.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: cs.surfaceContainerHighest.withValues(alpha: 0.16),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              Icons.info_outline,
+              color: cs.onSurface.withValues(alpha: 0.85),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Сначала добавь авто во вкладке “Авто”.',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: cs.onSurface.withValues(alpha: 0.85),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final selectedId = carId;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Авто',
+          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+            fontWeight: FontWeight.w900,
+            color: cs.onSurface.withValues(alpha: 0.95),
+          ),
+        ),
+        const SizedBox(height: 10),
+        SizedBox(
+          height: 160,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: _cars.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 12),
+            itemBuilder: (_, i) {
+              final c = _cars[i];
+              final selected = selectedId == c.id;
+              return _carTile(c, selected);
+            },
+          ),
+        ),
+      ],
     );
   }
 
@@ -1107,23 +1279,25 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
     if (_loading) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Создать запись')),
+        appBar: AppBar(title: const Text('Записаться на мойку')),
         body: const Center(child: CircularProgressIndicator()),
       );
     }
 
     if (_error != null) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Создать запись')),
+        appBar: AppBar(title: const Text('Записаться на мойку')),
         body: Center(
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text('Error: $_error'),
+                Text('Ошибка: $_error', textAlign: TextAlign.center),
                 const SizedBox(height: 12),
                 FilledButton(
                   onPressed: _bootstrap,
@@ -1136,9 +1310,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
       );
     }
 
-    final carIds = _cars.map((c) => c.id).toSet();
     final serviceIds = _services.map((s) => s.id).toSet();
-    final safeCarId = (carId != null && carIds.contains(carId)) ? carId : null;
     final safeServiceId = (serviceId != null && serviceIds.contains(serviceId))
         ? serviceId
         : null;
@@ -1147,9 +1319,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
     const chipLabelPadding = EdgeInsets.symmetric(horizontal: 10);
     const chipVD = VisualDensity(horizontal: -2, vertical: -2);
-
-    final cs = Theme.of(context).colorScheme;
-    final primary = cs.primary;
 
     final service = _findService(safeServiceId);
     final basePriceRub = service?.priceRub ?? 0;
@@ -1179,13 +1348,14 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     final locColor = _hexToColorSafe(loc?.colorHex ?? '#2D9CDB');
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Создать запись')),
+      appBar: AppBar(title: const Text('Записаться на мойку')),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Form(
           key: _formKey,
           child: ListView(
             children: [
+              // -------- Location --------
               if (_locations.isNotEmpty)
                 Container(
                   padding: const EdgeInsets.all(12),
@@ -1200,15 +1370,15 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'МОЙКА / ЛОКАЦИЯ',
-                        style: Theme.of(context).textTheme.labelMedium
-                            ?.copyWith(
-                              fontWeight: FontWeight.w700,
-                              color: cs.onSurface.withValues(alpha: 0.85),
-                            ),
+                        'Мойка',
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w900,
+                          color: cs.onSurface.withValues(alpha: 0.95),
+                        ),
                       ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 10),
                       DropdownButtonFormField<String>(
+                        isExpanded: true,
                         initialValue: loc?.id,
                         decoration: const InputDecoration(
                           border: OutlineInputBorder(),
@@ -1219,7 +1389,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                           return DropdownMenuItem<String>(
                             value: l.id,
                             child: Row(
-                              mainAxisSize: MainAxisSize.min,
                               children: [
                                 Container(
                                   width: 10,
@@ -1230,7 +1399,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                                   ),
                                 ),
                                 const SizedBox(width: 10),
-                                Flexible(
+                                Expanded(
                                   child: Text(
                                     '${l.name} — ${l.address}',
                                     maxLines: 1,
@@ -1256,7 +1425,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                           });
 
                           await _refreshBusy(force: true);
-                          await _autoPickBestSlot(forceBusyRefresh: false);
+                          await _autoPickBestSlotForCurrentState(
+                            forceBusyRefresh: false,
+                          );
                         },
                         validator: (_) =>
                             _location == null ? 'Выбери локацию' : null,
@@ -1275,11 +1446,11 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              'Убедись, что выбрана правильная мойка перед бронированием.',
+                              'Проверь, что выбрана правильная мойка.',
                               style: Theme.of(context).textTheme.bodySmall
                                   ?.copyWith(
                                     color: cs.onSurface.withValues(alpha: 0.70),
-                                    fontWeight: FontWeight.w600,
+                                    fontWeight: FontWeight.w700,
                                   ),
                             ),
                           ),
@@ -1289,63 +1460,72 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                   ),
                 ),
 
-              const SizedBox(height: 12),
+              const SizedBox(height: 14),
 
-              DropdownButtonFormField<String>(
-                initialValue: safeCarId,
-                decoration: const InputDecoration(
-                  labelText: 'Авто',
-                  border: OutlineInputBorder(),
+              // -------- Cars tiles --------
+              _carsPicker(),
+
+              const SizedBox(height: 14),
+
+              // -------- Service (keep dropdown for now) --------
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(18),
+                  color: cs.surfaceContainerHighest.withValues(alpha: 0.16),
+                  border: Border.all(
+                    color: cs.outlineVariant.withValues(alpha: 0.6),
+                  ),
                 ),
-                items: _cars
-                    .map(
-                      (c) => DropdownMenuItem<String>(
-                        value: c.id,
-                        child: Text(_carTitleForUi(c)),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Услуга',
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        color: cs.onSurface.withValues(alpha: 0.95),
                       ),
-                    )
-                    .toList(),
-                onChanged: (v) => setState(() => carId = v),
-                validator: (_) {
-                  if (_cars.isEmpty) return 'Сначала добавь авто';
-                  if (carId == null) return 'Выбери авто';
-                  return null;
-                },
-              ),
+                    ),
+                    const SizedBox(height: 10),
+                    DropdownButtonFormField<String>(
+                      isExpanded: true,
+                      initialValue: safeServiceId,
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      items: _services
+                          .map(
+                            (s) => DropdownMenuItem<String>(
+                              value: s.id,
+                              child: Text(
+                                '${s.name} (${s.priceRub} ₽) • ${s.durationMin} мин',
+                              ),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (v) async {
+                        setState(() {
+                          serviceId = v;
+                          _selectedSlotStart = null;
+                          _pickedBayIdForAny = null;
+                          _selectedAddonServiceIds.clear();
+                        });
 
-              const SizedBox(height: 12),
-
-              DropdownButtonFormField<String>(
-                initialValue: safeServiceId,
-                decoration: const InputDecoration(
-                  labelText: 'Услуга',
-                  border: OutlineInputBorder(),
+                        await _refreshBusy(force: true);
+                        await _autoPickBestSlotForCurrentState(
+                          forceBusyRefresh: false,
+                        );
+                      },
+                      validator: (_) {
+                        if (_services.isEmpty) return 'Нет услуг';
+                        if (serviceId == null) return 'Выбери услугу';
+                        return null;
+                      },
+                    ),
+                  ],
                 ),
-                items: _services
-                    .map(
-                      (s) => DropdownMenuItem<String>(
-                        value: s.id,
-                        child: Text(
-                          '${s.name} (${s.priceRub} ₽) • ${s.durationMin} мин',
-                        ),
-                      ),
-                    )
-                    .toList(),
-                onChanged: (v) async {
-                  setState(() {
-                    serviceId = v;
-                    _selectedAddonServiceIds.clear();
-                    _selectedSlotStart = null;
-                    _pickedBayIdForAny = null;
-                  });
-                  await _refreshBusy(force: true);
-                  await _autoPickBestSlot(forceBusyRefresh: false);
-                },
-                validator: (_) {
-                  if (_services.isEmpty) return 'Нет услуг';
-                  if (serviceId == null) return 'Выбери услугу';
-                  return null;
-                },
               ),
 
               const SizedBox(height: 12),
@@ -1354,28 +1534,57 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
               const SizedBox(height: 12),
 
+              // -------- Line --------
+              Text(
+                'Линия',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w900,
+                  color: cs.onSurface.withValues(alpha: 0.95),
+                ),
+              ),
+              const SizedBox(height: 10),
               _lineSelectorAccordion(),
 
-              const SizedBox(height: 12),
+              const SizedBox(height: 14),
 
+              // -------- Date chips --------
+              Text(
+                'Дата',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w900,
+                  color: cs.onSurface.withValues(alpha: 0.95),
+                ),
+              ),
+              const SizedBox(height: 10),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
                 children: dates.map((d) {
                   final dd = _dateOnly(d);
                   final selected = dd == _selectedDate;
+
                   return ChoiceChip(
                     label: Text(_chipLabelForDate(dd)),
                     labelPadding: chipLabelPadding,
                     selected: selected,
-                    selectedColor: primary.withValues(alpha: 0.18),
+                    selectedColor: cs.primary.withValues(alpha: 0.18),
                     onSelected: (_) => _selectDate(dd),
                     visualDensity: chipVD,
                   );
                 }).toList(),
               ),
 
-              const SizedBox(height: 12),
+              const SizedBox(height: 14),
+
+              // -------- Time slots --------
+              Text(
+                'Время',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w900,
+                  color: cs.onSurface.withValues(alpha: 0.95),
+                ),
+              ),
+              const SizedBox(height: 10),
 
               if (visibleSlots.isEmpty)
                 const Padding(
@@ -1402,8 +1611,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                 ),
               ],
 
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
 
+              // -------- Comment (optional) --------
               TextFormField(
                 controller: _commentCtrl,
                 minLines: 1,
@@ -1416,8 +1626,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                 ),
               ),
 
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
 
+              // -------- Compact summary (less “каша”) --------
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(12),
@@ -1432,21 +1643,33 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Оплата брони: $_depositRub ₽',
-                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        color: cs.onSurface.withValues(alpha: 0.92),
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      'Стоимость: $totalPriceRub ₽ • Остаток на месте: $remaining ₽',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        fontWeight: FontWeight.w600,
-                        color: cs.onSurface.withValues(alpha: 0.72),
+                      'Итого',
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        color: cs.onSurface.withValues(alpha: 0.95),
                       ),
                     ),
                     const SizedBox(height: 8),
+
+                    Row(
+                      children: [
+                        _miniPill(
+                          context,
+                          'Депозит',
+                          '$_depositRub ₽',
+                          leadingDotColor: cs.primary,
+                        ),
+                        const SizedBox(width: 10),
+                        _miniPill(
+                          context,
+                          'К оплате',
+                          '$remaining ₽',
+                          leadingDotColor: cs.onSurface.withValues(alpha: 0.55),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+
                     Row(
                       children: [
                         Container(
@@ -1465,8 +1688,8 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                             overflow: TextOverflow.ellipsis,
                             style: Theme.of(context).textTheme.bodyMedium
                                 ?.copyWith(
-                                  fontWeight: FontWeight.w700,
-                                  color: cs.onSurface.withValues(alpha: 0.85),
+                                  fontWeight: FontWeight.w900,
+                                  color: cs.onSurface.withValues(alpha: 0.88),
                                 ),
                           ),
                         ),
@@ -1476,8 +1699,16 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                     Text(
                       'Длительность: ${_effectiveBlockMinForSelectedService()} мин (включая буфер)',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        fontWeight: FontWeight.w600,
                         color: cs.onSurface.withValues(alpha: 0.70),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Стоимость: $totalPriceRub ₽',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: cs.onSurface.withValues(alpha: 0.70),
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
                   ],
@@ -1496,6 +1727,50 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  // ---------- UI tiny helpers ----------
+  Widget _miniPill(
+    BuildContext context,
+    String label,
+    String value, {
+    required Color leadingDotColor,
+  }) {
+    final cs = Theme.of(context).colorScheme;
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: cs.surfaceContainerHigh.withValues(alpha: 0.45),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(
+                color: leadingDotColor,
+                borderRadius: BorderRadius.circular(999),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                '$label: $value',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  fontWeight: FontWeight.w900,
+                  color: cs.onSurface.withValues(alpha: 0.88),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
