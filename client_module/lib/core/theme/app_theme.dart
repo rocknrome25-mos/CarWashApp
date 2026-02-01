@@ -22,28 +22,17 @@ class AppTheme {
       primary: _accent,
     );
 
-    // ВАЖНО для web-чёткости:
-    // - только целые размеры
-    // - веса 400/500/600/700 (без 800)
-    // - letterSpacing 0 (почти везде)
-    TextStyle inter(double size, FontWeight weight, {double height = 1.22}) {
+    TextStyle inter({
+      required double size,
+      required FontWeight weight,
+      double height = 1.20,
+    }) {
       return TextStyle(
         fontFamily: 'Inter',
-        fontFamilyFallback: const ['Roboto', 'Segoe UI', 'Arial'],
         fontSize: size,
         fontWeight: weight,
         height: height,
-        letterSpacing: 0,
-      );
-    }
-
-    TextStyle manrope(double size, FontWeight weight, {double height = 1.12}) {
-      return TextStyle(
-        fontFamily: 'Manrope',
-        fontFamilyFallback: const ['Inter', 'Roboto', 'Segoe UI', 'Arial'],
-        fontSize: size,
-        fontWeight: weight,
-        height: height,
+        // ВАЖНО для web: без letterSpacing (часто даёт “мыло”)
         letterSpacing: 0,
       );
     }
@@ -51,20 +40,20 @@ class AppTheme {
     final base = Typography.material2021().white;
 
     final text = base.copyWith(
-      // Заголовки — Manrope (но без 800)
-      titleLarge: manrope(22, FontWeight.w700, height: 1.10),
-      titleMedium: manrope(18, FontWeight.w700, height: 1.12),
-      titleSmall: manrope(15, FontWeight.w600, height: 1.14),
+      // Заголовки — 600/700, без 800/900
+      titleLarge: inter(size: 22, weight: FontWeight.w700, height: 1.12),
+      titleMedium: inter(size: 18, weight: FontWeight.w700, height: 1.14),
+      titleSmall: inter(size: 15, weight: FontWeight.w600, height: 1.16),
 
-      // Тело — Inter (максимальная читабельность)
-      bodyLarge: inter(15, FontWeight.w400, height: 1.28),
-      bodyMedium: inter(14, FontWeight.w400, height: 1.28),
-      bodySmall: inter(12, FontWeight.w400, height: 1.26),
+      // Тело — 400/500
+      bodyLarge: inter(size: 15, weight: FontWeight.w400, height: 1.26),
+      bodyMedium: inter(size: 14, weight: FontWeight.w400, height: 1.26),
+      bodySmall: inter(size: 12, weight: FontWeight.w400, height: 1.26),
 
-      // Кнопки/лейблы
-      labelLarge: inter(14, FontWeight.w600, height: 1.14),
-      labelMedium: inter(12, FontWeight.w600, height: 1.14),
-      labelSmall: inter(11, FontWeight.w600, height: 1.12),
+      // Лейблы/кнопки — 600
+      labelLarge: inter(size: 14, weight: FontWeight.w600, height: 1.10),
+      labelMedium: inter(size: 12, weight: FontWeight.w600, height: 1.10),
+      labelSmall: inter(size: 11, weight: FontWeight.w600, height: 1.10),
     );
 
     return ThemeData(
@@ -102,15 +91,11 @@ class AppTheme {
         fillColor: _card2,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(18),
-          borderSide: BorderSide(
-            color: scheme.outlineVariant.withValues(alpha: 0.6),
-          ),
+          borderSide: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.6)),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(18),
-          borderSide: BorderSide(
-            color: scheme.outlineVariant.withValues(alpha: 0.45),
-          ),
+          borderSide: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.45)),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(18),
@@ -124,9 +109,7 @@ class AppTheme {
         style: FilledButton.styleFrom(
           backgroundColor: scheme.primary,
           foregroundColor: Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
-          ),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
           textStyle: text.labelLarge,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         ),
@@ -136,9 +119,7 @@ class AppTheme {
         style: OutlinedButton.styleFrom(
           foregroundColor: scheme.onSurface,
           side: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.7)),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
-          ),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
           textStyle: text.labelLarge,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         ),
@@ -148,10 +129,7 @@ class AppTheme {
         backgroundColor: _bg,
         indicatorColor: scheme.primary.withValues(alpha: 0.18),
         labelTextStyle: WidgetStatePropertyAll(
-          TextStyle(
-            fontFamily: 'Inter',
-            fontFamilyFallback: const ['Roboto', 'Segoe UI', 'Arial'],
-            fontWeight: FontWeight.w600,
+          inter(size: 12, weight: FontWeight.w600, height: 1.0).copyWith(
             color: scheme.onSurface.withValues(alpha: 0.85),
           ),
         ),
@@ -163,10 +141,7 @@ class AppTheme {
       chipTheme: ChipThemeData(
         backgroundColor: _card2,
         selectedColor: scheme.primary.withValues(alpha: 0.22),
-        labelStyle: TextStyle(
-          fontFamily: 'Inter',
-          fontFamilyFallback: const ['Roboto', 'Segoe UI', 'Arial'],
-          fontWeight: FontWeight.w600,
+        labelStyle: inter(size: 12, weight: FontWeight.w600, height: 1.0).copyWith(
           color: scheme.onSurface.withValues(alpha: 0.90),
         ),
         side: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.6)),
@@ -174,11 +149,11 @@ class AppTheme {
       ),
 
       iconTheme: IconThemeData(color: scheme.onSurface.withValues(alpha: 0.9)),
-      dividerTheme: DividerThemeData(
-        color: scheme.outlineVariant.withValues(alpha: 0.5),
-      ),
+      dividerTheme: DividerThemeData(color: scheme.outlineVariant.withValues(alpha: 0.5)),
+
+      // Сделаем snackbar заметнее (как ты хотел)
       snackBarTheme: SnackBarThemeData(
-        backgroundColor: _card,
+        backgroundColor: scheme.surfaceContainerHighest.withValues(alpha: 0.95),
         contentTextStyle: text.bodyMedium?.copyWith(color: scheme.onSurface),
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/material.dart';
 
 import '../../core/data/app_repository.dart';
@@ -10,7 +11,7 @@ class PaymentPage extends StatefulWidget {
   final Booking booking;
   final Service? service;
 
-  // ✅ депозит (оплата брони)
+  // депозит (оплата брони)
   final int depositRub;
 
   const PaymentPage({
@@ -34,7 +35,6 @@ class _PaymentPageState extends State<PaymentPage> {
 
   bool _paying = false;
   bool _syncing = false;
-
   bool _closing = false;
 
   DateTime? get _dueAt => _booking?.paymentDueAt;
@@ -136,7 +136,7 @@ class _PaymentPageState extends State<PaymentPage> {
         return;
       }
     } catch (_) {
-      // молча
+      // silently
     } finally {
       _syncing = false;
     }
@@ -147,6 +147,57 @@ class _PaymentPageState extends State<PaymentPage> {
     final m = d.inMinutes;
     final s = d.inSeconds % 60;
     return '${two(m)}:${two(s)}';
+  }
+
+  // ---- addons safe ----
+  List<Map<String, dynamic>> _addonsSafe(Booking b) {
+    try {
+      final dyn = b as dynamic;
+      final addons = dyn.addons;
+      if (addons is List) {
+        final out = <Map<String, dynamic>>[];
+        for (final x in addons) {
+          if (x is Map) {
+            out.add(x.cast<String, dynamic>());
+          } else {
+            try {
+              final dx = x as dynamic;
+              out.add({
+                'qty': dx.qty,
+                'priceRubSnapshot': dx.priceRubSnapshot,
+                'durationMinSnapshot': dx.durationMinSnapshot,
+                'service': dx.service,
+                'serviceId': dx.serviceId,
+              });
+            } catch (_) {}
+          }
+        }
+        return out;
+      }
+    } catch (_) {}
+    return const [];
+  }
+
+  String _addonName(Map<String, dynamic> a) {
+    final s = a['service'];
+    if (s is Map) {
+      final name = (s['name'] ?? '').toString().trim();
+      if (name.isNotEmpty) return name;
+    }
+    final sid = (a['serviceId'] ?? '').toString().trim();
+    return sid.isNotEmpty ? 'Услуга ($sid)' : 'Доп. услуга';
+  }
+
+  int _addonsTotalPriceRub(List<Map<String, dynamic>> addons) {
+    int sum = 0;
+    for (final a in addons) {
+      final qty = (a['qty'] is num) ? (a['qty'] as num).toInt() : 1;
+      final price = (a['priceRubSnapshot'] is num)
+          ? (a['priceRubSnapshot'] as num).toInt()
+          : 0;
+      sum += max(qty, 1) * max(price, 0);
+    }
+    return sum;
   }
 
   Future<void> _pay() async {
@@ -186,20 +237,38 @@ class _PaymentPageState extends State<PaymentPage> {
     }
   }
 
+  Widget _card(BuildContext context, {required Widget child}) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
+      ),
+      child: child,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     final b = _booking ?? widget.booking;
 
     final service = widget.service;
     final title = service?.name ?? 'Услуга';
 
-    final total = service?.priceRub;
-    final remaining = (total == null)
-        ? null
-        : ((total - widget.depositRub) > 0 ? (total - widget.depositRub) : 0);
+    final addons = _addonsSafe(b);
+    final addonsPrice = _addonsTotalPriceRub(addons);
+
+    final baseTotal = service?.priceRub ?? 0;
+    final total = baseTotal + addonsPrice;
+
+    final remaining = max(total - widget.depositRub, 0);
 
     final isPending = b.status == BookingStatus.pendingPayment;
     final hasDue = _dueAt != null;
+
     final canPay =
         isPending &&
         (!hasDue || _left != Duration.zero) &&
@@ -211,48 +280,148 @@ class _PaymentPageState extends State<PaymentPage> {
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              title,
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+            _card(
+              context,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: cs.onSurface.withValues(alpha: 0.95),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Бронирование (депозит)',
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: cs.onSurface.withValues(alpha: 0.75),
+                                fontWeight: FontWeight.w600,
+                              ),
+                        ),
+                      ),
+                      Text(
+                        '${widget.depositRub} ₽',
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: cs.onSurface,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Остаток на месте',
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: cs.onSurface.withValues(alpha: 0.75),
+                                fontWeight: FontWeight.w600,
+                              ),
+                        ),
+                      ),
+                      Text(
+                        '$remaining ₽',
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: cs.onSurface,
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  if (addons.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    Divider(color: cs.outlineVariant.withValues(alpha: 0.55)),
+                    const SizedBox(height: 10),
+                    Text(
+                      'Доп. услуги',
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: cs.onSurface.withValues(alpha: 0.95),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    for (final a in addons) ...[
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              _addonName(a),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.bodyMedium
+                                  ?.copyWith(
+                                    fontWeight: FontWeight.w600,
+                                    color: cs.onSurface.withValues(alpha: 0.9),
+                                  ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Text(
+                            '+${(a['priceRubSnapshot'] is num) ? (a['priceRubSnapshot'] as num).toInt() : 0} ₽',
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                  color: cs.onSurface.withValues(alpha: 0.9),
+                                ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                    ],
+                    const SizedBox(height: 6),
+                    Text(
+                      'Итого по доп. услугам: +$addonsPrice ₽',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: cs.onSurface.withValues(alpha: 0.75),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+
+                  const SizedBox(height: 12),
+
+                  if (_dueAt != null) ...[
+                    Text(
+                      'Осталось на оплату: ${_fmt(_left)}',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: _left == Duration.zero ? cs.error : cs.onSurface,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      _left == Duration.zero
+                          ? 'Дедлайн прошёл — запись отменится автоматически.'
+                          : 'Если не оплатить вовремя — запись отменится автоматически.',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: cs.onSurface.withValues(alpha: 0.75),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ] else ...[
+                    Text(
+                      'Дедлайн оплаты не задан.',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: cs.onSurface.withValues(alpha: 0.75),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
             ),
-            const SizedBox(height: 10),
-
-            Text(
-              'Бронирование: ${widget.depositRub} ₽',
-              style: const TextStyle(fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 6),
-
-            if (remaining != null)
-              Text(
-                'Остаток к оплате на месте: $remaining ₽',
-                style: TextStyle(
-                  color: Colors.black.withValues(alpha: 0.65),
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-
-            const SizedBox(height: 14),
-
-            if (_dueAt != null) ...[
-              Text(
-                'Осталось на оплату: ${_fmt(_left)}',
-                style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  color: _left == Duration.zero ? Colors.red : null,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                _left == Duration.zero
-                    ? 'Дедлайн прошёл — запись отменится автоматически.'
-                    : 'Если не оплатить вовремя — запись отменится автоматически.',
-              ),
-            ] else ...[
-              const Text('Дедлайн оплаты не задан.'),
-            ],
 
             const Spacer(),
 

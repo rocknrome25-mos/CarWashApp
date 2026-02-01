@@ -62,11 +62,6 @@ class _ServicesScreenState extends State<ServicesScreen> {
     } catch (_) {}
   }
 
-  String _priceLine(Service s) {
-    final dur = s.durationMin ?? 30;
-    return '${s.priceRub} ₽  •  $dur мин';
-  }
-
   ImageProvider _serviceThumb(Service s) {
     if (s.imageUrl != null && s.imageUrl!.isNotEmpty) {
       return NetworkImage(s.imageUrl!);
@@ -102,16 +97,22 @@ class _ServicesScreenState extends State<ServicesScreen> {
     }
   }
 
-  Widget _viewButton(VoidCallback onPressed) {
-    // “Яндекс-подобная” пилюля
-    return OutlinedButton.icon(
-      onPressed: onPressed,
-      icon: const Icon(Icons.chevron_right, size: 18),
-      label: const Text('Посмотреть'),
-      style: OutlinedButton.styleFrom(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        visualDensity: const VisualDensity(horizontal: -3, vertical: -3),
-        shape: const StadiumBorder(),
+  Widget _pricePill(BuildContext context, int priceRub) {
+    final cs = Theme.of(context).colorScheme;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: cs.primary.withValues(alpha: 0.22), // ✅ “яндекс-похожая” заливка
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: cs.primary.withValues(alpha: 0.35)),
+      ),
+      child: Text(
+        '$priceRub ₽',
+        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+          fontWeight: FontWeight.w700,
+          color: cs.onSurface.withValues(alpha: 0.95),
+        ),
       ),
     );
   }
@@ -208,13 +209,13 @@ class _ServicesScreenState extends State<ServicesScreen> {
                             'Выбери услугу и время',
                             style: Theme.of(context).textTheme.titleMedium
                                 ?.copyWith(
-                                  fontWeight: FontWeight.w900,
+                                  fontWeight: FontWeight.w700,
                                   color: cs.onSurface.withValues(alpha: 0.95),
                                 ),
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            'Сначала открой услугу, затем нажми “Записаться”.',
+                            'Открой услугу и выбери слот.',
                             style: Theme.of(context).textTheme.bodySmall
                                 ?.copyWith(
                                   color: cs.onSurface.withValues(alpha: 0.70),
@@ -233,13 +234,12 @@ class _ServicesScreenState extends State<ServicesScreen> {
               Text(
                 'Услуги',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w900,
+                  fontWeight: FontWeight.w700,
                   color: cs.onSurface.withValues(alpha: 0.95),
                 ),
               ),
               const SizedBox(height: 10),
 
-              // cards
               for (final s in services)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 12),
@@ -256,12 +256,12 @@ class _ServicesScreenState extends State<ServicesScreen> {
                       ),
                       clipBehavior: Clip.antiAlias,
                       child: SizedBox(
-                        height: 104, // ✅ чтобы точно не было overflow
+                        height: 96, // ✅ фикс высоты => нет overflow
                         child: Row(
                           children: [
                             SizedBox(
                               width: 118,
-                              height: 104,
+                              height: 96,
                               child: Image(
                                 image: _serviceThumb(s),
                                 fit: BoxFit.cover,
@@ -286,6 +286,7 @@ class _ServicesScreenState extends State<ServicesScreen> {
                                   12,
                                 ),
                                 child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
@@ -296,31 +297,33 @@ class _ServicesScreenState extends State<ServicesScreen> {
                                           .textTheme
                                           .titleSmall
                                           ?.copyWith(
-                                            fontWeight: FontWeight.w900,
+                                            fontWeight: FontWeight.w700,
                                             color: cs.onSurface.withValues(
                                               alpha: 0.95,
                                             ),
                                           ),
                                     ),
-                                    const SizedBox(height: 6),
-                                    Text(
-                                      _priceLine(s),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodySmall
-                                          ?.copyWith(
-                                            color: cs.onSurface.withValues(
-                                              alpha: 0.72,
-                                            ),
-                                            fontWeight: FontWeight.w700,
+                                    const SizedBox(height: 8),
+                                    Row(
+                                      children: [
+                                        _pricePill(context, s.priceRub),
+                                        const SizedBox(width: 10),
+                                        Expanded(
+                                          child: Text(
+                                            '${s.durationMin ?? 30} мин',
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .bodySmall
+                                                ?.copyWith(
+                                                  color: cs.onSurface
+                                                      .withValues(alpha: 0.72),
+                                                  fontWeight: FontWeight.w600,
+                                                ),
                                           ),
-                                    ),
-                                    const Spacer(),
-                                    Align(
-                                      alignment: Alignment.centerLeft,
-                                      child: _viewButton(() => _openDetails(s)),
+                                        ),
+                                      ],
                                     ),
                                   ],
                                 ),
