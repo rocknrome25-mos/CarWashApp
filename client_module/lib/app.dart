@@ -82,26 +82,34 @@ class _ClientModuleAppState extends State<ClientModuleApp> {
   Widget _brandTitle(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
 
+    // ✅ ЛОГО фиксируем: без внутренних “острых” углов и без “квадрат в квадрате”.
+    // Заполняем плейсхолдер, аккуратный фон, лёгкая рамка.
     return Row(
       children: [
         Container(
           width: 28,
           height: 28,
-          padding: const EdgeInsets.all(4),
           decoration: BoxDecoration(
-            color: cs.surfaceContainerHighest.withValues(alpha: 0.35),
+            color: Colors.white.withValues(alpha: 0.92),
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
               color: cs.outlineVariant.withValues(alpha: 0.35),
             ),
           ),
+          clipBehavior: Clip.antiAlias,
           child: Image.asset(
             'assets/images/logo/carwash_logo_512.png',
-            fit: BoxFit.contain,
+            fit: BoxFit.cover, // ✅ ключ: заполняем весь плейсхолдер
           ),
         ),
         const SizedBox(width: 10),
-        const Text('Автомойка'),
+        Text(
+          'Автомойка',
+          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+            fontWeight: FontWeight.w900,
+            color: cs.onSurface.withValues(alpha: 0.92),
+          ),
+        ),
       ],
     );
   }

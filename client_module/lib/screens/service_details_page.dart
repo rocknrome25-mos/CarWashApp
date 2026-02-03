@@ -20,7 +20,9 @@ class ServiceDetailsPage extends StatelessWidget {
 
   ImageProvider _heroImageProvider() {
     final url = service.imageUrl;
-    if (url != null && url.isNotEmpty) return NetworkImage(url);
+    if (url != null && url.isNotEmpty) {
+      return NetworkImage(url);
+    }
 
     final n = service.name.toLowerCase();
     if (n.contains('воск')) {
@@ -29,24 +31,21 @@ class ServiceDetailsPage extends StatelessWidget {
     if (n.contains('комплекс')) {
       return const AssetImage('assets/images/services/kompleks_1080.jpg');
     }
-    if (n.contains('кузов')) {
-      return const AssetImage('assets/images/services/kuzov_1080.jpg');
-    }
     return const AssetImage('assets/images/services/kuzov_1080.jpg');
   }
 
-  Future<bool> _bookNow(BuildContext context) async {
+  Future<Object?> _bookNow(BuildContext context) async {
     final nav = Navigator.of(context);
 
-    final created = await nav.push<bool>(
+    final created = await nav.push<Object?>(
       MaterialPageRoute(
         builder: (_) =>
             CreateBookingPage(repo: repo, preselectedServiceId: service.id),
       ),
     );
 
-    if (!context.mounted) return false;
-    return created == true;
+    if (!context.mounted) return null;
+    return created;
   }
 
   @override
@@ -106,14 +105,14 @@ class ServiceDetailsPage extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 14),
+
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Text(
                   service.name,
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    color: cs.onSurface.withValues(alpha: 0.95),
-                  ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
                 ),
               ),
               const SizedBox(height: 8),
@@ -123,11 +122,12 @@ class ServiceDetailsPage extends StatelessWidget {
                   _priceLine(service),
                   style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                     color: cs.onSurface.withValues(alpha: 0.75),
-                    fontWeight: FontWeight.w500,
+                    fontWeight: FontWeight.w800,
                   ),
                 ),
               ),
               const SizedBox(height: 18),
+
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Container(
@@ -145,8 +145,7 @@ class ServiceDetailsPage extends StatelessWidget {
                       Text(
                         'Описание',
                         style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w800,
-                          color: cs.onSurface.withValues(alpha: 0.95),
+                          fontWeight: FontWeight.w900,
                         ),
                       ),
                       const SizedBox(height: 8),
@@ -154,7 +153,7 @@ class ServiceDetailsPage extends StatelessWidget {
                         'Описание услуги будет здесь. Что входит, ограничения, рекомендации.',
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           color: cs.onSurface.withValues(alpha: 0.75),
-                          fontWeight: FontWeight.w400,
+                          fontWeight: FontWeight.w600,
                           height: 1.35,
                         ),
                       ),
@@ -178,6 +177,7 @@ class ServiceDetailsPage extends StatelessWidget {
               ),
             ],
           ),
+
           Positioned(
             left: 16,
             right: 16,
@@ -186,15 +186,18 @@ class ServiceDetailsPage extends StatelessWidget {
               height: 54,
               child: FilledButton(
                 onPressed: () async {
-                  final ok = await _bookNow(context);
+                  final res = await _bookNow(context);
                   if (!context.mounted) return;
-                  if (ok) Navigator.of(context).pop(true);
+
+                  if (res == true || res == 'waitlisted') {
+                    Navigator.of(context).pop(res);
+                  }
                 },
                 child: Text(
                   'Записаться',
                   style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w900,
                   ),
                 ),
               ),
@@ -231,16 +234,15 @@ class _InfoChip extends StatelessWidget {
               label,
               style: Theme.of(context).textTheme.labelMedium?.copyWith(
                 color: cs.onSurface.withValues(alpha: 0.65),
-                fontWeight: FontWeight.w600,
+                fontWeight: FontWeight.w700,
               ),
             ),
             const SizedBox(height: 6),
             Text(
               value,
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                fontWeight: FontWeight.w800,
-                color: cs.onSurface.withValues(alpha: 0.95),
-              ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900),
             ),
           ],
         ),

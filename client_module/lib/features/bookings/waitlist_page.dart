@@ -74,6 +74,32 @@ class _WaitlistPageState extends State<WaitlistPage> {
     }
   }
 
+  Widget _sectionCard({required String title, required Widget child}) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w900,
+              color: cs.onSurface.withValues(alpha: 0.95),
+            ),
+          ),
+          const SizedBox(height: 10),
+          child,
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -134,26 +160,11 @@ class _WaitlistPageState extends State<WaitlistPage> {
 
                 final reason = _reasonRu(_s(w, 'reason'));
 
-                return Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).cardColor,
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(
-                      color: cs.outlineVariant.withValues(alpha: 0.6),
-                    ),
-                  ),
+                return _sectionCard(
+                  title: serviceName,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        serviceName,
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w900,
-                          color: cs.onSurface.withValues(alpha: 0.95),
-                        ),
-                      ),
-                      const SizedBox(height: 6),
                       Text(
                         _fmtTime(dtIso),
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -172,7 +183,8 @@ class _WaitlistPageState extends State<WaitlistPage> {
                               ),
                         ),
                       ],
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 12),
+
                       Container(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 12,
@@ -197,7 +209,7 @@ class _WaitlistPageState extends State<WaitlistPage> {
                                 style: Theme.of(context).textTheme.bodySmall
                                     ?.copyWith(
                                       color: cs.onSurface.withValues(
-                                        alpha: 0.85,
+                                        alpha: 0.88,
                                       ),
                                       fontWeight: FontWeight.w800,
                                     ),
@@ -206,6 +218,7 @@ class _WaitlistPageState extends State<WaitlistPage> {
                           ],
                         ),
                       ),
+
                       const SizedBox(height: 10),
                       Text(
                         'Мы свяжемся, когда появится свободное окно.',
@@ -214,9 +227,8 @@ class _WaitlistPageState extends State<WaitlistPage> {
                           fontWeight: FontWeight.w600,
                         ),
                       ),
-                      const SizedBox(height: 10),
 
-                      // Контакты (быстро, без config — если у тебя уже есть /config, можно потом подтянуть)
+                      const SizedBox(height: 12),
                       Wrap(
                         spacing: 10,
                         runSpacing: 10,

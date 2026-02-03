@@ -34,8 +34,18 @@ import { CloseCashDto } from './cash/dto/close-cash.dto';
 import { AdminBayCloseDto } from './dto/admin-bay-close.dto';
 import { AdminBayOpenDto } from './dto/admin-bay-open.dto';
 
+// ✅ for upload-to-disk (no Express.Multer typing needed)
+import { promises as fs } from 'fs';
+import * as path from 'path';
+
 const F_CASH = 'CASH_DRAWER';
 const F_MOVE = 'BOOKING_MOVE';
+
+type UploadedFileLike = {
+  buffer: Buffer;
+  mimetype?: string;
+  originalname?: string;
+};
 
 @Injectable()
 export class AdminService {
@@ -385,19 +395,14 @@ export class AdminService {
   async closeShift(userId: string, shiftId: string) {
     const { user, shift } = await this._requireActiveShift(userId, shiftId);
 
-    const cashEnabled = await this.cfg.isEnabledByLocationId(
-      shift.locationId,
-      F_CASH,
-    );
+    const cashEnabled = await this.cfg.isEnabledByLocationId(shift.locationId, F_CASH);
     if (cashEnabled) {
       const cashClosed = await this.prisma.shiftCashEvent.findFirst({
         where: { shiftId: shift.id, type: ShiftCashEventType.CLOSE_COUNT },
         select: { id: true },
       });
       if (!cashClosed) {
-        throw new ConflictException(
-          'Cash close is required before closing shift',
-        );
+        throw new ConflictException('Cash close is required before closing shift');
       }
     }
 
@@ -446,9 +451,7 @@ export class AdminService {
       include: {
         car: true,
         client: { select: { id: true, phone: true, name: true } },
-        service: {
-          select: { id: true, name: true, durationMin: true, priceRub: true },
-        },
+        service: { select: { id: true, name: true, durationMin: true, priceRub: true } },
         payments: { orderBy: { paidAt: 'asc' } },
         addons: { include: { service: true } },
         photos: { orderBy: { createdAt: 'asc' } },
@@ -456,10 +459,7 @@ export class AdminService {
     });
 
     return rows.map((b) => {
-      const paidTotal = (b.payments ?? []).reduce(
-        (s, p) => s + (p.amountRub ?? 0),
-        0,
-      );
+      const paidTotal = (b.payments ?? []).reduce((s, p) => s + (p.amountRub ?? 0), 0);
 
       const basePrice = b.service?.priceRub ?? 0;
       const discount = b.discountRub ?? 0;
@@ -536,12 +536,7 @@ export class AdminService {
 
   /* ===================== bookings: start/move/finish ===================== */
 
-  async startBooking(
-    userId: string,
-    shiftId: string,
-    bookingId: string,
-    dto?: AdminBookingStartDto,
-  ) {
+  async startBooking(userId: string, shiftId: string, bookingId: string, dto?: AdminBookingStartDto) {
     const { user, shift } = await this._requireActiveShift(userId, shiftId);
 
     const startedAt = this._parseIsoOrNow(dto?.startedAt);
@@ -613,14 +608,8 @@ export class AdminService {
     });
   }
 
-  async moveBooking(
-    userId: string,
-    shiftId: string,
-    bookingId: string,
-    dto?: AdminBookingMoveDto,
-  ) {
+  async moveBooking(userId: string, shiftId: string, bookingId: string, dto?: AdminBookingMoveDto) {
     const { user, shift } = await this._requireActiveShift(userId, shiftId);
-
     await this._requireFeature(shift.locationId, F_MOVE);
 
     const newDateTimeRaw = (dto?.newDateTime ?? '').trim();
@@ -630,7 +619,6 @@ export class AdminService {
 
     const reason = (dto?.reason ?? '').trim();
     if (!reason) throw new BadRequestException('reason is required');
-
     if (dto?.clientAgreed !== true) throw new BadRequestException('clientAgreed must be true');
 
     const newBayId =
@@ -709,12 +697,7 @@ export class AdminService {
     return updated;
   }
 
-  async finishBooking(
-    userId: string,
-    shiftId: string,
-    bookingId: string,
-    dto?: AdminBookingFinishDto,
-  ) {
+  async finishBooking(userId: string, shiftId: string, bookingId: string, dto?: AdminBookingFinishDto) {
     const { user, shift } = await this._requireActiveShift(userId, shiftId);
 
     const finishedAt = this._parseIsoOrNow(dto?.finishedAt);
@@ -785,6 +768,7 @@ export class AdminService {
     });
   }
 
+  // controller calls cashOpenFloat/cashIn/cashOut/cashClose/cashExpected
   async cashOpenFloat(userId: string, shiftId: string, dto: OpenFloatDto) {
     const { shift } = await this._requireActiveShift(userId, shiftId);
     await this._requireFeature(shift.locationId, F_CASH);
@@ -920,12 +904,7 @@ export class AdminService {
     return PaymentMethodType.CARD;
   }
 
-  async payBookingAdmin(
-    userId: string,
-    shiftId: string,
-    bookingId: string,
-    dto: AdminBookingPayDto,
-  ) {
+  async payBookingAdmin(userId: string, shiftId: string, bookingId: string, dto: AdminBookingPayDto) {
     const { user, shift } = await this._requireActiveShift(userId, shiftId);
 
     const methodType = this._parseMethodType(dto.methodType);
@@ -1009,14 +988,8 @@ export class AdminService {
 
   /* ===================== ADMIN DISCOUNT ===================== */
 
-  async applyDiscount(
-    userId: string,
-    shiftId: string,
-    bookingId: string,
-    dto: AdminBookingDiscountDto,
-  ) {
+  async applyDiscount(userId: string, shiftId: string, bookingId: string, dto: AdminBookingDiscountDto) {
     const { user, shift } = await this._requireActiveShift(userId, shiftId);
-
     await this._requireFeature(shift.locationId, 'DISCOUNTS');
 
     const discountRub = Math.trunc(Number(dto.discountRub));
@@ -1084,13 +1057,7 @@ export class AdminService {
     });
   }
 
-  async setBayActive(
-    userId: string,
-    shiftId: string,
-    bayNumber: number,
-    isActive: boolean,
-    reason?: string,
-  ) {
+  async setBayActive(userId: string, shiftId: string, bayNumber: number, isActive: boolean, reason?: string) {
     const { user, shift } = await this._requireActiveShift(userId, shiftId);
 
     const n = Math.trunc(Number(bayNumber));
@@ -1157,7 +1124,6 @@ export class AdminService {
     const { shift } = await this._requireActiveShift(userId, shiftId);
     const { from, to } = this._parseDayRangeLocal(dateYmd);
 
-    // ✅ только текущие WAITING и только по desiredDateTime выбранного дня
     return this.prisma.waitlistRequest.findMany({
       where: {
         locationId: shift.locationId,
@@ -1176,8 +1142,6 @@ export class AdminService {
   async getWaitlistDay(userId: string, shiftId: string, dateYmd: string) {
     return this.waitlistDay(userId, shiftId, dateYmd);
   }
-
-  /* ===================== WAITLIST -> BOOKING (convert) ===================== */
 
   async convertWaitlistToBooking(
     userId: string,
@@ -1207,7 +1171,6 @@ export class AdminService {
 
     await this._requireBayActiveOrThrow(shift.locationId, bayId);
 
-    // duration = base + 15 buffer => round to 30
     const base = this._serviceDurationOrDefault(wl.service?.durationMin);
     const raw = base + 15;
     const durationTotalMin = this._roundUpToStepMin(raw);
@@ -1285,12 +1248,7 @@ export class AdminService {
     }));
   }
 
-  async addBookingAddon(
-    userId: string,
-    shiftId: string,
-    bookingId: string,
-    dto: { serviceId: string; qty?: any },
-  ) {
+  async addBookingAddon(userId: string, shiftId: string, bookingId: string, dto: { serviceId: string; qty?: any }) {
     const { shift } = await this._requireActiveShift(userId, shiftId);
     const booking = await this._requireBookingInShiftLocation(shift.locationId, bookingId);
 
@@ -1337,12 +1295,7 @@ export class AdminService {
     };
   }
 
-  async removeBookingAddon(
-    userId: string,
-    shiftId: string,
-    bookingId: string,
-    serviceId: string,
-  ) {
+  async removeBookingAddon(userId: string, shiftId: string, bookingId: string, serviceId: string) {
     const { shift } = await this._requireActiveShift(userId, shiftId);
     const booking = await this._requireBookingInShiftLocation(shift.locationId, bookingId);
 
@@ -1377,12 +1330,7 @@ export class AdminService {
     });
   }
 
-  async addBookingPhoto(
-    userId: string,
-    shiftId: string,
-    bookingId: string,
-    dto: { kind: string; url: string; note?: string },
-  ) {
+  async addBookingPhoto(userId: string, shiftId: string, bookingId: string, dto: { kind: string; url: string; note?: string }) {
     const { user, shift } = await this._requireActiveShift(userId, shiftId);
     const booking = await this._requireBookingInShiftLocation(shift.locationId, bookingId);
 
@@ -1397,6 +1345,66 @@ export class AdminService {
     if (!allowed.has(kind)) {
       throw new BadRequestException('kind must be BEFORE/AFTER/DAMAGE/OTHER');
     }
+
+    const created = await this.prisma.bookingPhoto.create({
+      data: {
+        bookingId: booking.id,
+        kind: kind as any,
+        url,
+        note: note.length ? note : null,
+        uploadedByUserId: user.id,
+      },
+      select: {
+        id: true,
+        kind: true,
+        url: true,
+        note: true,
+        createdAt: true,
+        uploadedByUserId: true,
+      },
+    });
+
+    this.ws.emitBookingChanged(booking.locationId, booking.bayId ?? 1);
+    return created;
+  }
+
+  // ✅ NEW: multipart upload handler (called from controller)
+  async uploadBookingPhoto(
+    userId: string,
+    shiftId: string,
+    bookingId: string,
+    dto: { kind: string; note?: string; file: UploadedFileLike },
+  ) {
+    const { user, shift } = await this._requireActiveShift(userId, shiftId);
+    const booking = await this._requireBookingInShiftLocation(shift.locationId, bookingId);
+
+    const kind = (dto?.kind ?? '').toString().trim().toUpperCase();
+    const note = (dto?.note ?? '').toString().trim();
+    const file = dto?.file;
+
+    if (!kind) throw new BadRequestException('kind is required');
+    if (!file || !file.buffer) throw new BadRequestException('file is required');
+
+    const allowed = new Set(['BEFORE', 'AFTER', 'DAMAGE', 'OTHER']);
+    if (!allowed.has(kind)) {
+      throw new BadRequestException('kind must be BEFORE/AFTER/DAMAGE/OTHER');
+    }
+
+    const uploadsRoot = path.resolve(process.cwd(), 'uploads', 'bookings', booking.id);
+    await fs.mkdir(uploadsRoot, { recursive: true });
+
+    const mime = (file.mimetype ?? '').toLowerCase();
+    const ext =
+      mime.includes('png') ? '.png' :
+      mime.includes('webp') ? '.webp' :
+      '.jpg';
+
+    const filename = `${Date.now()}_${kind.toLowerCase()}${ext}`;
+    const fullPath = path.join(uploadsRoot, filename);
+
+    await fs.writeFile(fullPath, file.buffer);
+
+    const url = `/uploads/bookings/${booking.id}/${filename}`;
 
     const created = await this.prisma.bookingPhoto.create({
       data: {

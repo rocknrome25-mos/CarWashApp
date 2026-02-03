@@ -4,7 +4,7 @@ import 'dart:convert';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 class BookingRealtimeEvent {
-  final String type; // 'booking.changed'
+  final String type; // e.g. 'booking.changed'
   final String locationId;
   final int bayId;
   final DateTime at;
@@ -16,14 +16,48 @@ class BookingRealtimeEvent {
     required this.at,
   });
 
+  static String _str(dynamic v) => (v ?? '').toString();
+
+  static int _int(dynamic v, {int fallback = 1}) {
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    final n = int.tryParse(_str(v));
+    return n ?? fallback;
+  }
+
+  static DateTime _dt(dynamic v) {
+    final s = _str(v);
+    final parsed = DateTime.tryParse(s);
+    return parsed ?? DateTime.now().toUtc();
+  }
+
   factory BookingRealtimeEvent.fromJson(Map<String, dynamic> j) {
+    // Support "type" and "event"
+    var type = _str(j['type']).trim();
+    if (type.isEmpty) type = _str(j['event']).trim();
+
+    // normalize: treat any booking.* as booking.changed (so UI refresh always happens)
+    if (type.startsWith('booking.') && type != 'booking.changed') {
+      type = 'booking.changed';
+    }
+
+    // Support camelCase + snake_case
+    final locationId = _str(j['locationId']).trim().isNotEmpty
+        ? _str(j['locationId']).trim()
+        : _str(j['location_id']).trim();
+
+    final bayId = j.containsKey('bayId')
+        ? _int(j['bayId'], fallback: 1)
+        : _int(j['bay_id'], fallback: 1);
+
+    // Support "at" or "ts"
+    final at = j.containsKey('at') ? _dt(j['at']) : _dt(j['ts']);
+
     return BookingRealtimeEvent(
-      type: (j['type'] ?? '').toString(),
-      locationId: (j['locationId'] ?? '').toString(),
-      bayId: (j['bayId'] as num?)?.toInt() ?? 1,
-      at:
-          DateTime.tryParse((j['at'] ?? '').toString()) ??
-          DateTime.now().toUtc(),
+      type: type,
+      locationId: locationId,
+      bayId: bayId,
+      at: at,
     );
   }
 }
@@ -42,7 +76,6 @@ class RealtimeClient {
 
   RealtimeClient({required this.wsUri});
 
-  /// Helper: build ws://.../ws from http baseUrl
   factory RealtimeClient.fromBaseUrl(String baseUrl) {
     final b = baseUrl.trim();
     final httpUri = Uri.parse(b);
@@ -70,10 +103,13 @@ class RealtimeClient {
       _sub = _ch!.stream.listen(
         (msg) {
           try {
-            final m = jsonDecode(msg as String);
-            if (m is Map<String, dynamic>) {
-              final ev = BookingRealtimeEvent.fromJson(m);
-              if (ev.type.isNotEmpty) {
+            final raw = msg is String ? msg : msg.toString();
+            final decoded = jsonDecode(raw);
+
+            if (decoded is Map) {
+              final map = Map<String, dynamic>.from(decoded);
+              final ev = BookingRealtimeEvent.fromJson(map);
+              if (ev.type.trim().isNotEmpty) {
                 _ctrl.add(ev);
               }
             }

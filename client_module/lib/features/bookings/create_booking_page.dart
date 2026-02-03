@@ -1,3 +1,5 @@
+// (ФАЙЛ ЦЕЛИКОМ — твой, с 2 правками: mounted guard + Align картинки)
+
 import 'dart:async';
 import 'dart:math';
 
@@ -10,6 +12,8 @@ import '../../core/realtime/realtime_client.dart';
 import 'payment_page.dart';
 
 enum _BayMode { any, bay1, bay2 }
+
+enum _DayPart { morning, day, evening }
 
 class CreateBookingPage extends StatefulWidget {
   final AppRepository repo;
@@ -40,8 +44,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
   static const Color _greenLine = Color(0xFF2DBD6E);
   static const Color _blueLine = Color(0xFF2D9CDB);
 
-  final _formKey = GlobalKey<FormState>();
-
   List<LocationLite> _locations = const [];
   LocationLite? _location;
 
@@ -66,13 +68,14 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
   Object? _error;
   bool _saving = false;
 
-  // used only for first auto-pick
   bool _didInitialAutoPick = false;
 
   StreamSubscription<BookingRealtimeEvent>? _rtSub;
 
-  // Addons selection (toggle only)
   final Set<String> _selectedAddonServiceIds = <String>{};
+
+  // ✅ для “как у Яндекса”: свайп машин
+  final PageController _carsPage = PageController(viewportFraction: 1.0);
 
   @override
   void initState() {
@@ -96,8 +99,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
           _selectedSlotStart = null;
           _pickedBayIdForAny = null;
         });
-
-        // slot became busy -> auto-pick new immediately
         await _autoPickBestSlotForCurrentState(forceBusyRefresh: false);
       }
     });
@@ -106,6 +107,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
   @override
   void dispose() {
     _rtSub?.cancel();
+    _carsPage.dispose();
     _commentCtrl.dispose();
     super.dispose();
   }
@@ -113,6 +115,13 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
   // ---------------- helpers ----------------
 
   static DateTime _dateOnly(DateTime dt) => DateTime(dt.year, dt.month, dt.day);
+
+  _DayPart _currentDayPart() {
+    final h = DateTime.now().hour;
+    if (h < 12) return _DayPart.morning;
+    if (h < 17) return _DayPart.day;
+    return _DayPart.evening;
+  }
 
   Service? _findService(String? id) {
     if (id == null) return null;
@@ -162,18 +171,15 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     return _roundUpToStepMin(raw, _slotStepMin);
   }
 
+  int _washTimeMinApprox() {
+    final base = _serviceDurationOrDefault(serviceId);
+    final addon = _addonsTotalDurationMin();
+    return max(base + addon, 0);
+  }
+
   String _fmtTime(DateTime d) {
     String two(int n) => n.toString().padLeft(2, '0');
     return '${two(d.hour)}:${two(d.minute)}';
-  }
-
-  String _carTitleForUi(Car c) {
-    final make = c.make.trim();
-    final model = c.model.trim();
-    if (model.isEmpty || model == '—') {
-      return make.isEmpty ? 'Авто' : make;
-    }
-    return '$make $model';
   }
 
   DateTime _ceilToStep(DateTime dt, int stepMin) {
@@ -229,9 +235,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
   bool _isBusySlot(DateTime slotStart) {
     final bayId = _currentBayIdOrNull();
-    if (bayId != null) {
-      return _isBusySlotForBay(slotStart, bayId);
-    }
+    if (bayId != null) return _isBusySlotForBay(slotStart, bayId);
     final busy1 = _isBusySlotForBay(slotStart, 1);
     final busy2 = _isBusySlotForBay(slotStart, 2);
     return busy1 && busy2;
@@ -256,7 +260,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
     final slots = <DateTime>[];
     var cur = start;
-
     while (cur.isBefore(end)) {
       if (_endsBeforeClose(cur)) slots.add(cur);
       cur = cur.add(const Duration(minutes: _slotStepMin));
@@ -280,7 +283,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
   Future<int?> _pickBayForSlotAny(DateTime slotStart) async {
     final busy1 = _isBusySlotForBay(slotStart, 1);
     final busy2 = _isBusySlotForBay(slotStart, 2);
-
     if (!busy1) return 1;
     if (!busy2) return 2;
     return null;
@@ -365,9 +367,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     ]);
 
     if (!mounted) return;
-    setState(() {
-      _busyByBay = {1: results[0], 2: results[1]};
-    });
+    setState(() => _busyByBay = {1: results[0], 2: results[1]});
 
     final cur = _selectedSlotStart;
     if (cur != null && _bayMode == _BayMode.any && !_isBusySlot(cur)) {
@@ -446,6 +446,8 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
         _didInitialAutoPick = true;
         await _autoPickBestSlotForCurrentState(forceBusyRefresh: false);
       }
+
+      if (!mounted) return;
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -474,29 +476,257 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
   String _weekdayShortRu(int weekday) {
     switch (weekday) {
       case DateTime.monday:
-        return 'Пн';
+        return 'ПН';
       case DateTime.tuesday:
-        return 'Вт';
+        return 'ВТ';
       case DateTime.wednesday:
-        return 'Ср';
+        return 'СР';
       case DateTime.thursday:
-        return 'Чт';
+        return 'ЧТ';
       case DateTime.friday:
-        return 'Пт';
+        return 'ПТ';
       case DateTime.saturday:
-        return 'Сб';
+        return 'СБ';
       case DateTime.sunday:
-        return 'Вс';
+        return 'ВС';
     }
     return '';
   }
 
-  String _chipLabelForDate(DateTime d) {
-    final today = _dateOnly(DateTime.now());
-    final diff = _dateOnly(d).difference(today).inDays;
-    if (diff == 0) return 'Сегодня';
-    if (diff == 1) return 'Завтра';
-    return '${_weekdayShortRu(d.weekday)} ${d.day}';
+  // ---------------- UI: cars (FULL WIDTH, swipe like Yandex) ----------------
+
+  String _carIconAsset(Car c) {
+    final bt = (c.bodyType ?? '').toLowerCase().trim();
+    final title = c.title.toLowerCase();
+    final hint = '$bt $title';
+    const base = 'assets/images/cars';
+
+    if (hint.contains('suv') ||
+        hint.contains('внедорож') ||
+        hint.contains('крос') ||
+        hint.contains('джип')) {
+      return '$base/suv.png';
+    }
+    if (hint.contains('sedan') || hint.contains('седан')) {
+      return '$base/sedan.png';
+    }
+    return '$base/incognito.png';
+  }
+
+  Widget _carTile(Car c, {required bool selected}) {
+    final cs = Theme.of(context).colorScheme;
+
+    final borderColor = selected
+        ? cs.primary.withValues(alpha: 0.65)
+        : cs.outlineVariant.withValues(alpha: 0.55);
+
+    final bg = selected
+        ? cs.primary.withValues(alpha: 0.12)
+        : cs.surfaceContainerHighest.withValues(alpha: 0.16);
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(22),
+      onTap: _saving ? null : () => setState(() => carId = c.id),
+      child: Container(
+        width: double.infinity,
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: borderColor),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          children: [
+            SizedBox(
+              height: 140,
+              width: double.infinity,
+              child: Align(
+                alignment: const Alignment(
+                  0,
+                  0.15,
+                ), // ✅ сдвиг вниз (вертикальная центровка)
+                child: Image.asset(
+                  _carIconAsset(c),
+                  width: 320,
+                  height: 140,
+                  fit: BoxFit.contain,
+                  filterQuality: FilterQuality.high,
+                  errorBuilder: (_, __, ___) => Icon(
+                    Icons.directions_car,
+                    size: 60,
+                    color: cs.onSurface.withValues(alpha: 0.9),
+                  ),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      c.title.trim().isEmpty ? 'Авто' : c.title.trim(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        color: cs.onSurface.withValues(alpha: 0.92),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: cs.surfaceContainerHighest.withValues(alpha: 0.18),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(
+                        color: cs.outlineVariant.withValues(alpha: 0.6),
+                      ),
+                    ),
+                    child: Text(
+                      c.plateDisplay,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        color: cs.onSurface.withValues(alpha: 0.92),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _carsSelector() {
+    final cs = Theme.of(context).colorScheme;
+
+    if (_cars.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: cs.surfaceContainerHighest.withValues(alpha: 0.16),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
+        ),
+        child: Text(
+          'Сначала добавь авто в профиле.',
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+            color: cs.onSurface.withValues(alpha: 0.80),
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      );
+    }
+
+    final selectedId = carId ?? _cars.first.id;
+    final selectedIndex = max(0, _cars.indexWhere((c) => c.id == selectedId));
+    if (selectedIndex >= 0 && selectedIndex < _cars.length) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        try {
+          _carsPage.jumpToPage(selectedIndex);
+        } catch (_) {}
+      });
+    }
+
+    return SizedBox(
+      height: 220,
+      child: PageView.builder(
+        controller: _carsPage,
+        itemCount: _cars.length,
+        onPageChanged: (i) {
+          if (i >= 0 && i < _cars.length) {
+            setState(() => carId = _cars[i].id);
+          }
+        },
+        itemBuilder: (_, i) {
+          final c = _cars[i];
+          return Padding(
+            padding: const EdgeInsets.only(right: 0),
+            child: _carTile(c, selected: c.id == (carId ?? _cars.first.id)),
+          );
+        },
+      ),
+    );
+  }
+
+  // ---------------- UI: date squares ----------------
+
+  Widget _dateSquare(DateTime d) {
+    final cs = Theme.of(context).colorScheme;
+    final dd = _dateOnly(d);
+    final selected = dd == _selectedDate;
+
+    final bg = selected
+        ? cs.primary.withValues(alpha: 0.20)
+        : cs.surfaceContainerHighest.withValues(alpha: 0.14);
+    final border = selected
+        ? cs.primary.withValues(alpha: 0.65)
+        : cs.outlineVariant.withValues(alpha: 0.55);
+
+    final top = _weekdayShortRu(dd.weekday);
+    final day = dd.day.toString();
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: _saving ? null : () => _selectDate(dd),
+      child: Container(
+        width: 56,
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: border),
+        ),
+        child: Column(
+          children: [
+            Text(
+              top,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                fontWeight: FontWeight.w900,
+                color: cs.onSurface.withValues(alpha: 0.70),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              day,
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w900,
+                color: cs.onSurface.withValues(alpha: 0.92),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ---------------- UI: bay selector row ----------------
+
+  Future<void> _selectBay(_BayMode mode) async {
+    setState(() {
+      _bayMode = mode;
+      _pickedBayIdForAny = null;
+    });
+    await _autoPickBestSlotForCurrentState(forceBusyRefresh: false);
+  }
+
+  String _bayTitleForMode(_BayMode m) {
+    switch (m) {
+      case _BayMode.any:
+        return 'Любая линия';
+      case _BayMode.bay1:
+        return 'Зелёная';
+      case _BayMode.bay2:
+        return 'Синяя';
+    }
   }
 
   Color _bayStripeColor(BuildContext context, _BayMode m) {
@@ -509,38 +739,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
       case _BayMode.bay2:
         return _blueLine;
     }
-  }
-
-  String _bayTitleForMode(_BayMode m) {
-    switch (m) {
-      case _BayMode.any:
-        return 'Любая линия';
-      case _BayMode.bay1:
-        return 'Зелёная линия';
-      case _BayMode.bay2:
-        return 'Синяя линия';
-    }
-  }
-
-  String _pickedBayLabel(int bayId) {
-    if (bayId == 1) return 'Зелёная линия';
-    if (bayId == 2) return 'Синяя линия';
-    return 'Линия';
-  }
-
-  Color _pickedBayColor(BuildContext context, int bayId) {
-    if (bayId == 1) return _greenLine;
-    if (bayId == 2) return _blueLine;
-    return Theme.of(context).colorScheme.primary;
-  }
-
-  Future<void> _selectBay(_BayMode mode) async {
-    setState(() {
-      _bayMode = mode;
-      _pickedBayIdForAny = null;
-    });
-
-    await _autoPickBestSlotForCurrentState(forceBusyRefresh: false);
   }
 
   String _bayIconAsset(_BayMode mode) {
@@ -557,8 +755,8 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
   Widget _bayIcon(_BayMode mode, Color fallbackColor) {
     return Image.asset(
       _bayIconAsset(mode),
-      width: 22,
-      height: 22,
+      width: 20,
+      height: 20,
       fit: BoxFit.contain,
       errorBuilder: (_, __, ___) => Container(
         width: 10,
@@ -571,98 +769,288 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     );
   }
 
-  // ---------------- Bay selector ----------------
-
-  Widget _lineSelectorAccordion() {
+  Widget _lineSelectorRow() {
     final cs = Theme.of(context).colorScheme;
 
-    Widget item({
-      required _BayMode mode,
-      required bool selected,
-      required String title,
-      required Color stripe,
-    }) {
-      return InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: () => _selectBay(mode),
-        child: Container(
-          constraints: const BoxConstraints(minWidth: 150),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-          decoration: BoxDecoration(
-            color: selected
-                ? stripe.withValues(alpha: 0.10)
-                : Theme.of(context).cardColor,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
+    Widget item(_BayMode mode, {required int flex}) {
+      final selected = _bayMode == mode;
+      final stripe = _bayStripeColor(context, mode);
+
+      return Expanded(
+        flex: flex,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: _saving ? null : () => _selectBay(mode),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+            decoration: BoxDecoration(
               color: selected
-                  ? stripe.withValues(alpha: 0.55)
-                  : cs.outlineVariant.withValues(alpha: 0.6),
-            ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 4,
-                height: 26,
-                decoration: BoxDecoration(
-                  color: stripe,
-                  borderRadius: BorderRadius.circular(999),
-                ),
+                  ? stripe.withValues(alpha: 0.12)
+                  : cs.surfaceContainerHighest.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: selected
+                    ? stripe.withValues(alpha: 0.70)
+                    : cs.outlineVariant.withValues(alpha: 0.60),
               ),
-              const SizedBox(width: 10),
-              _bayIcon(mode, stripe),
-              const SizedBox(width: 10),
-              Flexible(
-                child: Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w900,
-                    color: cs.onSurface.withValues(alpha: 0.92),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 4,
+                  height: 24,
+                  decoration: BoxDecoration(
+                    color: stripe,
+                    borderRadius: BorderRadius.circular(999),
                   ),
                 ),
-              ),
-              const SizedBox(width: 10),
-              if (selected) Icon(Icons.check_circle, color: stripe, size: 18),
-            ],
+                const SizedBox(width: 8),
+                _bayIcon(mode, stripe),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    _bayTitleForMode(mode),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      fontWeight: FontWeight.w900,
+                      color: cs.onSurface.withValues(alpha: 0.92),
+                    ),
+                  ),
+                ),
+                if (selected) ...[
+                  const SizedBox(width: 6),
+                  Icon(Icons.check_circle, color: stripe, size: 18),
+                ],
+              ],
+            ),
           ),
         ),
       );
     }
 
-    return Wrap(
-      spacing: 10,
-      runSpacing: 10,
+    return Row(
       children: [
-        item(
-          mode: _BayMode.any,
-          selected: _bayMode == _BayMode.any,
-          title: 'Любая линия',
-          stripe: Theme.of(context).colorScheme.primary,
-        ),
-        item(
-          mode: _BayMode.bay1,
-          selected: _bayMode == _BayMode.bay1,
-          title: 'Зелёная линия',
-          stripe: _greenLine,
-        ),
-        item(
-          mode: _BayMode.bay2,
-          selected: _bayMode == _BayMode.bay2,
-          title: 'Синяя линия',
-          stripe: _blueLine,
-        ),
+        item(_BayMode.any, flex: 2),
+        const SizedBox(width: 10),
+        item(_BayMode.bay1, flex: 1),
+        const SizedBox(width: 10),
+        item(_BayMode.bay2, flex: 1),
       ],
     );
   }
 
-  // ---------------- Slots ----------------
+  // ---------------- UI: addons ----------------
+
+  List<Service> _addonCandidates() {
+    final sid = serviceId;
+    final list = _services
+        .where((s) => sid == null ? true : s.id != sid)
+        .toList();
+    list.sort((a, b) => a.priceRub.compareTo(b.priceRub));
+    return list;
+  }
+
+  List<Map<String, dynamic>> _addonsPayload() {
+    final out = <Map<String, dynamic>>[];
+    for (final sid in _selectedAddonServiceIds) {
+      out.add({'serviceId': sid, 'qty': 1});
+    }
+    return out;
+  }
+
+  Future<void> _toggleAddon(Service s, bool value) async {
+    setState(() {
+      if (value) {
+        _selectedAddonServiceIds.add(s.id);
+      } else {
+        _selectedAddonServiceIds.remove(s.id);
+      }
+    });
+
+    await _refreshBusy(force: true);
+    await _autoPickBestSlotForCurrentState(forceBusyRefresh: false);
+  }
+
+  Widget _addonMetaPill(String text) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: cs.primary.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: cs.primary.withValues(alpha: 0.35)),
+      ),
+      child: Text(
+        text,
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+          fontWeight: FontWeight.w900,
+          color: cs.onSurface.withValues(alpha: 0.92),
+        ),
+      ),
+    );
+  }
+
+  Widget _addonRow(Service s, {bool dense = false}) {
+    final cs = Theme.of(context).colorScheme;
+    final selected = _selectedAddonServiceIds.contains(s.id);
+
+    final dur = (s.durationMin ?? 0);
+    final price = s.priceRub;
+
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: 12, vertical: dense ? 10 : 12),
+      decoration: BoxDecoration(
+        color: cs.primary.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: cs.primary.withValues(alpha: 0.30)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  s.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    color: cs.onSurface.withValues(alpha: 0.95),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    _addonMetaPill('$price ₽'),
+                    _addonMetaPill('+$dur мин'),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          Switch(
+            value: selected,
+            onChanged: _saving ? null : (v) => _toggleAddon(s, v),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openAllAddonsSheet() async {
+    final list = _addonCandidates();
+    if (list.isEmpty) return;
+
+    await showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (_) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Дополнительные услуги',
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w900),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Flexible(
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: list.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 10),
+                    itemBuilder: (_, i) => _addonRow(list[i]),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Text('Готово'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _addonsSection() {
+    final list = _addonCandidates();
+    if (list.isEmpty) return const SizedBox.shrink();
+
+    final preview = list.take(2).toList();
+    final totalDur = _addonsTotalDurationMin();
+    final totalPrice = _addonsTotalPriceRub();
+
+    final cs = Theme.of(context).colorScheme;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        color: cs.primary.withValues(alpha: 0.08),
+        border: Border.all(color: cs.primary.withValues(alpha: 0.28)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Дополнительные услуги',
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w900,
+              color: cs.onSurface.withValues(alpha: 0.95),
+            ),
+          ),
+          const SizedBox(height: 10),
+          for (final s in preview) ...[
+            _addonRow(s, dense: true),
+            const SizedBox(height: 10),
+          ],
+          if (list.length > 2)
+            Center(
+              child: TextButton(
+                onPressed: _saving ? null : _openAllAddonsSheet,
+                child: const Text('Посмотреть все'),
+              ),
+            ),
+          if (totalDur > 0 || totalPrice > 0) ...[
+            const SizedBox(height: 6),
+            Text(
+              'Выбрано: +$totalDur мин • +$totalPrice ₽',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                fontWeight: FontWeight.w900,
+                color: cs.onSurface.withValues(alpha: 0.85),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // ---------------- UI: time ----------------
 
   List<DateTime> _visibleSlotsForCurrentMode() {
     final allSlots = _buildSlotsForDay(_selectedDate);
-
     final minNow = _minSelectableNowLocal();
     final isSelectedDayToday = _selectedDate == _dateOnly(DateTime.now());
 
@@ -689,7 +1077,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     final cs = Theme.of(context).colorScheme;
     return OutlinedButton.styleFrom(
       side: BorderSide(color: cs.outlineVariant.withValues(alpha: 0.8)),
-      backgroundColor: Colors.black.withValues(alpha: 0.03),
+      backgroundColor: cs.surfaceContainerHighest.withValues(alpha: 0.10),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       shape: const StadiumBorder(),
       visualDensity: const VisualDensity(horizontal: -2, vertical: -2),
@@ -727,7 +1115,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     return selected
         ? FilledButton(
             style: _slotStyleFilled(),
-            onPressed: select,
+            onPressed: _saving ? null : select,
             child: Text(
               label,
               style: const TextStyle(fontWeight: FontWeight.w900),
@@ -735,7 +1123,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
           )
         : OutlinedButton(
             style: _slotStyleOutlined(),
-            onPressed: select,
+            onPressed: _saving ? null : select,
             child: Text(
               label,
               style: const TextStyle(fontWeight: FontWeight.w900),
@@ -746,16 +1134,15 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
   Widget _timeSection({
     required String title,
     required List<DateTime> slots,
-    bool initiallyExpanded = true,
+    required bool initiallyExpanded,
   }) {
     if (slots.isEmpty) return const SizedBox.shrink();
 
     final cs = Theme.of(context).colorScheme;
-
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.14),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
       ),
@@ -781,407 +1168,77 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     );
   }
 
-  // ---------------- Addons UI ----------------
+  // ---------------- WAITLIST dialog ----------------
 
-  List<Service> _addonCandidates() {
-    final sid = serviceId;
-    final list = _services
-        .where((s) => sid == null ? true : s.id != sid)
-        .toList();
-    list.sort((a, b) => a.priceRub.compareTo(b.priceRub));
-    return list;
-  }
-
-  List<Map<String, dynamic>> _addonsPayload() {
-    final out = <Map<String, dynamic>>[];
-    for (final sid in _selectedAddonServiceIds) {
-      out.add({'serviceId': sid, 'qty': 1});
-    }
-    return out;
-  }
-
-  Future<void> _toggleAddon(Service s, bool value) async {
-    setState(() {
-      if (value) {
-        _selectedAddonServiceIds.add(s.id);
-      } else {
-        _selectedAddonServiceIds.remove(s.id);
-      }
-    });
-
-    await _refreshBusy(force: true);
-    await _autoPickBestSlotForCurrentState(forceBusyRefresh: false);
-  }
-
-  Widget _addonRow(Service s, {bool dense = false}) {
-    final cs = Theme.of(context).colorScheme;
-    final selected = _selectedAddonServiceIds.contains(s.id);
-
-    final dur = (s.durationMin ?? 0);
-    final price = s.priceRub;
-
-    return Container(
-      padding: EdgeInsets.symmetric(horizontal: 12, vertical: dense ? 10 : 12),
-      decoration: BoxDecoration(
-        color: cs.surfaceContainerHighest.withValues(alpha: 0.18),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  s.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w900,
-                    color: cs.onSurface.withValues(alpha: 0.95),
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: cs.surfaceContainerHigh.withValues(alpha: 0.55),
-                        borderRadius: BorderRadius.circular(999),
-                        border: Border.all(
-                          color: cs.outlineVariant.withValues(alpha: 0.55),
-                        ),
-                      ),
-                      child: Text(
-                        '$price ₽',
-                        style: Theme.of(context).textTheme.labelMedium
-                            ?.copyWith(
-                              fontWeight: FontWeight.w900,
-                              color: cs.onSurface.withValues(alpha: 0.90),
-                            ),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Text(
-                      '+$dur мин',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: cs.onSurface.withValues(alpha: 0.70),
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 10),
-          Switch(
-            value: selected,
-            onChanged: _saving ? null : (v) => _toggleAddon(s, v),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _openAllAddonsSheet() async {
-    final list = _addonCandidates();
-    if (list.isEmpty) return;
-
-    await showModalBottomSheet(
+  Future<void> _showWaitlistDialogAndGoToBookings() async {
+    if (!mounted) return;
+    await showDialog<void>(
       context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      builder: (_) {
-        final cs = Theme.of(context).colorScheme;
-
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        'Дополнительные услуги',
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(
-                              fontWeight: FontWeight.w900,
-                              color: cs.onSurface.withValues(alpha: 0.95),
-                            ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Flexible(
-                  child: ListView.separated(
-                    shrinkWrap: true,
-                    itemCount: list.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 10),
-                    itemBuilder: (_, i) => _addonRow(list[i]),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    child: const Text('Готово'),
-                  ),
-                ),
-              ],
-            ),
+      builder: (ctx) => AlertDialog(
+        title: const Text('Посты закрыты'),
+        content: const Text(
+          'Мы добавили вас в очередь ожидания.\nКак только появится возможность — свяжемся с вами.',
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Ок'),
           ),
-        );
-      },
-    );
-  }
-
-  Widget _addonsSection() {
-    final cs = Theme.of(context).colorScheme;
-    final list = _addonCandidates();
-    if (list.isEmpty) return const SizedBox.shrink();
-
-    final preview = list.take(2).toList();
-    final totalDur = _addonsTotalDurationMin();
-    final totalPrice = _addonsTotalPriceRub();
-
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
-        color: cs.surfaceContainerHighest.withValues(alpha: 0.16),
-        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Дополнительные услуги',
-            style: Theme.of(context).textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w900,
-              color: cs.onSurface.withValues(alpha: 0.95),
-            ),
-          ),
-          const SizedBox(height: 10),
-          for (final s in preview) ...[
-            _addonRow(s, dense: true),
-            const SizedBox(height: 10),
-          ],
-          if (list.length > 2)
-            Center(
-              child: TextButton(
-                onPressed: _saving ? null : _openAllAddonsSheet,
-                child: const Text('Посмотреть все'),
-              ),
-            ),
-          if (totalDur > 0 || totalPrice > 0) ...[
-            const SizedBox(height: 6),
-            Text(
-              'Выбрано: +$totalDur мин • +$totalPrice ₽',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: cs.onSurface.withValues(alpha: 0.75),
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ],
         ],
       ),
     );
-  }
-
-  // ---------------- car tiles (Yandex-like) ----------------
-
-  String _carTileAsset(Car c) {
-    final body = (c.bodyType ?? '').toLowerCase().trim();
-    final sub = c.subtitle.toLowerCase();
-
-    bool isSuv() =>
-        body.contains('suv') || body.contains('внед') || sub.contains('внед');
-    bool isSedan() =>
-        body.contains('sedan') ||
-        body.contains('седан') ||
-        sub.contains('седан');
-
-    if (isSuv()) return 'assets/cars/suv.png';
-    if (isSedan()) return 'assets/cars/sedan.png';
-    return 'assets/cars/incognito.png';
-  }
-
-  Widget _carTile(Car c, bool selected) {
-    final cs = Theme.of(context).colorScheme;
-
-    return InkWell(
-      borderRadius: BorderRadius.circular(18),
-      onTap: _saving
-          ? null
-          : () async {
-              setState(() => carId = c.id);
-              // ничего не сбрасываем — выбор авто не должен рушить слот
-              await _autoPickBestSlotForCurrentState(forceBusyRefresh: false);
-            },
-      child: Container(
-        width: 148,
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: selected
-              ? cs.primary.withValues(alpha: 0.12)
-              : cs.surfaceContainerHighest.withValues(alpha: 0.16),
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(
-            color: selected
-                ? cs.primary.withValues(alpha: 0.35)
-                : cs.outlineVariant.withValues(alpha: 0.6),
-          ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // image box
-            Container(
-              height: 76,
-              width: double.infinity,
-              decoration: BoxDecoration(
-                color: cs.surfaceContainerHigh.withValues(alpha: 0.45),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: cs.outlineVariant.withValues(alpha: 0.55),
-                ),
-              ),
-              alignment: Alignment.center,
-              child: Image.asset(
-                _carTileAsset(c),
-                height: 70,
-                fit: BoxFit.contain,
-                errorBuilder: (_, __, ___) => Icon(
-                  Icons.directions_car,
-                  color: cs.onSurface.withValues(alpha: 0.85),
-                  size: 34,
-                ),
-              ),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              _carTitleForUi(c).toUpperCase(),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                fontWeight: FontWeight.w900,
-                color: cs.onSurface.withValues(alpha: 0.95),
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              c.plateDisplay.trim().isEmpty
-                  ? c.subtitle
-                  : '${c.plateDisplay} • ${c.subtitle}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: cs.onSurface.withValues(alpha: 0.70),
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _carsPicker() {
-    final cs = Theme.of(context).colorScheme;
-
-    if (_cars.isEmpty) {
-      return Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: cs.surfaceContainerHighest.withValues(alpha: 0.16),
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
-        ),
-        child: Row(
-          children: [
-            Icon(
-              Icons.info_outline,
-              color: cs.onSurface.withValues(alpha: 0.85),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                'Сначала добавь авто во вкладке “Авто”.',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: cs.onSurface.withValues(alpha: 0.85),
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    final selectedId = carId;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Авто',
-          style: Theme.of(context).textTheme.titleSmall?.copyWith(
-            fontWeight: FontWeight.w900,
-            color: cs.onSurface.withValues(alpha: 0.95),
-          ),
-        ),
-        const SizedBox(height: 10),
-        SizedBox(
-          height: 160,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            itemCount: _cars.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 12),
-            itemBuilder: (_, i) {
-              final c = _cars[i];
-              final selected = selectedId == c.id;
-              return _carTile(c, selected);
-            },
-          ),
-        ),
-      ],
-    );
+    if (!mounted) return;
+    Navigator.of(context).pop('waitlisted');
   }
 
   // ---------------- SAVE ----------------
 
   Future<void> _save() async {
     if (_saving) return;
-    if (!_formKey.currentState!.validate()) return;
     if (_location == null) return;
-    if (carId == null || serviceId == null) return;
 
-    final messenger = ScaffoldMessenger.of(context);
+    if (_cars.isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Сначала добавь авто.')));
+      return;
+    }
+    if (carId == null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Выбери авто.')));
+      return;
+    }
+    if (serviceId == null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Выбери услугу.')));
+      return;
+    }
 
     final slot = _selectedSlotStart;
-    if (slot == null) return;
+    if (slot == null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Выбери время.')));
+      return;
+    }
 
     final isToday = _selectedDate == _dateOnly(DateTime.now());
     final minNow = _minSelectableNowLocal();
     if (isToday && slot.isBefore(minNow)) return;
-
     if (_isBusySlot(slot)) return;
 
     int? bayIdToSend = _currentBayIdOrNull();
     if (bayIdToSend == null) {
       bayIdToSend = _pickedBayIdForAny;
       bayIdToSend ??= await _pickBayForSlotAny(slot);
+
+      // ✅ FIX lint: context after await
+      if (!mounted) return;
+
       if (bayIdToSend == null) {
-        messenger.showSnackBar(
+        ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Нет доступной линии на это время. Выбери другое.'),
           ),
@@ -1229,29 +1286,23 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
       if (paid == true) {
         Navigator.of(context).pop(true);
       } else {
-        messenger.showSnackBar(
+        ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Запись создана, но не оплачена.')),
         );
       }
     } catch (e) {
       if (!mounted) return;
-
       final lower = e.toString().toLowerCase();
+
       if (lower.contains('all_bays_closed_waitlisted') ||
           lower.contains('bay_closed_waitlisted')) {
-        messenger.showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Посты сейчас закрыты. Мы добавили вас в очередь ожидания.',
-            ),
-            duration: Duration(seconds: 4),
-          ),
-        );
-        Navigator.of(context).pop(false);
+        await _showWaitlistDialogAndGoToBookings();
         return;
       }
 
-      messenger.showSnackBar(SnackBar(content: Text('Ошибка: $e')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -1269,13 +1320,57 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     final isToday = _selectedDate == _dateOnly(DateTime.now());
     final minNow = _minSelectableNowLocal();
     if (isToday && slot.isBefore(minNow)) return false;
-
     if (_isBusySlot(slot)) return false;
 
     return true;
   }
 
   // ---------------- UI ----------------
+
+  Widget _sectionCard({required Widget child}) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.14),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.60)),
+      ),
+      child: child,
+    );
+  }
+
+  Widget _sectionTitle(String t) {
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Text(
+        t,
+        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+          fontWeight: FontWeight.w900,
+          color: cs.onSurface.withValues(alpha: 0.90),
+        ),
+      ),
+    );
+  }
+
+  Widget _pill(ColorScheme cs, String text) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
+      ),
+      child: Text(
+        text,
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+          fontWeight: FontWeight.w900,
+          color: cs.onSurface.withValues(alpha: 0.92),
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1317,14 +1412,10 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
     final dates = _quickDates();
 
-    const chipLabelPadding = EdgeInsets.symmetric(horizontal: 10);
-    const chipVD = VisualDensity(horizontal: -2, vertical: -2);
-
     final service = _findService(safeServiceId);
     final basePriceRub = service?.priceRub ?? 0;
     final addonsPriceRub = _addonsTotalPriceRub();
     final totalPriceRub = basePriceRub + addonsPriceRub;
-
     final remaining = max(totalPriceRub - _depositRub, 0);
 
     final visibleSlots = _visibleSlotsForCurrentMode();
@@ -1334,15 +1425,20 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
     final canProceed = _canProceed();
 
-    final pickedLineText =
-        (_bayMode == _BayMode.any && _pickedBayIdForAny != null)
-        ? _pickedBayLabel(_pickedBayIdForAny!)
-        : _bayTitleForMode(_bayMode);
+    final nowPart = _currentDayPart();
 
-    final pickedLineColor =
-        (_bayMode == _BayMode.any && _pickedBayIdForAny != null)
-        ? _pickedBayColor(context, _pickedBayIdForAny!)
-        : _bayStripeColor(context, _bayMode);
+    String pickedLineText;
+    if (_bayMode == _BayMode.any && _pickedBayIdForAny != null) {
+      pickedLineText = _pickedBayIdForAny == 1
+          ? 'Зелёная линия'
+          : 'Синяя линия';
+    } else {
+      pickedLineText = _bayMode == _BayMode.any
+          ? 'Любая линия'
+          : (_bayMode == _BayMode.bay1 ? 'Зелёная линия' : 'Синяя линия');
+    }
+
+    final pickedLineColor = _bayStripeColor(context, _bayMode);
 
     final loc = _location;
     final locColor = _hexToColorSafe(loc?.colorHex ?? '#2D9CDB');
@@ -1351,166 +1447,57 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
       appBar: AppBar(title: const Text('Записаться на мойку')),
       body: Padding(
         padding: const EdgeInsets.all(16),
-        child: Form(
-          key: _formKey,
-          child: ListView(
-            children: [
-              // -------- Location --------
-              if (_locations.isNotEmpty)
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(18),
-                    color: cs.surfaceContainerHighest.withValues(alpha: 0.16),
-                    border: Border.all(
-                      color: cs.outlineVariant.withValues(alpha: 0.6),
-                    ),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Мойка',
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w900,
-                          color: cs.onSurface.withValues(alpha: 0.95),
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      DropdownButtonFormField<String>(
-                        isExpanded: true,
-                        initialValue: loc?.id,
-                        decoration: const InputDecoration(
-                          border: OutlineInputBorder(),
-                          isDense: true,
-                        ),
-                        items: _locations.map((l) {
-                          final c = _hexToColorSafe(l.colorHex);
-                          return DropdownMenuItem<String>(
-                            value: l.id,
-                            child: Row(
-                              children: [
-                                Container(
-                                  width: 10,
-                                  height: 10,
-                                  decoration: BoxDecoration(
-                                    color: c,
-                                    borderRadius: BorderRadius.circular(999),
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Text(
-                                    '${l.name} — ${l.address}',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          );
-                        }).toList(),
-                        onChanged: (id) async {
-                          if (id == null) return;
-                          final picked = _locations.firstWhere(
-                            (x) => x.id == id,
-                          );
-                          await widget.repo.setCurrentLocation(picked);
-                          if (!mounted) return;
-
-                          setState(() {
-                            _location = picked;
-                            _selectedSlotStart = null;
-                            _pickedBayIdForAny = null;
-                          });
-
-                          await _refreshBusy(force: true);
-                          await _autoPickBestSlotForCurrentState(
-                            forceBusyRefresh: false,
-                          );
-                        },
-                        validator: (_) =>
-                            _location == null ? 'Выбери локацию' : null,
-                      ),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          Container(
-                            width: 10,
-                            height: 10,
-                            decoration: BoxDecoration(
-                              color: locColor,
-                              borderRadius: BorderRadius.circular(999),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              'Проверь, что выбрана правильная мойка.',
-                              style: Theme.of(context).textTheme.bodySmall
-                                  ?.copyWith(
-                                    color: cs.onSurface.withValues(alpha: 0.70),
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-
-              const SizedBox(height: 14),
-
-              // -------- Cars tiles --------
-              _carsPicker(),
-
-              const SizedBox(height: 14),
-
-              // -------- Service (keep dropdown for now) --------
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(18),
-                  color: cs.surfaceContainerHighest.withValues(alpha: 0.16),
-                  border: Border.all(
-                    color: cs.outlineVariant.withValues(alpha: 0.6),
-                  ),
-                ),
+        child: ListView(
+          children: [
+            if (_locations.isNotEmpty) ...[
+              _sectionTitle('Мойка по адресу:'),
+              _sectionCard(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'Услуга',
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w900,
-                        color: cs.onSurface.withValues(alpha: 0.95),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
                     DropdownButtonFormField<String>(
                       isExpanded: true,
-                      initialValue: safeServiceId,
+                      initialValue: loc?.id,
                       decoration: const InputDecoration(
                         border: OutlineInputBorder(),
                         isDense: true,
                       ),
-                      items: _services
-                          .map(
-                            (s) => DropdownMenuItem<String>(
-                              value: s.id,
-                              child: Text(
-                                '${s.name} (${s.priceRub} ₽) • ${s.durationMin} мин',
+                      items: _locations.map((l) {
+                        final c = _hexToColorSafe(l.colorHex);
+                        return DropdownMenuItem<String>(
+                          value: l.id,
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 10,
+                                height: 10,
+                                decoration: BoxDecoration(
+                                  color: c,
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
                               ),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (v) async {
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  '${l.name} — ${l.address}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }).toList(),
+                      onChanged: (id) async {
+                        if (id == null) return;
+                        final picked = _locations.firstWhere((x) => x.id == id);
+                        await widget.repo.setCurrentLocation(picked);
+                        if (!mounted) return;
+
                         setState(() {
-                          serviceId = v;
+                          _location = picked;
                           _selectedSlotStart = null;
                           _pickedBayIdForAny = null;
-                          _selectedAddonServiceIds.clear();
                         });
 
                         await _refreshBusy(force: true);
@@ -1518,103 +1505,138 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                           forceBusyRefresh: false,
                         );
                       },
-                      validator: (_) {
-                        if (_services.isEmpty) return 'Нет услуг';
-                        if (serviceId == null) return 'Выбери услугу';
-                        return null;
-                      },
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Container(
+                          width: 10,
+                          height: 10,
+                          decoration: BoxDecoration(
+                            color: locColor,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Проверь, что выбрана правильный адрес мойки.',
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(
+                                  color: cs.onSurface.withValues(alpha: 0.70),
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
               ),
-
               const SizedBox(height: 12),
+            ],
 
-              _addonsSection(),
+            _sectionTitle('Авто'),
+            _sectionCard(child: _carsSelector()),
+            const SizedBox(height: 12),
 
-              const SizedBox(height: 12),
-
-              // -------- Line --------
-              Text(
-                'Линия',
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: cs.onSurface.withValues(alpha: 0.95),
+            _sectionTitle('Услуга'),
+            _sectionCard(
+              child: DropdownButtonFormField<String>(
+                isExpanded: true,
+                initialValue: safeServiceId,
+                decoration: const InputDecoration(
+                  labelText: 'Тариф',
+                  border: OutlineInputBorder(),
                 ),
-              ),
-              const SizedBox(height: 10),
-              _lineSelectorAccordion(),
-
-              const SizedBox(height: 14),
-
-              // -------- Date chips --------
-              Text(
-                'Дата',
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: cs.onSurface.withValues(alpha: 0.95),
-                ),
-              ),
-              const SizedBox(height: 10),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: dates.map((d) {
-                  final dd = _dateOnly(d);
-                  final selected = dd == _selectedDate;
-
-                  return ChoiceChip(
-                    label: Text(_chipLabelForDate(dd)),
-                    labelPadding: chipLabelPadding,
-                    selected: selected,
-                    selectedColor: cs.primary.withValues(alpha: 0.18),
-                    onSelected: (_) => _selectDate(dd),
-                    visualDensity: chipVD,
+                items: _services
+                    .map(
+                      (s) => DropdownMenuItem<String>(
+                        value: s.id,
+                        child: Text(
+                          '${s.name} (${s.priceRub} ₽) • ${s.durationMin ?? 30} мин',
+                        ),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (v) async {
+                  setState(() {
+                    serviceId = v;
+                    _selectedSlotStart = null;
+                    _pickedBayIdForAny = null;
+                    _selectedAddonServiceIds.clear();
+                  });
+                  await _refreshBusy(force: true);
+                  await _autoPickBestSlotForCurrentState(
+                    forceBusyRefresh: false,
                   );
-                }).toList(),
+                },
               ),
+            ),
+            const SizedBox(height: 12),
 
-              const SizedBox(height: 14),
+            _addonsSection(),
+            const SizedBox(height: 12),
 
-              // -------- Time slots --------
-              Text(
-                'Время',
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: cs.onSurface.withValues(alpha: 0.95),
+            _sectionTitle('Линия'),
+            _sectionCard(child: _lineSelectorRow()),
+            const SizedBox(height: 12),
+
+            _sectionTitle('Дата'),
+            _sectionCard(
+              child: SizedBox(
+                height: 74,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: dates.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 10),
+                  itemBuilder: (_, i) => _dateSquare(dates[i]),
                 ),
               ),
-              const SizedBox(height: 10),
+            ),
+            const SizedBox(height: 12),
 
-              if (visibleSlots.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 10),
-                  child: Center(
-                    child: Text('В этот день нет свободного времени'),
-                  ),
-                )
-              else ...[
-                _timeSection(
-                  title: 'Утро',
-                  slots: morningSlots,
-                  initiallyExpanded: true,
-                ),
-                _timeSection(
-                  title: 'День',
-                  slots: daySlots,
-                  initiallyExpanded: true,
-                ),
-                _timeSection(
-                  title: 'Вечер',
-                  slots: eveningSlots,
-                  initiallyExpanded: true,
-                ),
-              ],
+            _sectionTitle('Время'),
+            _sectionCard(
+              child: (visibleSlots.isEmpty)
+                  ? Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: Center(
+                        child: Text(
+                          'В этот день нет свободного времени',
+                          style: Theme.of(context).textTheme.bodyMedium
+                              ?.copyWith(
+                                color: cs.onSurface.withValues(alpha: 0.80),
+                                fontWeight: FontWeight.w700,
+                              ),
+                        ),
+                      ),
+                    )
+                  : Column(
+                      children: [
+                        _timeSection(
+                          title: 'Утро',
+                          slots: morningSlots,
+                          initiallyExpanded: nowPart == _DayPart.morning,
+                        ),
+                        _timeSection(
+                          title: 'День',
+                          slots: daySlots,
+                          initiallyExpanded: nowPart == _DayPart.day,
+                        ),
+                        _timeSection(
+                          title: 'Вечер',
+                          slots: eveningSlots,
+                          initiallyExpanded: nowPart == _DayPart.evening,
+                        ),
+                      ],
+                    ),
+            ),
+            const SizedBox(height: 12),
 
-              const SizedBox(height: 12),
-
-              // -------- Comment (optional) --------
-              TextFormField(
+            _sectionTitle('Комментарий'),
+            _sectionCard(
+              child: TextFormField(
                 controller: _commentCtrl,
                 minLines: 1,
                 maxLines: 3,
@@ -1625,149 +1647,83 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                   border: OutlineInputBorder(),
                 ),
               ),
+            ),
+            const SizedBox(height: 12),
 
-              const SizedBox(height: 12),
-
-              // -------- Compact summary (less “каша”) --------
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(18),
-                  color: cs.surfaceContainerHighest.withValues(alpha: 0.16),
-                  border: Border.all(
-                    color: cs.outlineVariant.withValues(alpha: 0.6),
+            _sectionTitle('Итого'),
+            _sectionCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Расчётное время на мойке ~${_washTimeMinApprox()} мин',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w900,
+                      color: cs.onSurface.withValues(alpha: 0.92),
+                    ),
                   ),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Итого',
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w900,
-                        color: cs.onSurface.withValues(alpha: 0.95),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: [
+                      _pill(cs, 'Депозит: $_depositRub ₽'),
+                      _pill(cs, 'К оплате: $remaining ₽'),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                          color: pickedLineColor,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 8),
-
-                    Row(
-                      children: [
-                        _miniPill(
-                          context,
-                          'Депозит',
-                          '$_depositRub ₽',
-                          leadingDotColor: cs.primary,
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          pickedLineText,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                fontWeight: FontWeight.w800,
+                                color: cs.onSurface.withValues(alpha: 0.78),
+                              ),
                         ),
-                        const SizedBox(width: 10),
-                        _miniPill(
-                          context,
-                          'К оплате',
-                          '$remaining ₽',
-                          leadingDotColor: cs.onSurface.withValues(alpha: 0.55),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-
-                    Row(
-                      children: [
-                        Container(
-                          width: 10,
-                          height: 10,
-                          decoration: BoxDecoration(
-                            color: pickedLineColor,
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            pickedLineText,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.bodyMedium
-                                ?.copyWith(
-                                  fontWeight: FontWeight.w900,
-                                  color: cs.onSurface.withValues(alpha: 0.88),
-                                ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      'Длительность: ${_effectiveBlockMinForSelectedService()} мин (включая буфер)',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: cs.onSurface.withValues(alpha: 0.70),
-                        fontWeight: FontWeight.w700,
                       ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Длительность слота: ${_effectiveBlockMinForSelectedService()} мин (с запасом $_bufferMin минут)',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: cs.onSurface.withValues(alpha: 0.70),
+                      fontWeight: FontWeight.w700,
                     ),
-                    const SizedBox(height: 6),
-                    Text(
-                      'Стоимость: $totalPriceRub ₽',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: cs.onSurface.withValues(alpha: 0.70),
-                        fontWeight: FontWeight.w700,
-                      ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Стоимость: $totalPriceRub ₽',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: cs.onSurface.withValues(alpha: 0.70),
+                      fontWeight: FontWeight.w700,
                     ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 12),
-
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: canProceed ? _save : null,
-                  icon: const Icon(Icons.credit_card),
-                  label: Text(_saving ? 'Сохраняю...' : 'Продолжить к оплате'),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  // ---------- UI tiny helpers ----------
-  Widget _miniPill(
-    BuildContext context,
-    String label,
-    String value, {
-    required Color leadingDotColor,
-  }) {
-    final cs = Theme.of(context).colorScheme;
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: cs.surfaceContainerHigh.withValues(alpha: 0.45),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 8,
-              height: 8,
-              decoration: BoxDecoration(
-                color: leadingDotColor,
-                borderRadius: BorderRadius.circular(999),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                '$label: $value',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: cs.onSurface.withValues(alpha: 0.88),
-                ),
+            const SizedBox(height: 12),
+
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: canProceed ? _save : null,
+                icon: const Icon(Icons.credit_card),
+                label: Text(_saving ? 'Сохраняю...' : 'Продолжить к оплате'),
               ),
             ),
           ],

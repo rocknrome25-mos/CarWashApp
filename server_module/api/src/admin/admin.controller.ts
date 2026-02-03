@@ -8,6 +8,8 @@ import {
   Post,
   Query,
   Delete,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
 import { AdminService } from './admin.service';
 import { AdminLoginDto } from './dto/admin-login.dto';
@@ -24,6 +26,9 @@ import { AdminBookingDiscountDto } from './dto/admin-booking-discount.dto';
 
 import { AdminBayCloseDto } from './dto/admin-bay-close.dto';
 import { AdminBayOpenDto } from './dto/admin-bay-open.dto';
+
+import { FileInterceptor } from '@nestjs/platform-express';
+import multer from 'multer';
 
 @Controller('admin')
 export class AdminController {
@@ -399,5 +404,35 @@ export class AdminController {
     if (!kind) throw new BadRequestException('kind is required (BEFORE/AFTER)');
     if (!url) throw new BadRequestException('url is required');
     return this.admin.addBookingPhoto(uid, sid, bid, { kind, url, note });
+  }
+
+  // ✅ NEW: upload file (multipart/form-data) -> /admin/bookings/:id/photos/upload
+  @Post('bookings/:id/photos/upload')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: multer.memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+    }),
+  )
+  uploadPhoto(
+    @Headers('x-user-id') userId?: string,
+    @Headers('x-shift-id') shiftId?: string,
+    @Param('id') bookingId?: string,
+    @UploadedFile() file?: Express.Multer.File,
+    @Body() body: any = {},
+  ) {
+    const uid = (userId ?? '').trim();
+    const sid = (shiftId ?? '').trim();
+    const bid = (bookingId ?? '').trim();
+    const kind = (body?.kind ?? '').toString().trim();
+    const note = (body?.note ?? '').toString().trim();
+
+    if (!uid) throw new BadRequestException('x-user-id is required');
+    if (!sid) throw new BadRequestException('x-shift-id is required');
+    if (!bid) throw new BadRequestException('booking id is required');
+    if (!kind) throw new BadRequestException('kind is required (BEFORE/AFTER/DAMAGE/OTHER)');
+    if (!file) throw new BadRequestException('file is required');
+
+    return this.admin.uploadBookingPhoto(uid, sid, bid, { kind, note, file });
   }
 }

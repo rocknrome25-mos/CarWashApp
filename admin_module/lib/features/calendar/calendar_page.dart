@@ -78,7 +78,7 @@ class _CalendarPageState extends State<CalendarPage> {
         if (x is Map<String, dynamic>) {
           final n = (x['number'] as num?)?.toInt();
           final a = x['isActive'];
-          if (n != null && n >= 1 && n <= 20) {
+          if (n != null && n >= 1 && n <= 50) {
             map[n] = a == true;
           }
         }
@@ -143,17 +143,35 @@ class _CalendarPageState extends State<CalendarPage> {
     return ps;
   }
 
-  IconData _payIcon(String x) {
-    switch (x) {
-      case 'CARD':
-        return Icons.credit_card;
-      case 'CASH':
-        return Icons.payments;
-      case 'CONTRACT':
-        return Icons.business_center;
-      default:
-        return Icons.receipt_long;
+
+  // ---------------- requested/assigned bay helpers ----------------
+  // Backend желательно:
+  // booking.requestedBayId (nullable) OR requestedBayNumber OR requestedBayMode ('ANY'/'SPECIFIC')
+  // booking.bayId = assigned
+  String _requestedBayText(Map<String, dynamic> b) {
+    final mode = (b['requestedBayMode'] ?? b['bayMode'] ?? '').toString();
+    final req =
+        b['requestedBayId'] ?? b['requestedBayNumber'] ?? b['desiredBayId'];
+
+    if (mode.toUpperCase() == 'ANY') return 'Запрошено: Любая';
+    if (req == null) {
+      // если клиент выбирал “любая”, но поле не приехало — покажем “—”
+      return 'Запрошено: —';
     }
+    final n = (req is num) ? req.toInt() : int.tryParse(req.toString());
+    if (n == null) return 'Запрошено: —';
+    if (n == 1) return 'Запрошено: Зелёная';
+    if (n == 2) return 'Запрошено: Синяя';
+    return 'Запрошено: Пост $n';
+  }
+
+  String _assignedBayText(Map<String, dynamic> b) {
+    final bay = b['bayId'];
+    final n = (bay is num) ? bay.toInt() : int.tryParse(bay?.toString() ?? '');
+    if (n == null) return 'Назначено: —';
+    if (n == 1) return 'Назначено: Зелёная';
+    if (n == 2) return 'Назначено: Синяя';
+    return 'Назначено: Пост $n';
   }
 
   Future<void> _closeShiftNoCash() async {
@@ -335,7 +353,6 @@ class _CalendarPageState extends State<CalendarPage> {
 
     try {
       if (isOpen) {
-        // close -> require reason
         final ctrl = TextEditingController(text: 'Ремонт/тех.перерыв');
         final ok = await showDialog<bool>(
           context: context,
@@ -453,7 +470,7 @@ class _CalendarPageState extends State<CalendarPage> {
     return Row(children: [_bayCard(1), const SizedBox(width: 10), _bayCard(2)]);
   }
 
-  // ===== PROPOSED: 3-column header row (sticky-like, inside list) =====
+  // ===== header row =====
 
   Widget _bookingHeaderRow() {
     return Container(
@@ -474,20 +491,20 @@ class _CalendarPageState extends State<CalendarPage> {
             ),
           ),
           Expanded(
-            flex: 3,
+            flex: 4,
             child: Center(
               child: Text(
-                'Пост / Статус',
+                'Запрошено / Назначено',
                 style: TextStyle(fontWeight: FontWeight.w900, fontSize: 12),
               ),
             ),
           ),
           Expanded(
-            flex: 6,
+            flex: 5,
             child: Align(
               alignment: Alignment.centerRight,
               child: Text(
-                'Оплата',
+                'Оплата / Статус',
                 style: TextStyle(fontWeight: FontWeight.w900, fontSize: 12),
               ),
             ),
@@ -497,14 +514,13 @@ class _CalendarPageState extends State<CalendarPage> {
     );
   }
 
-  // ===== PROPOSED: 3-column booking row =====
+  // ===== booking row =====
 
   Widget _bookingRow(Map<String, dynamic> b) {
     final statusRu = _statusRu(b);
     final statusColor = _statusColor(statusRu);
 
     final serviceName = b['service']?['name']?.toString() ?? 'Услуга';
-    final bayId = b['bayId']?.toString() ?? '';
     final dateTimeIso = b['dateTime']?.toString() ?? '';
     final time = dateTimeIso.isNotEmpty ? _fmtTime(dateTimeIso) : '--:--';
 
@@ -528,9 +544,8 @@ class _CalendarPageState extends State<CalendarPage> {
     final ps = (b['paymentStatus'] ?? '').toString();
     final psRu = _paymentStatusRu(ps);
 
-    final badges = (b['paymentBadges'] is List)
-        ? (b['paymentBadges'] as List).map((x) => x.toString()).toList()
-        : <String>[];
+    final reqText = _requestedBayText(b);
+    final asgText = _assignedBayText(b);
 
     return InkWell(
       onTap: () async {
@@ -590,13 +605,44 @@ class _CalendarPageState extends State<CalendarPage> {
 
             // MIDDLE
             Expanded(
-              flex: 3,
+              flex: 4,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   Text(
-                    'Пост $bayId',
+                    reqText,
+                    textAlign: TextAlign.center,
                     style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    asgText,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontWeight: FontWeight.w900),
+                  ),
+                ],
+              ),
+            ),
+
+            // RIGHT
+            Expanded(
+              flex: 5,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    psRu,
+                    style: const TextStyle(fontWeight: FontWeight.w900),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Опл: $paid ₽ • Ост: $toPay ₽',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.black.withValues(alpha: 0.75),
+                    ),
+                    textAlign: TextAlign.right,
                   ),
                   const SizedBox(height: 8),
                   Container(
@@ -617,50 +663,6 @@ class _CalendarPageState extends State<CalendarPage> {
                         fontSize: 12,
                       ),
                     ),
-                  ),
-                ],
-              ),
-            ),
-
-            // RIGHT
-            Expanded(
-              flex: 6,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    psRu,
-                    style: const TextStyle(fontWeight: FontWeight.w900),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Оплачено: $paid ₽ К оплате: $toPay ₽',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                      color: Colors.black.withValues(alpha: 0.75),
-                    ),
-                    textAlign: TextAlign.right,
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    alignment: WrapAlignment.end,
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: [
-                      for (final x in badges)
-                        Chip(
-                          avatar: Icon(_payIcon(x), size: 18),
-                          label: Text(
-                            x == 'CARD'
-                                ? 'Карта'
-                                : x == 'CASH'
-                                ? 'Наличные'
-                                : 'Контракт',
-                          ),
-                          visualDensity: VisualDensity.compact,
-                        ),
-                    ],
                   ),
                 ],
               ),
@@ -693,7 +695,21 @@ class _CalendarPageState extends State<CalendarPage> {
                 .toString();
             final time = dtIso.isNotEmpty ? _fmtTime(dtIso) : '--:--';
 
-            final bay = (w['desiredBayId'] ?? w['bayId'] ?? '').toString();
+            final bayReq =
+                w['desiredBayId'] ??
+                w['requestedBayId'] ??
+                w['requestedBayNumber'];
+            final req = (bayReq is num)
+                ? bayReq.toInt()
+                : int.tryParse(bayReq?.toString() ?? '');
+            final reqText = (req == null)
+                ? 'Запрошено: Любая'
+                : (req == 1
+                      ? 'Запрошено: Зелёная'
+                      : req == 2
+                      ? 'Запрошено: Синяя'
+                      : 'Запрошено: Пост $req');
+
             final serviceName = w['service']?['name']?.toString() ?? 'Услуга';
 
             final clientName = w['client']?['name']?.toString();
@@ -713,7 +729,7 @@ class _CalendarPageState extends State<CalendarPage> {
             return Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: Text(
-                '$time • Пост ${bay.isEmpty ? "—" : bay} • $serviceName • $clientTitle$carLine\n'
+                '$time • $reqText • $serviceName • $clientTitle$carLine\n'
                 'Причина: ${reason.isEmpty ? "—" : reason}',
                 style: const TextStyle(fontSize: 12),
               ),
@@ -772,8 +788,6 @@ class _CalendarPageState extends State<CalendarPage> {
                 ),
                 _waitlistSection(),
                 const SizedBox(height: 6),
-
-                // bookings list (3-column rows)
                 Expanded(
                   child: bookings.isEmpty
                       ? const Center(child: Text('Нет записей'))

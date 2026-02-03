@@ -1,8 +1,11 @@
 // C:\dev\carwash\admin_module\lib\features\booking\booking_actions_sheet.dart
 import 'dart:convert';
+import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart'; // kIsWeb
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/api/admin_api_client.dart';
@@ -33,12 +36,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
   final noteCtrl = TextEditingController();
 
   // Move
-  static const _moveReasons = <String>[
-    'Задержка',
-    'Сбой',
-    'Передумал',
-    'Другое',
-  ];
+  static const _moveReasons = <String>['Задержка', 'Сбой', 'Передумал', 'Другое'];
   String moveReasonKind = _moveReasons.first;
   final moveCommentCtrl = TextEditingController();
   bool clientAgreed = true;
@@ -60,9 +58,12 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
 
   // Photos
   List<Map<String, dynamic>> photos = [];
-  String photoKind = 'BEFORE'; // BEFORE/AFTER/DAMAGE/OTHER
-  final photoUrlCtrl = TextEditingController();
+  String photoKind = 'BEFORE'; // BEFORE/AFTER/DAMAGE/OTHER (server enums)
   final photoNoteCtrl = TextEditingController();
+
+  // Local previews so photo appears immediately
+  final Map<String, Uint8List> _localPreviewByTempId = {};
+  final _picker = ImagePicker();
 
   bool get _moveEnabled =>
       widget.session.featureOn('BOOKING_MOVE', defaultValue: true);
@@ -77,7 +78,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
   String get _shiftId => widget.session.activeShiftId ?? '';
   String get _bookingId => (widget.booking['id'] ?? '').toString();
 
-  static const _timeout = Duration(seconds: 12);
+  static const _timeout = Duration(seconds: 20);
 
   @override
   void initState() {
@@ -96,8 +97,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
       selectedDateTimeLocal = DateTime.tryParse(dtIso)?.toLocal();
     }
 
-    paymentMethod = 'CARD';
-
     final dr = widget.booking['discountRub'];
     if (dr is num) discountCtrl.text = dr.toInt().toString();
 
@@ -106,7 +105,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
       discountReasonCtrl.text = dn.trim();
     }
 
-    // If backend returns them in calendar payload already
     final rawAddons = widget.booking['addons'];
     if (rawAddons is List) {
       addons = rawAddons
@@ -132,17 +130,13 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     moveCommentCtrl.dispose();
     discountCtrl.dispose();
     discountReasonCtrl.dispose();
-
     addonServiceIdCtrl.dispose();
     addonQtyCtrl.dispose();
-
-    photoUrlCtrl.dispose();
     photoNoteCtrl.dispose();
-
     super.dispose();
   }
 
-  // ---------------- helpers (format) ----------------
+  // ---------------- helpers ----------------
 
   String _fmtTimeIso(String? iso) {
     if (iso == null || iso.isEmpty) return '--:--';
@@ -155,12 +149,49 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
       DateFormat('yyyy-MM-dd HH:mm').format(dt);
 
   int _intOr0(dynamic v) {
-    if (v is int) return v;
     if (v is num) return v.toInt();
     return int.tryParse(v?.toString() ?? '') ?? 0;
   }
 
-  // status
+  void _showSnack(String msg) {
+    final m = msg.trim();
+    if (m.isEmpty) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(m), behavior: SnackBarBehavior.floating),
+    );
+  }
+
+  Uri _u(String path, [Map<String, String>? q]) {
+    final uri = Uri.parse(widget.api.baseUrl + path);
+    return q == null ? uri : uri.replace(queryParameters: q);
+  }
+
+  Map<String, String> _headers({bool json = true}) {
+    final h = <String, String>{
+      'x-user-id': _userId,
+      'x-shift-id': _shiftId,
+    };
+    if (json) h['Content-Type'] = 'application/json; charset=utf-8';
+    return h;
+  }
+
+  // Convert server kind to RU label for UI
+  String _kindRu(String kind) {
+    switch (kind.toUpperCase()) {
+      case 'BEFORE':
+        return 'ДО';
+      case 'AFTER':
+        return 'ПОСЛЕ';
+      case 'DAMAGE':
+        return 'ПОВРЕЖДЕНИЯ';
+      case 'OTHER':
+        return 'ДРУГОЕ';
+      default:
+        return kind;
+    }
+  }
+
+  // ---------- status helpers ----------
   String _rawStatus() => (widget.booking['status'] ?? '').toString();
   String? _startedAtIso() => widget.booking['startedAt']?.toString();
   String? _finishedAtIso() => widget.booking['finishedAt']?.toString();
@@ -194,6 +225,13 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
       !_isCanceled && !_isCompletedRu && _statusRu != 'МОЕТСЯ';
   bool get _canFinish => !_isCanceled && !_isCompletedRu;
   bool get _canMove => _moveEnabled && !_isCanceled && !_isCompletedRu;
+
+  Color _statusColor() {
+    if (_statusRu == 'МОЕТСЯ') return Colors.blue;
+    if (_statusRu == 'ЗАВЕРШЕНО') return Colors.green;
+    if (_statusRu == 'ОТМЕНЕНО') return Colors.red;
+    return Colors.orange;
+  }
 
   // payment info
   List<String> _paymentBadges() {
@@ -229,13 +267,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     }
   }
 
-  Color _statusColor() {
-    if (_statusRu == 'МОЕТСЯ') return Colors.blue;
-    if (_statusRu == 'ЗАВЕРШЕНО') return Colors.green;
-    if (_statusRu == 'ОТМЕНЕНО') return Colors.red;
-    return Colors.orange;
-  }
-
   // auto string (no model)
   String _buildCarLine(Map<String, dynamic> b) {
     final plate = (b['car']?['plateDisplay'] ?? '').toString().trim();
@@ -254,94 +285,33 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     return parts.isEmpty ? '—' : parts.join(' • ');
   }
 
-  // ---------------- UX: errors ----------------
-
-  bool _isBayClosedError(Object e) {
-    final s = e.toString().toLowerCase();
-    return s.contains('409') &&
-        (s.contains('bay is closed') ||
-            s.contains('bay closed') ||
-            s.contains('post is closed') ||
-            s.contains('post closed') ||
-            s.contains('пост закрыт') ||
-            s.contains('bay_is_closed'));
-  }
-
-  Future<void> _showBayClosedDialog() async {
-    if (!mounted) return;
-    await showDialog<void>(
-      context: context,
-      barrierDismissible: true,
-      builder: (_) => AlertDialog(
-        title: const Text('Пост закрыт'),
-        content: const Text(
-          'Чтобы начать обслуживание, откройте пост во вкладке «Посты».',
-        ),
-        actions: [
-          ElevatedButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Ок'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showSnack(String msg) {
-    final m = msg.trim();
-    if (m.isEmpty) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(m), behavior: SnackBarBehavior.floating),
-    );
-  }
-
-  // ---------------- low-level admin http (addons/photos endpoints) ----------------
-
-  Uri _u(String path, [Map<String, String>? q]) {
-    final uri = Uri.parse(widget.api.baseUrl + path);
-    return q == null ? uri : uri.replace(queryParameters: q);
-  }
-
-  Map<String, String> _headers() {
-    return <String, String>{
-      'Content-Type': 'application/json; charset=utf-8',
-      'x-user-id': _userId,
-      'x-shift-id': _shiftId,
-    };
-  }
+  // ---------------- low-level lists ----------------
 
   Future<List<dynamic>> _getList(String path, {Map<String, String>? q}) async {
-    final res = await http
-        .get(_u(path, q), headers: _headers())
-        .timeout(_timeout);
+    final res = await http.get(_u(path, q), headers: _headers()).timeout(_timeout);
     if (res.statusCode >= 400) {
       throw Exception('GET $path failed: ${res.statusCode} ${res.body}');
     }
     final d = jsonDecode(res.body);
     if (d is List) return d;
+    if (d is Map && d['items'] is List) return (d['items'] as List);
     if (d is Map<String, dynamic>) return [d];
     return const [];
   }
 
-  Future<Map<String, dynamic>> _postMap(
-    String path,
-    Map<String, dynamic> body,
-  ) async {
-    final res = await http
-        .post(_u(path), headers: _headers(), body: jsonEncode(body))
-        .timeout(_timeout);
+  Future<Map<String, dynamic>> _postMap(String path, Map<String, dynamic> body) async {
+    final res = await http.post(_u(path), headers: _headers(), body: jsonEncode(body)).timeout(_timeout);
     if (res.statusCode >= 400) {
       throw Exception('POST $path failed: ${res.statusCode} ${res.body}');
     }
     final d = jsonDecode(res.body);
     if (d is Map<String, dynamic>) return d;
+    if (d is Map) return Map<String, dynamic>.from(d);
     throw Exception('POST $path failed: unexpected response');
   }
 
   Future<void> _delete(String path) async {
-    final res = await http
-        .delete(_u(path), headers: _headers())
-        .timeout(_timeout);
+    final res = await http.delete(_u(path), headers: _headers()).timeout(_timeout);
     if (res.statusCode >= 400) {
       throw Exception('DELETE $path failed: ${res.statusCode} ${res.body}');
     }
@@ -353,26 +323,17 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
       final p = await _getList('/admin/bookings/$_bookingId/photos');
       if (!mounted) return;
       setState(() {
-        addons = a
-            .whereType<Map>()
-            .map((x) => Map<String, dynamic>.from(x))
-            .toList();
-        photos = p
-            .whereType<Map>()
-            .map((x) => Map<String, dynamic>.from(x))
-            .toList();
+        addons = a.whereType<Map>().map((x) => Map<String, dynamic>.from(x)).toList();
+        photos = p.whereType<Map>().map((x) => Map<String, dynamic>.from(x)).toList();
       });
-    } catch (_) {
-      // ignore if backend not deployed
+    } catch (e) {
+      _showSnack('Не удалось обновить фото: $e');
     }
   }
 
   // ---------------- unified run wrapper ----------------
 
-  Future<void> _run(
-    Future<void> Function() fn, {
-    bool closeAfter = true,
-  }) async {
+  Future<void> _run(Future<void> Function() fn, {bool closeAfter = true}) async {
     setState(() => loading = true);
     try {
       await fn();
@@ -382,11 +343,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
       if (closeAfter) Navigator.of(context).pop();
     } catch (e) {
       if (!mounted) return;
-      if (_isBayClosedError(e)) {
-        await _showBayClosedDialog();
-      } else {
-        _showSnack(e.toString());
-      }
+      _showSnack(e.toString());
     } finally {
       if (mounted) setState(() => loading = false);
     }
@@ -614,26 +571,252 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     }, closeAfter: false);
   }
 
-  // ---------------- actions: photos ----------------
+  // ---------------- photos: UX + replace ----------------
 
-  Future<void> _addPhoto() async {
-    final url = photoUrlCtrl.text.trim();
+  ImageSource _bestImageSource() {
+    if (kIsWeb) return ImageSource.gallery;
+    final p = Theme.of(context).platform;
+    if (p == TargetPlatform.windows ||
+        p == TargetPlatform.macOS ||
+        p == TargetPlatform.linux) {
+      return ImageSource.gallery;
+    }
+    return ImageSource.camera;
+  }
+
+  String _absUrl(String raw) {
+    final u = raw.trim();
+    if (u.isEmpty) return '';
+    if (u.startsWith('http://') || u.startsWith('https://')) return u;
+    final base = Uri.parse(widget.api.baseUrl);
+    return Uri(
+      scheme: base.scheme,
+      host: base.host,
+      port: base.hasPort ? base.port : null,
+      path: u.startsWith('/') ? u : '/$u',
+    ).toString();
+  }
+
+  Future<void> _deletePhotoIfSupported(String photoId) async {
+    // This endpoint must exist server-side: DELETE /admin/bookings/:id/photos/:photoId
+    await _delete('/admin/bookings/$_bookingId/photos/$photoId');
+  }
+
+  Future<void> _replaceKindPhotosIfPossible(String kind) async {
+    // delete existing photos for this kind (BEFORE/AFTER) to make "replace"
+    final k = kind.toUpperCase();
+    final existing = photos
+        .where((p) => (p['kind'] ?? '').toString().toUpperCase() == k)
+        .toList();
+
+    if (existing.isEmpty) return;
+
+    for (final p in existing) {
+      final id = (p['id'] ?? '').toString().trim();
+      if (id.isEmpty) continue;
+      try {
+        await _deletePhotoIfSupported(id);
+      } catch (_) {
+        // If backend doesn't support delete yet — stop (will behave like add)
+        return;
+      }
+    }
+  }
+
+  Future<void> _uploadPhotoFile({required String kind, bool replace = false}) async {
+    final file = await _picker.pickImage(
+      source: _bestImageSource(),
+      imageQuality: 85,
+    );
+    if (file == null) return;
+
     final note = photoNoteCtrl.text.trim();
+    final bytes = await file.readAsBytes();
 
-    if (url.isEmpty) {
-      _showSnack('URL обязателен (пока без загрузки файлов — просто ссылка)');
-      return;
+    // optimistic preview
+    final tempId = 'local_${DateTime.now().millisecondsSinceEpoch}';
+    setState(() {
+      _localPreviewByTempId[tempId] = bytes;
+      photos.insert(0, {
+        'id': tempId,
+        'kind': kind,
+        'url': '',
+        'note': note,
+        'createdAt': DateTime.now().toUtc().toIso8601String(),
+        '_local': true,
+      });
+    });
+
+    try {
+      // if replace requested: try delete old kind photos (best-effort)
+      if (replace) {
+        await _replaceKindPhotosIfPossible(kind);
+      }
+
+      final req = http.MultipartRequest(
+        'POST',
+        _u('/admin/bookings/$_bookingId/photos/upload'),
+      );
+      req.headers.addAll(_headers(json: false));
+      req.fields['kind'] = kind;
+      if (note.isNotEmpty) req.fields['note'] = note;
+
+      req.files.add(http.MultipartFile.fromBytes(
+        'file',
+        bytes,
+        filename: file.name,
+      ));
+
+      final streamed = await req.send().timeout(_timeout);
+      final res = await http.Response.fromStream(streamed);
+
+      if (res.statusCode >= 400) {
+        throw Exception('UPLOAD failed: ${res.statusCode} ${res.body}');
+      }
+
+      photoNoteCtrl.clear();
+
+      await _refreshAddonsAndPhotos();
+      widget.onDone();
+    } catch (e) {
+      _showSnack('Не удалось загрузить фото: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _localPreviewByTempId.remove(tempId);
+          photos.removeWhere((p) => (p['id'] ?? '').toString() == tempId);
+        });
+      }
+    }
+  }
+
+  Future<void> _openPhotoFull(Map<String, dynamic> p) async {
+    final id = (p['id'] ?? '').toString();
+    final rawUrl = (p['url'] ?? '').toString();
+    final abs = _absUrl(rawUrl);
+
+    Widget content;
+    if (_localPreviewByTempId.containsKey(id)) {
+      content = InteractiveViewer(
+        child: Image.memory(_localPreviewByTempId[id]!, fit: BoxFit.contain),
+      );
+    } else if (abs.isNotEmpty) {
+      content = InteractiveViewer(
+        child: Image.network(abs, fit: BoxFit.contain),
+      );
+    } else {
+      content = const Padding(
+        padding: EdgeInsets.all(18),
+        child: Text('Фото недоступно'),
+      );
     }
 
-    await _run(() async {
-      await _postMap('/admin/bookings/$_bookingId/photos', {
-        'kind': photoKind,
-        'url': url,
-        'note': note,
-      });
-      photoUrlCtrl.clear();
-      photoNoteCtrl.clear();
-    }, closeAfter: false);
+    await showDialog<void>(
+      context: context,
+      builder: (_) => Dialog(
+        insetPadding: const EdgeInsets.all(12),
+        child: AspectRatio(
+          aspectRatio: 1,
+          child: Container(
+            color: Colors.black,
+            child: Stack(
+              children: [
+                Positioned.fill(child: content),
+                Positioned(
+                  top: 6,
+                  right: 6,
+                  child: IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close, color: Colors.white),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _photoThumb(Map<String, dynamic> p) {
+    final id = (p['id'] ?? '').toString();
+    final url = (p['url'] ?? '').toString();
+
+    if (_localPreviewByTempId.containsKey(id)) {
+      return Image.memory(
+        _localPreviewByTempId[id]!,
+        width: 72,
+        height: 72,
+        fit: BoxFit.cover,
+        gaplessPlayback: true,
+      );
+    }
+
+    final abs = _absUrl(url);
+    if (abs.isEmpty) {
+      return const Center(child: Icon(Icons.photo, size: 22));
+    }
+
+    return Image.network(
+      abs,
+      width: 72,
+      height: 72,
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) => const Center(child: Icon(Icons.broken_image)),
+    );
+  }
+
+  Widget _photoCard(BuildContext context, Map<String, dynamic> p) {
+    final cs = Theme.of(context).colorScheme;
+
+    final kind = (p['kind'] ?? '').toString();
+    final note = (p['note'] ?? '').toString().trim();
+
+    final createdAt = DateTime.tryParse((p['createdAt'] ?? '').toString())?.toLocal();
+    final time = createdAt == null ? '' : DateFormat('HH:mm').format(createdAt);
+
+    return InkWell(
+      onTap: () => _openPhotoFull(p),
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: cs.surfaceContainerHighest.withValues(alpha: 0.18),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
+        ),
+        child: Row(
+          children: [
+            ClipRRect(borderRadius: BorderRadius.circular(12), child: _photoThumb(p)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(_kindRu(kind), style: const TextStyle(fontWeight: FontWeight.w900)),
+                if (note.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    note,
+                    style: TextStyle(
+                      color: cs.onSurface.withValues(alpha: 0.75),
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ]),
+            ),
+            if (time.isNotEmpty)
+              Text(
+                time,
+                style: TextStyle(
+                  color: cs.onSurface.withValues(alpha: 0.65),
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
   }
 
   // ---------------- UI helpers ----------------
@@ -678,10 +861,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                 Expanded(
                   child: Text(
                     title,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w900,
-                      fontSize: 14,
-                    ),
+                    style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14),
                   ),
                 ),
                 if (trailing != null) trailing,
@@ -723,9 +903,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
           ChoiceChip(
             label: Text(label(v)),
             selected: paymentMethod == v,
-            onSelected: loading
-                ? null
-                : (_) => setState(() => paymentMethod = v),
+            onSelected: loading ? null : (_) => setState(() => paymentMethod = v),
           ),
       ],
     );
@@ -738,70 +916,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: const TextStyle(fontWeight: FontWeight.w900),
-      ),
-    );
-  }
-
-  Widget _photoCard(BuildContext context, Map<String, dynamic> p) {
-    final cs = Theme.of(context).colorScheme;
-
-    final kind = (p['kind'] ?? '').toString();
-    final url = (p['url'] ?? '').toString();
-    final note = (p['note'] ?? '').toString().trim();
-
-    final createdAt = DateTime.tryParse(
-      (p['createdAt'] ?? '').toString(),
-    )?.toLocal();
-    final time = createdAt == null ? '' : DateFormat('HH:mm').format(createdAt);
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: cs.surfaceContainerHighest.withValues(alpha: 0.18),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(kind, style: const TextStyle(fontWeight: FontWeight.w900)),
-                const SizedBox(height: 4),
-                Text(
-                  url,
-                  style: TextStyle(
-                    color: cs.onSurface.withValues(alpha: 0.75),
-                    fontWeight: FontWeight.w700,
-                  ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                if (note.isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    note,
-                    style: TextStyle(
-                      color: cs.onSurface.withValues(alpha: 0.75),
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          const SizedBox(width: 10),
-          if (time.isNotEmpty)
-            Text(
-              time,
-              style: TextStyle(
-                color: cs.onSurface.withValues(alpha: 0.65),
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-        ],
       ),
     );
   }
@@ -837,9 +951,8 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     final discountRub = _discountRub();
     final effectivePriceRub = _effectivePriceRub();
 
-    final clientComment = b['comment']?.toString();
-    final hasClientComment =
-        clientComment != null && clientComment.trim().isNotEmpty;
+    final clientCommentText = (b['comment'] ?? '').toString().trim();
+    final hasClientComment = clientCommentText.isNotEmpty;
 
     final addonsSumRub = _addonsTotalPrice();
     final addonsDur = _addonsTotalDurationMin();
@@ -856,19 +969,13 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                 padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
                 decoration: BoxDecoration(
                   color: cs.surfaceContainerHighest.withValues(alpha: 0.20),
-                  border: Border(
-                    bottom: BorderSide(
-                      color: cs.outlineVariant.withValues(alpha: 0.6),
-                    ),
-                  ),
+                  border: Border(bottom: BorderSide(color: cs.outlineVariant.withValues(alpha: 0.6))),
                 ),
                 child: Row(
                   children: [
                     IconButton(
                       tooltip: 'Назад',
-                      onPressed: loading
-                          ? null
-                          : () => Navigator.of(context).pop(),
+                      onPressed: loading ? null : () => Navigator.of(context).pop(),
                       icon: const Icon(Icons.arrow_back),
                     ),
                     const SizedBox(width: 6),
@@ -878,10 +985,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                         children: [
                           Text(
                             '$dtLine • $serviceName • Пост $bayIdStr',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w900,
-                              fontSize: 14,
-                            ),
+                            style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -925,27 +1029,49 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
               Expanded(
                 child: TabBarView(
                   children: [
-                    // ---------------- TAB: SERVICE ----------------
+                    // TAB: SERVICE
                     SingleChildScrollView(
                       padding: EdgeInsets.only(
-                        left: 12,
-                        right: 12,
-                        top: 12,
+                        left: 12, right: 12, top: 12,
                         bottom: 16 + MediaQuery.of(context).viewInsets.bottom,
                       ),
                       child: Column(
                         children: [
+                          if (hasClientComment)
+                            _sectionCard(
+                              title: 'Комментарий клиента',
+                              child: Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: Colors.amber.withValues(alpha: 0.16),
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(color: Colors.amber.withValues(alpha: 0.7)),
+                                ),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Icon(Icons.campaign, size: 18),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Text(
+                                        clientCommentText,
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w900,
+                                          color: cs.onSurface.withValues(alpha: 0.92),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+
                           _sectionCard(
                             title: 'Информация',
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
-                                  'Клиент: $clientTitle',
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
+                                Text('Клиент: $clientTitle', style: const TextStyle(fontWeight: FontWeight.w800)),
                                 const SizedBox(height: 6),
                                 Text(
                                   'Авто: $carLine',
@@ -957,50 +1083,10 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                                 const SizedBox(height: 10),
                                 Row(
                                   children: [
-                                    Expanded(
-                                      child: Text(
-                                        'Начато: ${_fmtTimeIso(startedAt)}',
-                                        style: TextStyle(
-                                          color: cs.onSurface.withValues(
-                                            alpha: 0.75,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                    Expanded(
-                                      child: Text(
-                                        'Завершено: ${_fmtTimeIso(finishedAt)}',
-                                        style: TextStyle(
-                                          color: cs.onSurface.withValues(
-                                            alpha: 0.75,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
+                                    Expanded(child: Text('Начато: ${_fmtTimeIso(startedAt)}')),
+                                    Expanded(child: Text('Завершено: ${_fmtTimeIso(finishedAt)}')),
                                   ],
                                 ),
-                                if (hasClientComment) ...[
-                                  const SizedBox(height: 12),
-                                  Container(
-                                    padding: const EdgeInsets.all(12),
-                                    decoration: BoxDecoration(
-                                      color: cs.surfaceContainerHighest
-                                          .withValues(alpha: 0.18),
-                                      borderRadius: BorderRadius.circular(16),
-                                      border: Border.all(
-                                        color: cs.outlineVariant.withValues(
-                                          alpha: 0.55,
-                                        ),
-                                      ),
-                                    ),
-                                    child: Text(
-                                      'Комментарий клиента: ${clientComment.trim()}',
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                  ),
-                                ],
                               ],
                             ),
                           ),
@@ -1011,24 +1097,16 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                               children: [
                                 Expanded(
                                   child: FilledButton(
-                                    onPressed: loading || !_canStart
-                                        ? null
-                                        : _start,
+                                    onPressed: loading || !_canStart ? null : _start,
                                     child: loading
-                                        ? const SizedBox(
-                                            height: 18,
-                                            width: 18,
-                                            child: CircularProgressIndicator(),
-                                          )
+                                        ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator())
                                         : const Text('Начать'),
                                   ),
                                 ),
                                 const SizedBox(width: 10),
                                 Expanded(
                                   child: OutlinedButton(
-                                    onPressed: loading || !_canFinish
-                                        ? null
-                                        : _finish,
+                                    onPressed: loading || !_canFinish ? null : _finish,
                                     child: const Text('Завершить'),
                                   ),
                                 ),
@@ -1042,9 +1120,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                               controller: noteCtrl,
                               minLines: 1,
                               maxLines: 4,
-                              decoration: const InputDecoration(
-                                labelText: 'Комментарий администратора',
-                              ),
+                              decoration: const InputDecoration(labelText: 'Комментарий администратора'),
                             ),
                           ),
 
@@ -1055,9 +1131,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                                     '+$addonsSumRub ₽ • +$addonsDur мин',
                                     style: TextStyle(
                                       fontWeight: FontWeight.w900,
-                                      color: cs.onSurface.withValues(
-                                        alpha: 0.85,
-                                      ),
+                                      color: cs.onSurface.withValues(alpha: 0.85),
                                     ),
                                   )
                                 : null,
@@ -1065,75 +1139,35 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 if (addons.isEmpty)
-                                  Text(
-                                    'Пока нет доп. услуг.',
-                                    style: TextStyle(
-                                      color: cs.onSurface.withValues(
-                                        alpha: 0.7,
-                                      ),
-                                    ),
-                                  )
+                                  Text('Пока нет доп. услуг.', style: TextStyle(color: cs.onSurface.withValues(alpha: 0.7)))
                                 else
                                   Column(
                                     children: [
                                       for (final a in addons)
                                         Container(
-                                          margin: const EdgeInsets.only(
-                                            bottom: 8,
-                                          ),
+                                          margin: const EdgeInsets.only(bottom: 8),
                                           padding: const EdgeInsets.all(12),
                                           decoration: BoxDecoration(
-                                            color: cs.surfaceContainerHighest
-                                                .withValues(alpha: 0.18),
-                                            borderRadius: BorderRadius.circular(
-                                              14,
-                                            ),
-                                            border: Border.all(
-                                              color: cs.outlineVariant
-                                                  .withValues(alpha: 0.55),
-                                            ),
+                                            color: cs.surfaceContainerHighest.withValues(alpha: 0.18),
+                                            borderRadius: BorderRadius.circular(14),
+                                            border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
                                           ),
                                           child: Row(
                                             children: [
                                               Expanded(
                                                 child: Text(
-                                                  (a['service']?['name'] ??
-                                                          a['serviceName'] ??
-                                                          a['serviceId'] ??
-                                                          'Услуга')
-                                                      .toString(),
-                                                  style: const TextStyle(
-                                                    fontWeight: FontWeight.w900,
-                                                  ),
+                                                  (a['service']?['name'] ?? a['serviceName'] ?? a['serviceId'] ?? 'Услуга').toString(),
+                                                  style: const TextStyle(fontWeight: FontWeight.w900),
                                                 ),
                                               ),
-                                              Text(
-                                                'x${_intOr0(a['qty'])}',
-                                                style: TextStyle(
-                                                  fontWeight: FontWeight.w900,
-                                                  color: cs.onSurface
-                                                      .withValues(alpha: 0.8),
-                                                ),
-                                              ),
+                                              Text('x${_intOr0(a['qty'])}', style: const TextStyle(fontWeight: FontWeight.w900)),
                                               const SizedBox(width: 10),
-                                              Text(
-                                                '${_intOr0(a['priceRubSnapshot'])} ₽',
-                                                style: const TextStyle(
-                                                  fontWeight: FontWeight.w900,
-                                                ),
-                                              ),
+                                              Text('${_intOr0(a['priceRubSnapshot'])} ₽', style: const TextStyle(fontWeight: FontWeight.w900)),
                                               const SizedBox(width: 6),
                                               IconButton(
                                                 tooltip: 'Убрать',
-                                                onPressed: loading
-                                                    ? null
-                                                    : () => _removeAddon(
-                                                        (a['serviceId'] ?? '')
-                                                            .toString(),
-                                                      ),
-                                                icon: const Icon(
-                                                  Icons.delete_outline,
-                                                ),
+                                                onPressed: loading ? null : () => _removeAddon((a['serviceId'] ?? '').toString()),
+                                                icon: const Icon(Icons.delete_outline),
                                               ),
                                             ],
                                           ),
@@ -1141,22 +1175,12 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                                     ],
                                   ),
                                 const SizedBox(height: 8),
-                                Text(
-                                  'Добавить доп. услугу (временно: ввод serviceId):',
-                                  style: TextStyle(
-                                    color: cs.onSurface.withValues(alpha: 0.75),
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                                const SizedBox(height: 10),
                                 Row(
                                   children: [
                                     Expanded(
                                       child: TextField(
                                         controller: addonServiceIdCtrl,
-                                        decoration: const InputDecoration(
-                                          labelText: 'serviceId',
-                                        ),
+                                        decoration: const InputDecoration(labelText: 'serviceId'),
                                       ),
                                     ),
                                     const SizedBox(width: 10),
@@ -1165,9 +1189,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                                       child: TextField(
                                         controller: addonQtyCtrl,
                                         keyboardType: TextInputType.number,
-                                        decoration: const InputDecoration(
-                                          labelText: 'qty',
-                                        ),
+                                        decoration: const InputDecoration(labelText: 'qty'),
                                       ),
                                     ),
                                   ],
@@ -1188,71 +1210,31 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                       ),
                     ),
 
-                    // ---------------- TAB: PAY ----------------
+                    // TAB: PAY
                     SingleChildScrollView(
-                      padding: EdgeInsets.only(
-                        left: 12,
-                        right: 12,
-                        top: 12,
-                        bottom: 16 + MediaQuery.of(context).viewInsets.bottom,
-                      ),
+                      padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
                       child: Column(
                         children: [
                           _sectionCard(
                             title: 'Статус оплаты',
                             trailing: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 6,
-                              ),
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                               decoration: BoxDecoration(
-                                color: cs.surfaceContainerHighest.withValues(
-                                  alpha: 0.20,
-                                ),
+                                color: cs.surfaceContainerHighest.withValues(alpha: 0.20),
                                 borderRadius: BorderRadius.circular(14),
-                                border: Border.all(
-                                  color: cs.outlineVariant.withValues(
-                                    alpha: 0.55,
-                                  ),
-                                ),
+                                border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
                               ),
-                              child: Text(
-                                _paymentStatusRu,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w900,
-                                  fontSize: 12,
-                                ),
-                              ),
+                              child: Text(_paymentStatusRu, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12)),
                             ),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
-                                  'Оплачено: $paid ₽   К оплате: $toPay ₽',
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w900,
-                                  ),
-                                ),
+                                Text('Оплачено: $paid ₽   К оплате: $toPay ₽', style: const TextStyle(fontWeight: FontWeight.w900)),
                                 const SizedBox(height: 6),
                                 Text(
                                   'Стоимость: $effectivePriceRub ₽ (скидка: $discountRub ₽)',
-                                  style: TextStyle(
-                                    color: cs.onSurface.withValues(alpha: 0.75),
-                                    fontWeight: FontWeight.w800,
-                                  ),
+                                  style: TextStyle(color: cs.onSurface.withValues(alpha: 0.75), fontWeight: FontWeight.w800),
                                 ),
-                                if (addonsSumRub > 0) ...[
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    'Доп. услуги: +$addonsSumRub ₽',
-                                    style: TextStyle(
-                                      color: cs.onSurface.withValues(
-                                        alpha: 0.75,
-                                      ),
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                                  ),
-                                ],
                                 if (payBadges.isNotEmpty) ...[
                                   const SizedBox(height: 10),
                                   Wrap(
@@ -1262,13 +1244,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                                       for (final x in payBadges)
                                         Chip(
                                           avatar: Icon(_payIcon(x), size: 18),
-                                          label: Text(
-                                            x == 'CARD'
-                                                ? 'Карта'
-                                                : x == 'CASH'
-                                                ? 'Наличные'
-                                                : 'Контракт',
-                                          ),
+                                          label: Text(x == 'CARD' ? 'Карта' : x == 'CASH' ? 'Наличные' : 'Контракт'),
                                           visualDensity: VisualDensity.compact,
                                         ),
                                     ],
@@ -1283,22 +1259,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(
-                                    'К оплате: $toPay ₽',
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w900,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 10),
-                                  Text(
-                                    'Способ оплаты',
-                                    style: TextStyle(
-                                      color: cs.onSurface.withValues(
-                                        alpha: 0.85,
-                                      ),
-                                      fontWeight: FontWeight.w900,
-                                    ),
-                                  ),
+                                  Text('К оплате: $toPay ₽', style: const TextStyle(fontWeight: FontWeight.w900)),
                                   const SizedBox(height: 10),
                                   _paymentMethodChips(),
                                   const SizedBox(height: 12),
@@ -1316,36 +1277,21 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                           else
                             _sectionCard(
                               title: 'Оплата',
-                              child: Text(
-                                'Остаток 0 ₽ — оплачено.',
-                                style: TextStyle(
-                                  color: cs.onSurface.withValues(alpha: 0.75),
-                                ),
-                              ),
+                              child: Text('Остаток 0 ₽ — оплачено.', style: TextStyle(color: cs.onSurface.withValues(alpha: 0.75))),
                             ),
                         ],
                       ),
                     ),
 
-                    // ---------------- TAB: DISCOUNT ----------------
+                    // TAB: DISCOUNT
                     SingleChildScrollView(
-                      padding: EdgeInsets.only(
-                        left: 12,
-                        right: 12,
-                        top: 12,
-                        bottom: 16 + MediaQuery.of(context).viewInsets.bottom,
-                      ),
+                      padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
                       child: Column(
                         children: [
                           if (!_discountEnabled)
                             _sectionCard(
                               title: 'Скидка',
-                              child: Text(
-                                'Функция скидок отключена для этой локации.',
-                                style: TextStyle(
-                                  color: cs.onSurface.withValues(alpha: 0.75),
-                                ),
-                              ),
+                              child: Text('Функция скидок отключена.', style: TextStyle(color: cs.onSurface.withValues(alpha: 0.75))),
                             )
                           else
                             _sectionCard(
@@ -1355,24 +1301,18 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                                   TextField(
                                     controller: discountCtrl,
                                     keyboardType: TextInputType.number,
-                                    decoration: const InputDecoration(
-                                      labelText: 'Скидка (₽)',
-                                    ),
+                                    decoration: const InputDecoration(labelText: 'Скидка (₽)'),
                                   ),
                                   const SizedBox(height: 10),
                                   TextField(
                                     controller: discountReasonCtrl,
-                                    decoration: const InputDecoration(
-                                      labelText: 'Причина скидки (обязательно)',
-                                    ),
+                                    decoration: const InputDecoration(labelText: 'Причина скидки (обязательно)'),
                                   ),
                                   const SizedBox(height: 12),
                                   SizedBox(
                                     width: double.infinity,
                                     child: FilledButton(
-                                      onPressed: loading
-                                          ? null
-                                          : _applyDiscount,
+                                      onPressed: loading ? null : _applyDiscount,
                                       child: const Text('Применить скидку'),
                                     ),
                                   ),
@@ -1383,25 +1323,15 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                       ),
                     ),
 
-                    // ---------------- TAB: MOVE ----------------
+                    // TAB: MOVE
                     SingleChildScrollView(
-                      padding: EdgeInsets.only(
-                        left: 12,
-                        right: 12,
-                        top: 12,
-                        bottom: 16 + MediaQuery.of(context).viewInsets.bottom,
-                      ),
+                      padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
                       child: Column(
                         children: [
                           if (!_moveEnabled)
                             _sectionCard(
                               title: 'Перенос',
-                              child: Text(
-                                'Функция переноса отключена.',
-                                style: TextStyle(
-                                  color: cs.onSurface.withValues(alpha: 0.75),
-                                ),
-                              ),
+                              child: Text('Функция переноса отключена.', style: TextStyle(color: cs.onSurface.withValues(alpha: 0.75))),
                             )
                           else
                             _sectionCard(
@@ -1413,16 +1343,8 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                                     children: [
                                       Expanded(
                                         child: OutlinedButton(
-                                          onPressed: loading || !_canMove
-                                              ? null
-                                              : _pickMoveDateTime,
-                                          child: Text(
-                                            selectedDateTimeLocal == null
-                                                ? 'Выбрать дату/время'
-                                                : _fmtDateTimeLocal(
-                                                    selectedDateTimeLocal!,
-                                                  ),
-                                          ),
+                                          onPressed: loading || !_canMove ? null : _pickMoveDateTime,
+                                          child: Text(selectedDateTimeLocal == null ? 'Выбрать дату/время' : _fmtDateTimeLocal(selectedDateTimeLocal!)),
                                         ),
                                       ),
                                       const SizedBox(width: 10),
@@ -1430,24 +1352,12 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                                         width: 130,
                                         child: DropdownButtonFormField<int>(
                                           initialValue: selectedBay,
-                                          decoration: const InputDecoration(
-                                            labelText: 'Пост',
-                                          ),
+                                          decoration: const InputDecoration(labelText: 'Пост'),
                                           items: const [
-                                            DropdownMenuItem(
-                                              value: 1,
-                                              child: Text('Пост 1'),
-                                            ),
-                                            DropdownMenuItem(
-                                              value: 2,
-                                              child: Text('Пост 2'),
-                                            ),
+                                            DropdownMenuItem(value: 1, child: Text('Пост 1')),
+                                            DropdownMenuItem(value: 2, child: Text('Пост 2')),
                                           ],
-                                          onChanged: loading || !_canMove
-                                              ? null
-                                              : (v) => setState(
-                                                  () => selectedBay = v ?? 1,
-                                                ),
+                                          onChanged: loading || !_canMove ? null : (v) => setState(() => selectedBay = v ?? 1),
                                         ),
                                       ),
                                     ],
@@ -1457,52 +1367,28 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                                     children: [
                                       Checkbox(
                                         value: clientAgreed,
-                                        onChanged: loading || !_canMove
-                                            ? null
-                                            : (v) => setState(
-                                                () => clientAgreed = v ?? false,
-                                              ),
+                                        onChanged: loading || !_canMove ? null : (v) => setState(() => clientAgreed = v ?? false),
                                       ),
-                                      const Expanded(
-                                        child: Text('Согласовано с клиентом'),
-                                      ),
+                                      const Expanded(child: Text('Согласовано с клиентом')),
                                     ],
                                   ),
                                   const SizedBox(height: 10),
                                   DropdownButtonFormField<String>(
                                     initialValue: moveReasonKind,
-                                    items: _moveReasons
-                                        .map(
-                                          (x) => DropdownMenuItem(
-                                            value: x,
-                                            child: Text(x),
-                                          ),
-                                        )
-                                        .toList(),
-                                    onChanged: loading || !_canMove
-                                        ? null
-                                        : (v) => setState(
-                                            () => moveReasonKind =
-                                                v ?? _moveReasons.first,
-                                          ),
-                                    decoration: const InputDecoration(
-                                      labelText: 'Причина',
-                                    ),
+                                    items: _moveReasons.map((x) => DropdownMenuItem(value: x, child: Text(x))).toList(),
+                                    onChanged: loading || !_canMove ? null : (v) => setState(() => moveReasonKind = v ?? _moveReasons.first),
+                                    decoration: const InputDecoration(labelText: 'Причина'),
                                   ),
                                   const SizedBox(height: 10),
                                   TextField(
                                     controller: moveCommentCtrl,
-                                    decoration: const InputDecoration(
-                                      labelText: 'Комментарий (обязательно)',
-                                    ),
+                                    decoration: const InputDecoration(labelText: 'Комментарий (обязательно)'),
                                   ),
                                   const SizedBox(height: 12),
                                   SizedBox(
                                     width: double.infinity,
                                     child: FilledButton(
-                                      onPressed: loading || !_canMove
-                                          ? null
-                                          : _move,
+                                      onPressed: loading || !_canMove ? null : _move,
                                       child: const Text('Перенести'),
                                     ),
                                   ),
@@ -1513,98 +1399,70 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                       ),
                     ),
 
-                    // ---------------- TAB: PHOTOS ----------------
+                    // TAB: PHOTOS
                     SingleChildScrollView(
-                      padding: EdgeInsets.only(
-                        left: 12,
-                        right: 12,
-                        top: 12,
-                        bottom: 16 + MediaQuery.of(context).viewInsets.bottom,
-                      ),
+                      padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
                       child: Column(
                         children: [
                           _sectionCard(
-                            title: 'Фото (ДО/ПОСЛЕ/повреждения)',
+                            title: 'Фото авто',
+                            trailing: IconButton(
+                              tooltip: 'Обновить',
+                              onPressed: loading ? null : _refreshAddonsAndPhotos,
+                              icon: const Icon(Icons.refresh),
+                            ),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                if (photos.isEmpty)
-                                  Text(
-                                    'Пока нет фото.',
-                                    style: TextStyle(
-                                      color: cs.onSurface.withValues(
-                                        alpha: 0.7,
-                                      ),
-                                    ),
-                                  )
-                                else
-                                  Column(
-                                    children: [
-                                      for (final p in photos)
-                                        _photoCard(context, p),
-                                    ],
-                                  ),
-                                const SizedBox(height: 10),
-                                Text(
-                                  'Добавить фото (сейчас: URL; позже подключим загрузку):',
-                                  style: TextStyle(
-                                    color: cs.onSurface.withValues(alpha: 0.75),
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                                const SizedBox(height: 10),
                                 DropdownButtonFormField<String>(
                                   initialValue: photoKind,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Тип',
-                                  ),
+                                  decoration: const InputDecoration(labelText: 'Тип'),
                                   items: const [
-                                    DropdownMenuItem(
-                                      value: 'BEFORE',
-                                      child: Text('BEFORE'),
-                                    ),
-                                    DropdownMenuItem(
-                                      value: 'AFTER',
-                                      child: Text('AFTER'),
-                                    ),
-                                    DropdownMenuItem(
-                                      value: 'DAMAGE',
-                                      child: Text('DAMAGE'),
-                                    ),
-                                    DropdownMenuItem(
-                                      value: 'OTHER',
-                                      child: Text('OTHER'),
-                                    ),
+                                    DropdownMenuItem(value: 'BEFORE', child: Text('ДО')),
+                                    DropdownMenuItem(value: 'AFTER', child: Text('ПОСЛЕ')),
+                                    DropdownMenuItem(value: 'DAMAGE', child: Text('ПОВРЕЖДЕНИЯ')),
+                                    DropdownMenuItem(value: 'OTHER', child: Text('ДРУГОЕ')),
                                   ],
-                                  onChanged: loading
-                                      ? null
-                                      : (v) => setState(
-                                          () => photoKind = (v ?? 'BEFORE'),
-                                        ),
-                                ),
-                                const SizedBox(height: 10),
-                                TextField(
-                                  controller: photoUrlCtrl,
-                                  decoration: const InputDecoration(
-                                    labelText: 'URL',
-                                  ),
+                                  onChanged: loading ? null : (v) => setState(() => photoKind = (v ?? 'BEFORE')),
                                 ),
                                 const SizedBox(height: 10),
                                 TextField(
                                   controller: photoNoteCtrl,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Комментарий (необязательно)',
-                                  ),
+                                  decoration: const InputDecoration(labelText: 'Комментарий (необязательно)'),
                                 ),
                                 const SizedBox(height: 12),
                                 SizedBox(
                                   width: double.infinity,
                                   child: FilledButton.icon(
-                                    onPressed: loading ? null : _addPhoto,
+                                    onPressed: loading ? null : () => _uploadPhotoFile(kind: photoKind, replace: false),
                                     icon: const Icon(Icons.photo_camera),
-                                    label: const Text('Добавить фото'),
+                                    label: const Text('Снять/выбрать и загрузить'),
                                   ),
                                 ),
+                                const SizedBox(height: 10),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: OutlinedButton(
+                                        onPressed: loading ? null : () => _uploadPhotoFile(kind: 'BEFORE', replace: true),
+                                        child: const Text('Переснять ДО'),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: OutlinedButton(
+                                        onPressed: loading ? null : () => _uploadPhotoFile(kind: 'AFTER', replace: true),
+                                        child: const Text('Переснять ПОСЛЕ'),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 14),
+
+                                if (photos.isEmpty)
+                                  Text('Пока нет фото.', style: TextStyle(color: cs.onSurface.withValues(alpha: 0.7)))
+                                else
+                                  Column(children: [for (final p in photos) _photoCard(context, p)]),
                               ],
                             ),
                           ),

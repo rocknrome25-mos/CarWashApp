@@ -43,9 +43,7 @@ class _BookingsPageState extends State<BookingsPage> {
   @override
   void dispose() {
     _rtDebounce?.cancel();
-    _rtDebounce = null;
     _rtSub?.cancel();
-    _rtSub = null;
     super.dispose();
   }
 
@@ -73,7 +71,7 @@ class _BookingsPageState extends State<BookingsPage> {
       widget.repo.getBookings(includeCanceled: true, forceRefresh: force),
       widget.repo.getCars(forceRefresh: force),
       widget.repo.getServices(forceRefresh: force),
-      _loadWaitlist(),
+      _loadWaitlist(force: force),
     ]);
 
     return _BookingsBundle(
@@ -84,10 +82,9 @@ class _BookingsPageState extends State<BookingsPage> {
     );
   }
 
-  Future<List<Map<String, dynamic>>> _loadWaitlist() async {
+  Future<List<Map<String, dynamic>>> _loadWaitlist({required bool force}) async {
     final cid = widget.repo.currentClient?.id.trim() ?? '';
     if (cid.isEmpty) return const [];
-    // cache/refresh контролируется в репозитории
     return widget.repo.getWaitlist(clientId: cid, includeAll: false);
   }
 
@@ -97,7 +94,7 @@ class _BookingsPageState extends State<BookingsPage> {
     });
   }
 
-  // ================= helpers =================
+  // ---------------- helpers ----------------
 
   DateTime _local(DateTime d) => d.toLocal();
 
@@ -118,6 +115,8 @@ class _BookingsPageState extends State<BookingsPage> {
     return '${x.hour.toString().padLeft(2, '0')}:'
         '${x.minute.toString().padLeft(2, '0')}';
   }
+
+  String _dtInline(DateTime d) => '${_dateHeader(d)} • ${_time(d)}';
 
   int _addonsCountSafe(Booking b) {
     try {
@@ -177,8 +176,7 @@ class _BookingsPageState extends State<BookingsPage> {
 
   String _serviceImage(Service? s) {
     final name = (s?.name ?? '').toLowerCase();
-    if (name.contains('комплекс'))
-      return 'assets/images/services/kompleks_512.jpg';
+    if (name.contains('комплекс')) return 'assets/images/services/kompleks_512.jpg';
     if (name.contains('воск')) return 'assets/images/services/vosk_512.jpg';
     return 'assets/images/services/kuzov_512.jpg';
   }
@@ -193,66 +191,70 @@ class _BookingsPageState extends State<BookingsPage> {
     return max(total - b.paidTotalRub, 0);
   }
 
-  // ================= UI pieces =================
+  // ---------------- Yandex-like layers ----------------
 
-  Widget _statusBadge(BuildContext ctx, Booking b) {
-    final c = _statusColor(ctx, b);
+  /// слой 2: секция (чуть светлее фона)
+  Widget _sectionBox({required Widget child}) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: cs.surface.withValues(alpha: 0.10), // базовый слой секции
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
+      ),
+      child: child,
+    );
+  }
+
+  /// слой 3: элемент внутри секции (ещё светлее)
+  Widget _pill({
+    required String text,
+    IconData? icon,
+    Color? borderTint,
+  }) {
+    final cs = Theme.of(context).colorScheme;
+    final bg = cs.surfaceContainerHighest.withValues(alpha: 0.22);
+    final border = (borderTint ?? cs.outlineVariant).withValues(alpha: 0.55);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: border),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(icon, size: 14, color: cs.onSurface.withValues(alpha: 0.85)),
+            const SizedBox(width: 6),
+          ],
+          Text(
+            text,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              fontWeight: FontWeight.w900,
+              color: cs.onSurface.withValues(alpha: 0.92),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _statusBadge(Booking b) {
+    final c = _statusColor(context, b);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
         color: c.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: c.withValues(alpha: 0.20)),
       ),
       child: Text(
         _statusText(b),
-        style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w900, color: c),
+        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w900, color: c),
       ),
-    );
-  }
-
-  Widget _bayBadge(BuildContext ctx, int? bayId) {
-    final cs = Theme.of(ctx).colorScheme;
-    final color = _bayColor(ctx, bayId);
-
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 4,
-          height: 18,
-          decoration: BoxDecoration(
-            color: color,
-            borderRadius: BorderRadius.circular(4),
-          ),
-        ),
-        const SizedBox(width: 8),
-        Image.asset(
-          _bayIcon(bayId),
-          width: 16,
-          height: 16,
-          errorBuilder: (_, __, ___) => Container(
-            width: 10,
-            height: 10,
-            decoration: BoxDecoration(
-              color: color,
-              borderRadius: BorderRadius.circular(999),
-            ),
-          ),
-        ),
-        const SizedBox(width: 8),
-        Flexible(
-          child: Text(
-            _bayText(bayId),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
-              fontWeight: FontWeight.w900,
-              color: cs.onSurface.withValues(alpha: 0.90),
-            ),
-          ),
-        ),
-      ],
     );
   }
 
@@ -279,45 +281,51 @@ class _BookingsPageState extends State<BookingsPage> {
     );
   }
 
-  Widget _pill({
-    required String text,
-    Color? bg,
-    Color? border,
-    Color? fg,
-    IconData? icon,
-  }) {
+  Widget _bayRow(int? bayId) {
     final cs = Theme.of(context).colorScheme;
-    final bgc = bg ?? cs.surfaceContainerHigh.withValues(alpha: 0.45);
-    final brc = border ?? cs.outlineVariant.withValues(alpha: 0.55);
-    final fgc = fg ?? cs.onSurface.withValues(alpha: 0.92);
+    final color = _bayColor(context, bayId);
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: bgc,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: brc),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (icon != null) ...[
-            Icon(icon, size: 14, color: fgc),
-            const SizedBox(width: 6),
-          ],
-          Text(
-            text,
+    return Row(
+      children: [
+        Container(
+          width: 4,
+          height: 20,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(4),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Image.asset(
+          _bayIcon(bayId),
+          width: 18,
+          height: 18,
+          errorBuilder: (_, __, ___) => Container(
+            width: 10,
+            height: 10,
+            decoration: BoxDecoration(
+              color: color,
+              borderRadius: BorderRadius.circular(999),
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            _bayText(bayId),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               fontWeight: FontWeight.w900,
-              color: fgc,
+              color: cs.onSurface.withValues(alpha: 0.90),
             ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
+
+  // ---------------- card ----------------
 
   Widget _bookingCard({
     required Booking b,
@@ -326,32 +334,18 @@ class _BookingsPageState extends State<BookingsPage> {
     required VoidCallback onTap,
   }) {
     final cs = Theme.of(context).colorScheme;
-
-    final when = '${_dateHeader(b.dateTime)} • ${_time(b.dateTime)}';
     final total = _effectivePriceRub(service, b);
     final toPay = _toPayRub(service, b);
     final addonsCount = _addonsCountSafe(b);
 
-    final secondaryText = cs.onSurface.withValues(alpha: 0.68);
+    final secondary = cs.onSurface.withValues(alpha: 0.72);
 
     return InkWell(
       borderRadius: BorderRadius.circular(18),
       onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: Theme.of(context).cardColor,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
-          boxShadow: [
-            BoxShadow(
-              blurRadius: 16,
-              offset: const Offset(0, 10),
-              color: Colors.black.withValues(alpha: 0.22),
-            ),
-          ],
-        ),
+      child: _sectionBox(
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _serviceThumb(service),
             const SizedBox(width: 12),
@@ -359,7 +353,7 @@ class _BookingsPageState extends State<BookingsPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // name + status
+                  // header
                   Row(
                     children: [
                       Expanded(
@@ -367,20 +361,28 @@ class _BookingsPageState extends State<BookingsPage> {
                           service?.name ?? 'Услуга удалена',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleSmall
-                              ?.copyWith(
-                                fontWeight: FontWeight.w900,
-                                color: cs.onSurface.withValues(alpha: 0.92),
-                              ),
+                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w900,
+                            color: cs.onSurface.withValues(alpha: 0.92),
+                          ),
                         ),
                       ),
                       const SizedBox(width: 8),
-                      _statusBadge(context, b),
+                      _statusBadge(b),
                     ],
                   ),
-                  const SizedBox(height: 6),
 
-                  // car
+                  const SizedBox(height: 10),
+
+                  // date/time as a clear pill (layer 3)
+                  _pill(
+                    text: _dtInline(b.dateTime),
+                    icon: Icons.schedule,
+                  ),
+
+                  const SizedBox(height: 8),
+
+                  // car (single line)
                   Text(
                     car == null
                         ? 'Авто удалено'
@@ -389,47 +391,26 @@ class _BookingsPageState extends State<BookingsPage> {
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       fontWeight: FontWeight.w700,
-                      color: secondaryText,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-
-                  // datetime
-                  Text(
-                    when,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      color: secondaryText,
+                      color: secondary,
                     ),
                   ),
 
                   const SizedBox(height: 10),
 
-                  // money pills
+                  // money pills (layer 3)
                   Wrap(
                     spacing: 10,
                     runSpacing: 10,
                     children: [
-                      _pill(text: '$total ₽', icon: Icons.payments_outlined),
-                      _pill(
-                        text: 'К оплате: $toPay ₽',
-                        icon: Icons.credit_card,
-                        bg: cs.primary.withValues(alpha: 0.12),
-                        border: cs.primary.withValues(alpha: 0.22),
-                        fg: cs.onSurface.withValues(alpha: 0.95),
-                      ),
+                      _pill(text: 'Стоимость: $total ₽', icon: Icons.payments_outlined),
+                      _pill(text: 'К оплате: $toPay ₽', icon: Icons.credit_card),
                       if (addonsCount > 0)
-                        _pill(
-                          text: '+$addonsCount доп.',
-                          icon: Icons.add_circle_outline,
-                        ),
+                        _pill(text: 'Доп. услуги: +$addonsCount', icon: Icons.add_circle_outline),
                     ],
                   ),
 
-                  const SizedBox(height: 10),
-                  _bayBadge(context, b.bayId),
+                  const SizedBox(height: 12),
+                  _bayRow(b.bayId),
                 ],
               ),
             ),
@@ -442,14 +423,7 @@ class _BookingsPageState extends State<BookingsPage> {
   Widget _waitlistTopCard(int count) {
     final cs = Theme.of(context).colorScheme;
 
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: cs.surfaceContainerHighest.withValues(alpha: 0.22),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
-      ),
+    return _sectionBox(
       child: Row(
         children: [
           Icon(Icons.hourglass_bottom, color: cs.primary),
@@ -463,12 +437,10 @@ class _BookingsPageState extends State<BookingsPage> {
               ),
             ),
           ),
-          TextButton(
+          FilledButton(
             onPressed: () {
               Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => WaitlistPage(repo: widget.repo),
-                ),
+                MaterialPageRoute(builder: (_) => WaitlistPage(repo: widget.repo)),
               );
             },
             child: const Text('Показать'),
@@ -478,13 +450,13 @@ class _BookingsPageState extends State<BookingsPage> {
     );
   }
 
-  // ================= build =================
+  // ---------------- build ----------------
 
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<_BookingsBundle>(
       future: _future,
-      builder: (ctx, snap) {
+      builder: (_, snap) {
         if (snap.connectionState != ConnectionState.done) {
           return const Center(child: CircularProgressIndicator());
         }
@@ -508,12 +480,15 @@ class _BookingsPageState extends State<BookingsPage> {
         final bookings = [...data.bookings]
           ..sort((a, b) => b.dateTime.compareTo(a.dateTime));
 
-        final listChildren = <Widget>[];
-
-        if (data.waitlist.isNotEmpty) {
-          listChildren.add(_waitlistTopCard(data.waitlist.length));
-          listChildren.add(const SizedBox(height: 12));
-        }
+        final listChildren = <Widget>[
+          const SizedBox(height: 12),
+          if (data.waitlist.isNotEmpty) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: _waitlistTopCard(data.waitlist.length),
+            ),
+          ],
+        ];
 
         if (bookings.isEmpty) {
           listChildren.add(
@@ -536,14 +511,12 @@ class _BookingsPageState extends State<BookingsPage> {
             lastDay = day;
             listChildren.add(
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
                 child: Text(
                   _dateHeader(b.dateTime),
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
                     fontWeight: FontWeight.w900,
-                    color: Theme.of(
-                      context,
-                    ).colorScheme.onSurface.withValues(alpha: 0.92),
+                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.92),
                   ),
                 ),
               ),
@@ -573,6 +546,7 @@ class _BookingsPageState extends State<BookingsPage> {
           );
         }
 
+        listChildren.add(const SizedBox(height: 16));
         return ListView(children: listChildren);
       },
     );

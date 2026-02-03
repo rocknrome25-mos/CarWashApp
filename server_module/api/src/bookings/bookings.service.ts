@@ -220,10 +220,6 @@ export class BookingsService {
 
   /**
    * ✅ CRON: статусы меняются даже если никто не дергает API.
-   * Каждую минуту:
-   * - отменяем просроченные оплаты
-   * - автозавершаем прошедшие ACTIVE
-   * WS шлём только если реально были изменения (чтобы клиент не дергался).
    */
   @Cron('*/1 * * * *')
   async cronHousekeeping() {
@@ -250,7 +246,13 @@ export class BookingsService {
       orderBy: { createdAt: 'desc' },
       include: {
         location: {
-          select: { id: true, name: true, address: true, colorHex: true, baysCount: true },
+          select: {
+            id: true,
+            name: true,
+            address: true,
+            colorHex: true,
+            baysCount: true,
+          },
         },
         car: true,
         service: true,
@@ -260,7 +262,12 @@ export class BookingsService {
 
   /* ===================== BUSY SLOTS ===================== */
 
-  async getBusySlots(args: { locationId: string; bayId: number; from: Date; to: Date }) {
+  async getBusySlots(args: {
+    locationId: string;
+    bayId: number;
+    from: Date;
+    to: Date;
+  }) {
     await this._housekeeping();
 
     const locationId = (args.locationId ?? '').trim();
@@ -274,7 +281,10 @@ export class BookingsService {
     const windowStart = new Date(from.getTime() - 24 * 60 * 60 * 1000);
     const windowEnd = new Date(to.getTime() + 24 * 60 * 60 * 1000);
 
-    const busyStatuses: BookingStatus[] = [BookingStatus.ACTIVE, BookingStatus.PENDING_PAYMENT];
+    const busyStatuses: BookingStatus[] = [
+      BookingStatus.ACTIVE,
+      BookingStatus.PENDING_PAYMENT,
+    ];
 
     const rows = await this.prisma.booking.findMany({
       where: {
@@ -324,16 +334,69 @@ export class BookingsService {
 
   /* ===================== LIST BOOKINGS ===================== */
 
+  // ✅ FIXED: return computed payment fields + isWashing
   async findAll(includeCanceled: boolean, clientId?: string) {
     await this._housekeeping();
 
-    const where: any = includeCanceled ? {} : { status: { not: BookingStatus.CANCELED } };
+    const where: any = includeCanceled
+      ? {}
+      : { status: { not: BookingStatus.CANCELED } };
     if (clientId) where.clientId = clientId;
 
-    return this.prisma.booking.findMany({
+    const rows = await this.prisma.booking.findMany({
       where,
       orderBy: { dateTime: 'asc' },
       include: this._bookingInclude(),
+    });
+
+    return rows.map((b: any) => {
+      const paidTotalRub = (b.payments ?? []).reduce(
+        (s: number, p: any) => s + (p.amountRub ?? 0),
+        0,
+      );
+
+      const basePriceRub = b.service?.priceRub ?? 0;
+      const discountRub = b.discountRub ?? 0;
+
+      const addonsSumRub = (b.addons ?? []).reduce((s: number, a: any) => {
+        const qty = a.qty ?? 1;
+        return s + (a.priceRubSnapshot ?? 0) * qty;
+      }, 0);
+
+      const effectivePriceRub = Math.max(
+        basePriceRub + addonsSumRub - discountRub,
+        0,
+      );
+      const remainingRub = Math.max(effectivePriceRub - paidTotalRub, 0);
+
+      const badgeSet = new Set<string>();
+      for (const p of b.payments ?? []) {
+        badgeSet.add(String(p.methodType ?? 'CARD'));
+      }
+      const paymentBadges = Array.from(badgeSet);
+
+      let paymentStatus = 'UNPAID';
+      if (effectivePriceRub > 0 && paidTotalRub >= effectivePriceRub) {
+        paymentStatus = 'PAID';
+      } else if (paidTotalRub > 0) {
+        paymentStatus = 'PARTIAL';
+      }
+
+      const isWashing =
+        !!b.startedAt &&
+        !b.finishedAt &&
+        b.status !== BookingStatus.CANCELED &&
+        b.status !== BookingStatus.COMPLETED;
+
+      return {
+        ...b,
+        isWashing,
+        paidTotalRub,
+        effectivePriceRub,
+        remainingRub,
+        paymentBadges,
+        paymentStatus,
+      };
     });
   }
 
@@ -497,7 +560,7 @@ export class BookingsService {
     });
     if (!service) throw new BadRequestException('Service not found');
 
-    // ✅ addons validate + fetch services
+    // addons validate + fetch services
     const addonsInput = Array.isArray(body.addons) ? body.addons : [];
     const addonPairs: Array<{ serviceId: string; qty: number }> = [];
 
@@ -512,10 +575,7 @@ export class BookingsService {
       addonPairs.push({ serviceId: sid, qty: q });
     }
 
-    const addonServicesById = new Map<
-      string,
-      { id: string; priceRub: number; durationMin: number }
-    >();
+    const addonServicesById = new Map<string, { id: string; priceRub: number; durationMin: number }>();
 
     if (addonPairs.length > 0) {
       const uniqueAddonIds = Array.from(new Set(addonPairs.map((x) => x.serviceId)));
@@ -532,7 +592,7 @@ export class BookingsService {
       }
     }
 
-    // ✅ all bays closed => waitlist
+    // all bays closed => waitlist
     const anyBayActive = await this._isAnyBayActive(locationId);
     if (!anyBayActive) {
       await this.prisma.waitlistRequest.create({
@@ -553,7 +613,7 @@ export class BookingsService {
       throw new ConflictException('ALL_BAYS_CLOSED_WAITLISTED');
     }
 
-    // ✅ selected bay closed => waitlist
+    // selected bay closed => waitlist
     const bay = await this._getBayOrThrow(locationId, bayId);
     if (bay.isActive !== true) {
       await this.prisma.waitlistRequest.create({
@@ -574,7 +634,7 @@ export class BookingsService {
       throw new ConflictException('BAY_CLOSED_WAITLISTED');
     }
 
-    // ✅ duration = base + addons + buffer => round up to 30
+    // duration = base + addons + buffer => round up to 30
     const baseDur = this._serviceDurationOrDefault(service.durationMin);
 
     let addonDurSum = 0;
@@ -963,7 +1023,10 @@ export class BookingsService {
       data: {
         status: BookingStatus.CANCELED,
         canceledAt: now,
-        cancelReason: existing.status === BookingStatus.PENDING_PAYMENT ? 'USER_CANCELED_PENDING' : 'USER_CANCELED',
+        cancelReason:
+          existing.status === BookingStatus.PENDING_PAYMENT
+            ? 'USER_CANCELED_PENDING'
+            : 'USER_CANCELED',
       },
       include: this._bookingInclude(),
     });

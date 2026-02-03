@@ -21,10 +21,6 @@ class ServicesScreen extends StatefulWidget {
 }
 
 class _ServicesScreenState extends State<ServicesScreen> {
-  // ✅ Web-safe height (removes 1px overflow on Chrome)
-  static const double _cardH = 100;
-  static const double _thumbW = 118;
-
   late Future<_ServicesBundle> _future;
 
   @override
@@ -66,11 +62,6 @@ class _ServicesScreenState extends State<ServicesScreen> {
     } catch (_) {}
   }
 
-  String _priceLine(Service s) {
-    final dur = s.durationMin ?? 30;
-    return '${s.priceRub} ₽  •  $dur мин';
-  }
-
   ImageProvider _serviceThumb(Service s) {
     if (s.imageUrl != null && s.imageUrl!.isNotEmpty) {
       return NetworkImage(s.imageUrl!);
@@ -87,7 +78,9 @@ class _ServicesScreenState extends State<ServicesScreen> {
   }
 
   Future<void> _openDetails(Service s) async {
-    final booked = await Navigator.of(context).push<bool>(
+    final nav = Navigator.of(context);
+
+    final result = await nav.push<Object?>(
       MaterialPageRoute(
         builder: (_) => ServiceDetailsPage(repo: widget.repo, service: s),
       ),
@@ -95,32 +88,23 @@ class _ServicesScreenState extends State<ServicesScreen> {
 
     if (!mounted) return;
 
-    if (booked == true) {
+    if (result == true) {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Запись создана')));
       widget.onBookingCreated();
       _refreshSync(force: true);
+      return;
     }
-  }
 
-  Widget _priceChip(BuildContext context, Service s) {
-    final cs = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: cs.surfaceContainerHigh.withValues(alpha: 0.55),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
-      ),
-      child: Text(
-        '${s.priceRub} ₽',
-        style: Theme.of(context).textTheme.labelMedium?.copyWith(
-          fontWeight: FontWeight.w900,
-          color: cs.onSurface.withValues(alpha: 0.92),
-        ),
-      ),
-    );
+    if (result == 'waitlisted') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Добавили в очередь ожидания')),
+      );
+      widget.onBookingCreated(); // ✅ переводим на вкладку "Записи"
+      _refreshSync(force: true);
+      return;
+    }
   }
 
   @override
@@ -185,7 +169,6 @@ class _ServicesScreenState extends State<ServicesScreen> {
           child: ListView(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
             children: [
-              // hint card
               Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
@@ -212,7 +195,7 @@ class _ServicesScreenState extends State<ServicesScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Выбери услугу и время',
+                            'Выбрать услугу',
                             style: Theme.of(context).textTheme.titleMedium
                                 ?.copyWith(
                                   fontWeight: FontWeight.w900,
@@ -221,7 +204,7 @@ class _ServicesScreenState extends State<ServicesScreen> {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            'Открой услугу — затем нажми “Записаться”.',
+                            'Открой услугу и выбери слот.',
                             style: Theme.of(context).textTheme.bodySmall
                                 ?.copyWith(
                                   color: cs.onSurface.withValues(alpha: 0.70),
@@ -234,9 +217,7 @@ class _ServicesScreenState extends State<ServicesScreen> {
                   ],
                 ),
               ),
-
               const SizedBox(height: 14),
-
               Text(
                 'Услуги',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
@@ -262,12 +243,12 @@ class _ServicesScreenState extends State<ServicesScreen> {
                       ),
                       clipBehavior: Clip.antiAlias,
                       child: SizedBox(
-                        height: _cardH, // ✅ increased height fixes 1px overflow
+                        height: 104, // ✅ убираем overflow
                         child: Row(
                           children: [
                             SizedBox(
-                              width: _thumbW,
-                              height: _cardH,
+                              width: 118,
+                              height: 104,
                               child: Image(
                                 image: _serviceThumb(s),
                                 fit: BoxFit.cover,
@@ -287,14 +268,13 @@ class _ServicesScreenState extends State<ServicesScreen> {
                               child: Padding(
                                 padding: const EdgeInsets.fromLTRB(
                                   14,
-                                  10,
+                                  12,
                                   14,
-                                  10,
+                                  12,
                                 ),
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   mainAxisAlignment: MainAxisAlignment.center,
-                                  mainAxisSize: MainAxisSize.min,
                                   children: [
                                     Text(
                                       s.name,
@@ -310,23 +290,26 @@ class _ServicesScreenState extends State<ServicesScreen> {
                                             ),
                                           ),
                                     ),
-                                    const SizedBox(height: 5),
-                                    Text(
-                                      _priceLine(s),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodySmall
-                                          ?.copyWith(
-                                            color: cs.onSurface.withValues(
-                                              alpha: 0.72,
-                                            ),
-                                            fontWeight: FontWeight.w700,
-                                          ),
+                                    const SizedBox(height: 8),
+                                    Wrap(
+                                      spacing: 10,
+                                      runSpacing: 10,
+                                      children: [
+                                        _PricePill(text: '${s.priceRub} ₽'),
+                                        Text(
+                                          '${s.durationMin ?? 30} мин',
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodySmall
+                                              ?.copyWith(
+                                                color: cs.onSurface.withValues(
+                                                  alpha: 0.72,
+                                                ),
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                        ),
+                                      ],
                                     ),
-                                    const SizedBox(height: 6),
-                                    _priceChip(context, s),
                                   ],
                                 ),
                               ),
@@ -348,6 +331,30 @@ class _ServicesScreenState extends State<ServicesScreen> {
 class _ServicesBundle {
   final int carsCount;
   final List<Service> services;
-
   const _ServicesBundle({required this.carsCount, required this.services});
+}
+
+class _PricePill extends StatelessWidget {
+  final String text;
+  const _PricePill({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
+      ),
+      child: Text(
+        text,
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+          fontWeight: FontWeight.w900,
+          color: cs.onSurface.withValues(alpha: 0.92),
+        ),
+      ),
+    );
+  }
 }

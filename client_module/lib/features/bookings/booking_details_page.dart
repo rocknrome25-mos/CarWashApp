@@ -40,11 +40,16 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
   StreamSubscription? _rtSub;
   Timer? _rtDebounce;
 
+  // Fallback polling: if server doesn't emit WS on start, we still refresh
+  Timer? _pollTimer;
+  Booking? _lastBooking;
+
   @override
   void initState() {
     super.initState();
     _future = _load();
     _subscribeRealtime();
+    _startPollingFallback();
   }
 
   @override
@@ -53,6 +58,10 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
     _rtDebounce = null;
     _rtSub?.cancel();
     _rtSub = null;
+
+    _pollTimer?.cancel();
+    _pollTimer = null;
+
     super.dispose();
   }
 
@@ -64,6 +73,33 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
         if (!mounted) return;
         setState(() => _future = _load(forceRefresh: true));
       });
+    });
+  }
+
+  void _startPollingFallback() {
+    _pollTimer?.cancel();
+    _pollTimer = Timer.periodic(const Duration(seconds: 7), (_) {
+      if (!mounted) return;
+
+      final b = _lastBooking;
+      if (b == null) return;
+
+      // no polling if finished
+      if (b.status == BookingStatus.completed ||
+          b.status == BookingStatus.canceled) {
+        return;
+      }
+
+      final now = DateTime.now();
+      final dt = b.dateTime.toLocal();
+      final minsFrom = now.difference(dt).inMinutes;
+
+      // window: from -30 minutes to +240 minutes
+      final shouldPoll = minsFrom >= -30 && minsFrom <= 240;
+
+      if (shouldPoll) {
+        setState(() => _future = _load(forceRefresh: true));
+      }
     });
   }
 
@@ -85,6 +121,8 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
         ? null
         : services.where((s) => s.id == booking.serviceId).firstOrNull;
 
+    _lastBooking = booking;
+
     return _Details(booking: booking, car: car, service: service);
   }
 
@@ -98,7 +136,7 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
         final out = <Map<String, dynamic>>[];
         for (final x in addons) {
           if (x is Map) {
-            out.add(x.cast<String, dynamic>());
+            out.add(Map<String, dynamic>.from(x));
             continue;
           }
           try {
@@ -173,7 +211,9 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
   String _carTitleForUi(Car c) {
     final make = c.make.trim();
     final model = c.model.trim();
-    if (model.isEmpty || model == '—') return '$make (${c.plateDisplay})';
+    if (model.isEmpty || model == '—') {
+      return '$make (${c.plateDisplay})';
+    }
     return '$make $model (${c.plateDisplay})';
   }
 
@@ -285,7 +325,9 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
   }) async {
     if (_paying) return;
 
+    // capture before await -> removes lint use_build_context_synchronously
     final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
 
     if (!_canPayDeposit(booking)) {
       messenger.showSnackBar(
@@ -297,7 +339,7 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
     setState(() => _paying = true);
 
     try {
-      final paid = await Navigator.of(context).push<bool>(
+      final paid = await navigator.push<bool>(
         MaterialPageRoute(
           builder: (_) => PaymentPage(
             repo: widget.repo,
@@ -333,6 +375,9 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
   Future<void> _confirmAndCancel(String bookingId) async {
     if (_canceling) return;
 
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -355,7 +400,6 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
     if (ok != true) return;
 
     setState(() => _canceling = true);
-    final messenger = ScaffoldMessenger.of(context);
 
     try {
       await widget.repo.cancelBooking(bookingId);
@@ -367,7 +411,7 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
         _future = _load(forceRefresh: true);
       });
 
-      Navigator.of(context).pop(true);
+      navigator.pop(true);
     } catch (e) {
       if (!mounted) return;
       setState(() => _canceling = false);
@@ -542,6 +586,8 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
     );
   }
 
+  // ---------------- build ----------------
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -560,17 +606,11 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
             return Center(
               child: Padding(
                 padding: const EdgeInsets.all(16),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text('Ошибка: ${snapshot.error}'),
-                    const SizedBox(height: 12),
-                    FilledButton(
-                      onPressed: () =>
-                          setState(() => _future = _load(forceRefresh: true)),
-                      child: const Text('Повторить'),
-                    ),
-                  ],
+                child: FilledButton(
+                  onPressed: () {
+                    setState(() => _future = _load(forceRefresh: true));
+                  },
+                  child: const Text('Повторить'),
                 ),
               ),
             );
@@ -640,7 +680,6 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                       ],
                     ),
                     const SizedBox(height: 8),
-
                     Text(
                       _dtText(booking.dateTime),
                       style: TextStyle(
@@ -649,10 +688,8 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-
                     const SizedBox(height: 12),
                     _bayPill(booking.bayId),
-
                     const SizedBox(height: 14),
 
                     Text(
@@ -708,18 +745,6 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                         fontWeight: FontWeight.w900,
                       ),
                     ),
-
-                    if (booking.lastPaidAt != null) ...[
-                      const SizedBox(height: 6),
-                      Text(
-                        'Последний платёж: ${_dtText(booking.lastPaidAt!)}',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: cs.onSurface.withValues(alpha: 0.68),
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ],
 
                     if (booking.status == BookingStatus.pendingPayment &&
                         booking.paymentDueAt != null) ...[
