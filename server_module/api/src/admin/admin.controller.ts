@@ -385,6 +385,27 @@ export class AdminController {
     return this.admin.listBookingPhotos(uid, sid, bid);
   }
 
+  // ✅ DELETE photo
+  @Delete('bookings/:id/photos/:photoId')
+  deletePhoto(
+    @Headers('x-user-id') userId?: string,
+    @Headers('x-shift-id') shiftId?: string,
+    @Param('id') bookingId?: string,
+    @Param('photoId') photoId?: string,
+  ) {
+    const uid = (userId ?? '').trim();
+    const sid = (shiftId ?? '').trim();
+    const bid = (bookingId ?? '').trim();
+    const pid = (photoId ?? '').trim();
+
+    if (!uid) throw new BadRequestException('x-user-id is required');
+    if (!sid) throw new BadRequestException('x-shift-id is required');
+    if (!bid) throw new BadRequestException('booking id is required');
+    if (!pid) throw new BadRequestException('photo id is required');
+
+    return this.admin.deleteBookingPhoto(uid, sid, bid, pid);
+  }
+
   @Post('bookings/:id/photos')
   addPhoto(
     @Headers('x-user-id') userId?: string,
@@ -401,12 +422,13 @@ export class AdminController {
     if (!uid) throw new BadRequestException('x-user-id is required');
     if (!sid) throw new BadRequestException('x-shift-id is required');
     if (!bid) throw new BadRequestException('booking id is required');
-    if (!kind) throw new BadRequestException('kind is required (BEFORE/AFTER)');
+    if (!kind)
+      throw new BadRequestException('kind is required (BEFORE/AFTER/DAMAGE/OTHER)');
     if (!url) throw new BadRequestException('url is required');
     return this.admin.addBookingPhoto(uid, sid, bid, { kind, url, note });
   }
 
-  // ✅ NEW: upload file (multipart/form-data) -> /admin/bookings/:id/photos/upload
+  // upload file (multipart/form-data) -> /admin/bookings/:id/photos/upload
   @Post('bookings/:id/photos/upload')
   @UseInterceptors(
     FileInterceptor('file', {
@@ -418,7 +440,8 @@ export class AdminController {
     @Headers('x-user-id') userId?: string,
     @Headers('x-shift-id') shiftId?: string,
     @Param('id') bookingId?: string,
-    @UploadedFile() file?: Express.Multer.File,
+    // IMPORTANT: avoid Express.Multer typing issues in TS
+    @UploadedFile() file?: any,
     @Body() body: any = {},
   ) {
     const uid = (userId ?? '').trim();
@@ -430,7 +453,8 @@ export class AdminController {
     if (!uid) throw new BadRequestException('x-user-id is required');
     if (!sid) throw new BadRequestException('x-shift-id is required');
     if (!bid) throw new BadRequestException('booking id is required');
-    if (!kind) throw new BadRequestException('kind is required (BEFORE/AFTER/DAMAGE/OTHER)');
+    if (!kind)
+      throw new BadRequestException('kind is required (BEFORE/AFTER/DAMAGE/OTHER)');
     if (!file) throw new BadRequestException('file is required');
 
     return this.admin.uploadBookingPhoto(uid, sid, bid, { kind, note, file });

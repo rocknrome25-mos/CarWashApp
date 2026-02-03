@@ -36,7 +36,12 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
   final noteCtrl = TextEditingController();
 
   // Move
-  static const _moveReasons = <String>['Задержка', 'Сбой', 'Передумал', 'Другое'];
+  static const _moveReasons = <String>[
+    'Задержка',
+    'Сбой',
+    'Передумал',
+    'Другое',
+  ];
   String moveReasonKind = _moveReasons.first;
   final moveCommentCtrl = TextEditingController();
   bool clientAgreed = true;
@@ -61,9 +66,8 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
   String photoKind = 'BEFORE'; // BEFORE/AFTER/DAMAGE/OTHER (server enums)
   final photoNoteCtrl = TextEditingController();
 
-  // Local previews so photo appears immediately
-  final Map<String, Uint8List> _localPreviewByTempId = {};
   final _picker = ImagePicker();
+  final Map<String, Uint8List> _localPreviewByTempId = {};
 
   bool get _moveEnabled =>
       widget.session.featureOn('BOOKING_MOVE', defaultValue: true);
@@ -78,7 +82,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
   String get _shiftId => widget.session.activeShiftId ?? '';
   String get _bookingId => (widget.booking['id'] ?? '').toString();
 
-  static const _timeout = Duration(seconds: 20);
+  static const _timeout = Duration(seconds: 25);
 
   @override
   void initState() {
@@ -96,6 +100,8 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     if (dtIso != null && dtIso.isNotEmpty) {
       selectedDateTimeLocal = DateTime.tryParse(dtIso)?.toLocal();
     }
+
+    paymentMethod = 'CARD';
 
     final dr = widget.booking['discountRub'];
     if (dr is num) discountCtrl.text = dr.toInt().toString();
@@ -121,7 +127,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
           .toList();
     }
 
-    _refreshAddonsAndPhotos();
+    _refreshAddonsAndPhotos(showErrors: false);
   }
 
   @override
@@ -130,13 +136,41 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     moveCommentCtrl.dispose();
     discountCtrl.dispose();
     discountReasonCtrl.dispose();
+
     addonServiceIdCtrl.dispose();
     addonQtyCtrl.dispose();
+
     photoNoteCtrl.dispose();
+
     super.dispose();
   }
 
   // ---------------- helpers ----------------
+
+  Uri _u(String path, [Map<String, String>? q]) {
+    final uri = Uri.parse(widget.api.baseUrl + path);
+    return q == null ? uri : uri.replace(queryParameters: q);
+  }
+
+  Map<String, String> _headers({bool json = true}) {
+    final h = <String, String>{'x-user-id': _userId, 'x-shift-id': _shiftId};
+    if (json) h['Content-Type'] = 'application/json; charset=utf-8';
+    return h;
+  }
+
+  void _showSnack(String msg) {
+    final m = msg.trim();
+    if (m.isEmpty) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(m), behavior: SnackBarBehavior.floating),
+    );
+  }
+
+  int _intOr0(dynamic v) {
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    return int.tryParse(v?.toString() ?? '') ?? 0;
+  }
 
   String _fmtTimeIso(String? iso) {
     if (iso == null || iso.isEmpty) return '--:--';
@@ -148,34 +182,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
   String _fmtDateTimeLocal(DateTime dt) =>
       DateFormat('yyyy-MM-dd HH:mm').format(dt);
 
-  int _intOr0(dynamic v) {
-    if (v is num) return v.toInt();
-    return int.tryParse(v?.toString() ?? '') ?? 0;
-  }
-
-  void _showSnack(String msg) {
-    final m = msg.trim();
-    if (m.isEmpty) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(m), behavior: SnackBarBehavior.floating),
-    );
-  }
-
-  Uri _u(String path, [Map<String, String>? q]) {
-    final uri = Uri.parse(widget.api.baseUrl + path);
-    return q == null ? uri : uri.replace(queryParameters: q);
-  }
-
-  Map<String, String> _headers({bool json = true}) {
-    final h = <String, String>{
-      'x-user-id': _userId,
-      'x-shift-id': _shiftId,
-    };
-    if (json) h['Content-Type'] = 'application/json; charset=utf-8';
-    return h;
-  }
-
-  // Convert server kind to RU label for UI
   String _kindRu(String kind) {
     switch (kind.toUpperCase()) {
       case 'BEFORE':
@@ -191,7 +197,22 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     }
   }
 
-  // ---------- status helpers ----------
+  String _absUrl(String raw) {
+    final u = raw.trim();
+    if (u.isEmpty) return '';
+    if (u.startsWith('http://') || u.startsWith('https://')) return u;
+
+    final base = Uri.parse(widget.api.baseUrl);
+    return Uri(
+      scheme: base.scheme,
+      host: base.host,
+      port: base.hasPort ? base.port : null,
+      path: u.startsWith('/') ? u : '/$u',
+    ).toString();
+  }
+
+  // ---------------- status helpers ----------------
+
   String _rawStatus() => (widget.booking['status'] ?? '').toString();
   String? _startedAtIso() => widget.booking['startedAt']?.toString();
   String? _finishedAtIso() => widget.booking['finishedAt']?.toString();
@@ -233,7 +254,8 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     return Colors.orange;
   }
 
-  // payment info
+  // ---------------- payment helpers ----------------
+
   List<String> _paymentBadges() {
     final b = widget.booking['paymentBadges'];
     if (b is List) return b.map((x) => x.toString()).toList();
@@ -285,10 +307,12 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     return parts.isEmpty ? '—' : parts.join(' • ');
   }
 
-  // ---------------- low-level lists ----------------
+  // ---------------- low-level http ----------------
 
   Future<List<dynamic>> _getList(String path, {Map<String, String>? q}) async {
-    final res = await http.get(_u(path, q), headers: _headers()).timeout(_timeout);
+    final res = await http
+        .get(_u(path, q), headers: _headers())
+        .timeout(_timeout);
     if (res.statusCode >= 400) {
       throw Exception('GET $path failed: ${res.statusCode} ${res.body}');
     }
@@ -299,8 +323,13 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     return const [];
   }
 
-  Future<Map<String, dynamic>> _postMap(String path, Map<String, dynamic> body) async {
-    final res = await http.post(_u(path), headers: _headers(), body: jsonEncode(body)).timeout(_timeout);
+  Future<Map<String, dynamic>> _postMap(
+    String path,
+    Map<String, dynamic> body,
+  ) async {
+    final res = await http
+        .post(_u(path), headers: _headers(), body: jsonEncode(body))
+        .timeout(_timeout);
     if (res.statusCode >= 400) {
       throw Exception('POST $path failed: ${res.statusCode} ${res.body}');
     }
@@ -311,33 +340,47 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
   }
 
   Future<void> _delete(String path) async {
-    final res = await http.delete(_u(path), headers: _headers()).timeout(_timeout);
+    final res = await http
+        .delete(_u(path), headers: _headers())
+        .timeout(_timeout);
     if (res.statusCode >= 400) {
       throw Exception('DELETE $path failed: ${res.statusCode} ${res.body}');
     }
   }
 
-  Future<void> _refreshAddonsAndPhotos() async {
+  // ---------------- refresh ----------------
+
+  Future<void> _refreshAddonsAndPhotos({bool showErrors = true}) async {
     try {
       final a = await _getList('/admin/bookings/$_bookingId/addons');
       final p = await _getList('/admin/bookings/$_bookingId/photos');
+
       if (!mounted) return;
       setState(() {
-        addons = a.whereType<Map>().map((x) => Map<String, dynamic>.from(x)).toList();
-        photos = p.whereType<Map>().map((x) => Map<String, dynamic>.from(x)).toList();
+        addons = a
+            .whereType<Map>()
+            .map((x) => Map<String, dynamic>.from(x))
+            .toList();
+        photos = p
+            .whereType<Map>()
+            .map((x) => Map<String, dynamic>.from(x))
+            .toList();
       });
     } catch (e) {
-      _showSnack('Не удалось обновить фото: $e');
+      if (showErrors) _showSnack('Не удалось обновить: $e');
     }
   }
 
-  // ---------------- unified run wrapper ----------------
+  // ---------------- unified runner ----------------
 
-  Future<void> _run(Future<void> Function() fn, {bool closeAfter = true}) async {
+  Future<void> _run(
+    Future<void> Function() fn, {
+    bool closeAfter = true,
+  }) async {
     setState(() => loading = true);
     try {
       await fn();
-      await _refreshAddonsAndPhotos();
+      await _refreshAddonsAndPhotos(showErrors: true);
       widget.onDone();
       if (!mounted) return;
       if (closeAfter) Navigator.of(context).pop();
@@ -349,7 +392,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     }
   }
 
-  // ---------------- actions: service/process ----------------
+  // ---------------- actions: start/finish ----------------
 
   Future<void> _start() async {
     if (!_canStart) return;
@@ -571,7 +614,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     }, closeAfter: false);
   }
 
-  // ---------------- photos: UX + replace ----------------
+  // ---------------- photos ----------------
 
   ImageSource _bestImageSource() {
     if (kIsWeb) return ImageSource.gallery;
@@ -584,46 +627,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     return ImageSource.camera;
   }
 
-  String _absUrl(String raw) {
-    final u = raw.trim();
-    if (u.isEmpty) return '';
-    if (u.startsWith('http://') || u.startsWith('https://')) return u;
-    final base = Uri.parse(widget.api.baseUrl);
-    return Uri(
-      scheme: base.scheme,
-      host: base.host,
-      port: base.hasPort ? base.port : null,
-      path: u.startsWith('/') ? u : '/$u',
-    ).toString();
-  }
-
-  Future<void> _deletePhotoIfSupported(String photoId) async {
-    // This endpoint must exist server-side: DELETE /admin/bookings/:id/photos/:photoId
-    await _delete('/admin/bookings/$_bookingId/photos/$photoId');
-  }
-
-  Future<void> _replaceKindPhotosIfPossible(String kind) async {
-    // delete existing photos for this kind (BEFORE/AFTER) to make "replace"
-    final k = kind.toUpperCase();
-    final existing = photos
-        .where((p) => (p['kind'] ?? '').toString().toUpperCase() == k)
-        .toList();
-
-    if (existing.isEmpty) return;
-
-    for (final p in existing) {
-      final id = (p['id'] ?? '').toString().trim();
-      if (id.isEmpty) continue;
-      try {
-        await _deletePhotoIfSupported(id);
-      } catch (_) {
-        // If backend doesn't support delete yet — stop (will behave like add)
-        return;
-      }
-    }
-  }
-
-  Future<void> _uploadPhotoFile({required String kind, bool replace = false}) async {
+  Future<void> _uploadPhotoFile({required String kind}) async {
     final file = await _picker.pickImage(
       source: _bestImageSource(),
       imageQuality: 85,
@@ -648,11 +652,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     });
 
     try {
-      // if replace requested: try delete old kind photos (best-effort)
-      if (replace) {
-        await _replaceKindPhotosIfPossible(kind);
-      }
-
       final req = http.MultipartRequest(
         'POST',
         _u('/admin/bookings/$_bookingId/photos/upload'),
@@ -661,11 +660,9 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
       req.fields['kind'] = kind;
       if (note.isNotEmpty) req.fields['note'] = note;
 
-      req.files.add(http.MultipartFile.fromBytes(
-        'file',
-        bytes,
-        filename: file.name,
-      ));
+      req.files.add(
+        http.MultipartFile.fromBytes('file', bytes, filename: file.name),
+      );
 
       final streamed = await req.send().timeout(_timeout);
       final res = await http.Response.fromStream(streamed);
@@ -676,7 +673,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
 
       photoNoteCtrl.clear();
 
-      await _refreshAddonsAndPhotos();
+      await _refreshAddonsAndPhotos(showErrors: true);
       widget.onDone();
     } catch (e) {
       _showSnack('Не удалось загрузить фото: $e');
@@ -687,6 +684,69 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
           photos.removeWhere((p) => (p['id'] ?? '').toString() == tempId);
         });
       }
+    }
+  }
+
+  bool _isLocalPhoto(Map<String, dynamic> p) {
+    final id = (p['id'] ?? '').toString();
+    return p['_local'] == true || _localPreviewByTempId.containsKey(id);
+  }
+
+  Future<void> _confirmDeletePhoto(Map<String, dynamic> p) async {
+    final id = (p['id'] ?? '').toString().trim();
+    if (id.isEmpty) return;
+
+    final isLocal = _isLocalPhoto(p);
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Удалить фото?'),
+        content: Text(
+          isLocal
+              ? 'Фото ещё не загружено на сервер. Удалить из списка?'
+              : 'Фото будет удалено.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Отмена'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Удалить'),
+          ),
+        ],
+      ),
+    );
+
+    if (ok != true) return;
+
+    // ✅ UI удаляем сразу (оптимистично), чтобы карточка сразу исчезла
+    final removedSnapshot = Map<String, dynamic>.from(p);
+    setState(() {
+      _localPreviewByTempId.remove(id);
+      photos.removeWhere((x) => (x['id'] ?? '').toString().trim() == id);
+    });
+
+    // локальное фото — на этом всё
+    if (isLocal) return;
+
+    try {
+      // server delete
+      await _delete('/admin/bookings/$_bookingId/photos/$id');
+
+      // подстрахуемся обновлением (если сервер удалил, но порядок/список поменялся)
+      await _refreshAddonsAndPhotos(showErrors: true);
+      widget.onDone();
+    } catch (e) {
+      // если сервер не удалил — возвращаем карточку и показываем ошибку
+      if (mounted) {
+        setState(() {
+          photos.insert(0, removedSnapshot);
+        });
+      }
+      _showSnack('Не удалось удалить фото: $e');
     }
   }
 
@@ -762,7 +822,8 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
       width: 72,
       height: 72,
       fit: BoxFit.cover,
-      errorBuilder: (_, __, ___) => const Center(child: Icon(Icons.broken_image)),
+      errorBuilder: (_, __, ___) =>
+          const Center(child: Icon(Icons.broken_image)),
     );
   }
 
@@ -772,7 +833,9 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     final kind = (p['kind'] ?? '').toString();
     final note = (p['note'] ?? '').toString().trim();
 
-    final createdAt = DateTime.tryParse((p['createdAt'] ?? '').toString())?.toLocal();
+    final createdAt = DateTime.tryParse(
+      (p['createdAt'] ?? '').toString(),
+    )?.toLocal();
     final time = createdAt == null ? '' : DateFormat('HH:mm').format(createdAt);
 
     return InkWell(
@@ -788,31 +851,98 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
         ),
         child: Row(
           children: [
-            ClipRRect(borderRadius: BorderRadius.circular(12), child: _photoThumb(p)),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: _photoThumb(p),
+            ),
             const SizedBox(width: 12),
+
             Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(_kindRu(kind), style: const TextStyle(fontWeight: FontWeight.w900)),
-                if (note.isNotEmpty) ...[
-                  const SizedBox(height: 4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                   Text(
-                    note,
+                    _kindRu(kind),
+                    style: const TextStyle(fontWeight: FontWeight.w900),
+                  ),
+                  if (note.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      note,
+                      style: TextStyle(
+                        color: cs.onSurface.withValues(alpha: 0.75),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 6),
+                  Text(
+                    'Нажми на фото, чтобы открыть',
                     style: TextStyle(
-                      color: cs.onSurface.withValues(alpha: 0.75),
+                      fontSize: 12,
+                      color: cs.onSurface.withValues(alpha: 0.55),
                       fontWeight: FontWeight.w700,
                     ),
                   ),
                 ],
-              ]),
-            ),
-            if (time.isNotEmpty)
-              Text(
-                time,
-                style: TextStyle(
-                  color: cs.onSurface.withValues(alpha: 0.65),
-                  fontWeight: FontWeight.w800,
-                ),
               ),
+            ),
+
+            const SizedBox(width: 10),
+
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                if (time.isNotEmpty)
+                  Text(
+                    time,
+                    style: TextStyle(
+                      color: cs.onSurface.withValues(alpha: 0.65),
+                      fontWeight: FontWeight.w900,
+                      fontSize: 12,
+                    ),
+                  )
+                else
+                  const SizedBox(height: 14),
+                const SizedBox(height: 8),
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: loading ? null : () => _confirmDeletePhoto(p),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 7,
+                    ),
+                    decoration: BoxDecoration(
+                      color: cs.surfaceContainerHighest.withValues(alpha: 0.20),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: cs.outlineVariant.withValues(alpha: 0.55),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.delete_outline,
+                          size: 18,
+                          color: cs.onSurface.withValues(alpha: 0.85),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Удалить',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w900,
+                            color: cs.onSurface.withValues(alpha: 0.9),
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ],
         ),
       ),
@@ -861,7 +991,10 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                 Expanded(
                   child: Text(
                     title,
-                    style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14),
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w900,
+                      fontSize: 14,
+                    ),
                   ),
                 ),
                 if (trailing != null) trailing,
@@ -903,7 +1036,9 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
           ChoiceChip(
             label: Text(label(v)),
             selected: paymentMethod == v,
-            onSelected: loading ? null : (_) => setState(() => paymentMethod = v),
+            onSelected: loading
+                ? null
+                : (_) => setState(() => paymentMethod = v),
           ),
       ],
     );
@@ -969,13 +1104,19 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                 padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
                 decoration: BoxDecoration(
                   color: cs.surfaceContainerHighest.withValues(alpha: 0.20),
-                  border: Border(bottom: BorderSide(color: cs.outlineVariant.withValues(alpha: 0.6))),
+                  border: Border(
+                    bottom: BorderSide(
+                      color: cs.outlineVariant.withValues(alpha: 0.6),
+                    ),
+                  ),
                 ),
                 child: Row(
                   children: [
                     IconButton(
                       tooltip: 'Назад',
-                      onPressed: loading ? null : () => Navigator.of(context).pop(),
+                      onPressed: loading
+                          ? null
+                          : () => Navigator.of(context).pop(),
                       icon: const Icon(Icons.arrow_back),
                     ),
                     const SizedBox(width: 6),
@@ -985,7 +1126,10 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                         children: [
                           Text(
                             '$dtLine • $serviceName • Пост $bayIdStr',
-                            style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14),
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w900,
+                              fontSize: 14,
+                            ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -1032,7 +1176,9 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                     // TAB: SERVICE
                     SingleChildScrollView(
                       padding: EdgeInsets.only(
-                        left: 12, right: 12, top: 12,
+                        left: 12,
+                        right: 12,
+                        top: 12,
                         bottom: 16 + MediaQuery.of(context).viewInsets.bottom,
                       ),
                       child: Column(
@@ -1045,7 +1191,9 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                                 decoration: BoxDecoration(
                                   color: Colors.amber.withValues(alpha: 0.16),
                                   borderRadius: BorderRadius.circular(16),
-                                  border: Border.all(color: Colors.amber.withValues(alpha: 0.7)),
+                                  border: Border.all(
+                                    color: Colors.amber.withValues(alpha: 0.7),
+                                  ),
                                 ),
                                 child: Row(
                                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1057,7 +1205,9 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                                         clientCommentText,
                                         style: TextStyle(
                                           fontWeight: FontWeight.w900,
-                                          color: cs.onSurface.withValues(alpha: 0.92),
+                                          color: cs.onSurface.withValues(
+                                            alpha: 0.92,
+                                          ),
                                         ),
                                       ),
                                     ),
@@ -1071,7 +1221,12 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text('Клиент: $clientTitle', style: const TextStyle(fontWeight: FontWeight.w800)),
+                                Text(
+                                  'Клиент: $clientTitle',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
                                 const SizedBox(height: 6),
                                 Text(
                                   'Авто: $carLine',
@@ -1083,8 +1238,16 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                                 const SizedBox(height: 10),
                                 Row(
                                   children: [
-                                    Expanded(child: Text('Начато: ${_fmtTimeIso(startedAt)}')),
-                                    Expanded(child: Text('Завершено: ${_fmtTimeIso(finishedAt)}')),
+                                    Expanded(
+                                      child: Text(
+                                        'Начато: ${_fmtTimeIso(startedAt)}',
+                                      ),
+                                    ),
+                                    Expanded(
+                                      child: Text(
+                                        'Завершено: ${_fmtTimeIso(finishedAt)}',
+                                      ),
+                                    ),
                                   ],
                                 ),
                               ],
@@ -1097,16 +1260,24 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                               children: [
                                 Expanded(
                                   child: FilledButton(
-                                    onPressed: loading || !_canStart ? null : _start,
+                                    onPressed: loading || !_canStart
+                                        ? null
+                                        : _start,
                                     child: loading
-                                        ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator())
+                                        ? const SizedBox(
+                                            height: 18,
+                                            width: 18,
+                                            child: CircularProgressIndicator(),
+                                          )
                                         : const Text('Начать'),
                                   ),
                                 ),
                                 const SizedBox(width: 10),
                                 Expanded(
                                   child: OutlinedButton(
-                                    onPressed: loading || !_canFinish ? null : _finish,
+                                    onPressed: loading || !_canFinish
+                                        ? null
+                                        : _finish,
                                     child: const Text('Завершить'),
                                   ),
                                 ),
@@ -1120,7 +1291,9 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                               controller: noteCtrl,
                               minLines: 1,
                               maxLines: 4,
-                              decoration: const InputDecoration(labelText: 'Комментарий администратора'),
+                              decoration: const InputDecoration(
+                                labelText: 'Комментарий администратора',
+                              ),
                             ),
                           ),
 
@@ -1131,7 +1304,9 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                                     '+$addonsSumRub ₽ • +$addonsDur мин',
                                     style: TextStyle(
                                       fontWeight: FontWeight.w900,
-                                      color: cs.onSurface.withValues(alpha: 0.85),
+                                      color: cs.onSurface.withValues(
+                                        alpha: 0.85,
+                                      ),
                                     ),
                                   )
                                 : null,
@@ -1139,35 +1314,75 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 if (addons.isEmpty)
-                                  Text('Пока нет доп. услуг.', style: TextStyle(color: cs.onSurface.withValues(alpha: 0.7)))
+                                  Text(
+                                    'Пока нет доп. услуг.',
+                                    style: TextStyle(
+                                      color: cs.onSurface.withValues(
+                                        alpha: 0.7,
+                                      ),
+                                    ),
+                                  )
                                 else
                                   Column(
                                     children: [
                                       for (final a in addons)
                                         Container(
-                                          margin: const EdgeInsets.only(bottom: 8),
+                                          margin: const EdgeInsets.only(
+                                            bottom: 8,
+                                          ),
                                           padding: const EdgeInsets.all(12),
                                           decoration: BoxDecoration(
-                                            color: cs.surfaceContainerHighest.withValues(alpha: 0.18),
-                                            borderRadius: BorderRadius.circular(14),
-                                            border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
+                                            color: cs.surfaceContainerHighest
+                                                .withValues(alpha: 0.18),
+                                            borderRadius: BorderRadius.circular(
+                                              14,
+                                            ),
+                                            border: Border.all(
+                                              color: cs.outlineVariant
+                                                  .withValues(alpha: 0.55),
+                                            ),
                                           ),
                                           child: Row(
                                             children: [
                                               Expanded(
                                                 child: Text(
-                                                  (a['service']?['name'] ?? a['serviceName'] ?? a['serviceId'] ?? 'Услуга').toString(),
-                                                  style: const TextStyle(fontWeight: FontWeight.w900),
+                                                  (a['service']?['name'] ??
+                                                          a['serviceName'] ??
+                                                          a['serviceId'] ??
+                                                          'Услуга')
+                                                      .toString(),
+                                                  style: const TextStyle(
+                                                    fontWeight: FontWeight.w900,
+                                                  ),
                                                 ),
                                               ),
-                                              Text('x${_intOr0(a['qty'])}', style: const TextStyle(fontWeight: FontWeight.w900)),
+                                              Text(
+                                                'x${_intOr0(a['qty'])}',
+                                                style: TextStyle(
+                                                  fontWeight: FontWeight.w900,
+                                                  color: cs.onSurface
+                                                      .withValues(alpha: 0.8),
+                                                ),
+                                              ),
                                               const SizedBox(width: 10),
-                                              Text('${_intOr0(a['priceRubSnapshot'])} ₽', style: const TextStyle(fontWeight: FontWeight.w900)),
+                                              Text(
+                                                '${_intOr0(a['priceRubSnapshot'])} ₽',
+                                                style: const TextStyle(
+                                                  fontWeight: FontWeight.w900,
+                                                ),
+                                              ),
                                               const SizedBox(width: 6),
                                               IconButton(
                                                 tooltip: 'Убрать',
-                                                onPressed: loading ? null : () => _removeAddon((a['serviceId'] ?? '').toString()),
-                                                icon: const Icon(Icons.delete_outline),
+                                                onPressed: loading
+                                                    ? null
+                                                    : () => _removeAddon(
+                                                        (a['serviceId'] ?? '')
+                                                            .toString(),
+                                                      ),
+                                                icon: const Icon(
+                                                  Icons.delete_outline,
+                                                ),
                                               ),
                                             ],
                                           ),
@@ -1180,7 +1395,9 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                                     Expanded(
                                       child: TextField(
                                         controller: addonServiceIdCtrl,
-                                        decoration: const InputDecoration(labelText: 'serviceId'),
+                                        decoration: const InputDecoration(
+                                          labelText: 'serviceId',
+                                        ),
                                       ),
                                     ),
                                     const SizedBox(width: 10),
@@ -1189,7 +1406,9 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                                       child: TextField(
                                         controller: addonQtyCtrl,
                                         keyboardType: TextInputType.number,
-                                        decoration: const InputDecoration(labelText: 'qty'),
+                                        decoration: const InputDecoration(
+                                          labelText: 'qty',
+                                        ),
                                       ),
                                     ),
                                   ],
@@ -1212,28 +1431,56 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
 
                     // TAB: PAY
                     SingleChildScrollView(
-                      padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
+                      padding: EdgeInsets.only(
+                        left: 12,
+                        right: 12,
+                        top: 12,
+                        bottom: 16 + MediaQuery.of(context).viewInsets.bottom,
+                      ),
                       child: Column(
                         children: [
                           _sectionCard(
                             title: 'Статус оплаты',
                             trailing: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                              decoration: BoxDecoration(
-                                color: cs.surfaceContainerHighest.withValues(alpha: 0.20),
-                                borderRadius: BorderRadius.circular(14),
-                                border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 6,
                               ),
-                              child: Text(_paymentStatusRu, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12)),
+                              decoration: BoxDecoration(
+                                color: cs.surfaceContainerHighest.withValues(
+                                  alpha: 0.20,
+                                ),
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(
+                                  color: cs.outlineVariant.withValues(
+                                    alpha: 0.55,
+                                  ),
+                                ),
+                              ),
+                              child: Text(
+                                _paymentStatusRu,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 12,
+                                ),
+                              ),
                             ),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text('Оплачено: $paid ₽   К оплате: $toPay ₽', style: const TextStyle(fontWeight: FontWeight.w900)),
+                                Text(
+                                  'Оплачено: $paid ₽   К оплате: $toPay ₽',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
                                 const SizedBox(height: 6),
                                 Text(
                                   'Стоимость: $effectivePriceRub ₽ (скидка: $discountRub ₽)',
-                                  style: TextStyle(color: cs.onSurface.withValues(alpha: 0.75), fontWeight: FontWeight.w800),
+                                  style: TextStyle(
+                                    color: cs.onSurface.withValues(alpha: 0.75),
+                                    fontWeight: FontWeight.w800,
+                                  ),
                                 ),
                                 if (payBadges.isNotEmpty) ...[
                                   const SizedBox(height: 10),
@@ -1244,7 +1491,13 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                                       for (final x in payBadges)
                                         Chip(
                                           avatar: Icon(_payIcon(x), size: 18),
-                                          label: Text(x == 'CARD' ? 'Карта' : x == 'CASH' ? 'Наличные' : 'Контракт'),
+                                          label: Text(
+                                            x == 'CARD'
+                                                ? 'Карта'
+                                                : x == 'CASH'
+                                                ? 'Наличные'
+                                                : 'Контракт',
+                                          ),
                                           visualDensity: VisualDensity.compact,
                                         ),
                                     ],
@@ -1259,7 +1512,12 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text('К оплате: $toPay ₽', style: const TextStyle(fontWeight: FontWeight.w900)),
+                                  Text(
+                                    'К оплате: $toPay ₽',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                                  ),
                                   const SizedBox(height: 10),
                                   _paymentMethodChips(),
                                   const SizedBox(height: 12),
@@ -1277,7 +1535,12 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                           else
                             _sectionCard(
                               title: 'Оплата',
-                              child: Text('Остаток 0 ₽ — оплачено.', style: TextStyle(color: cs.onSurface.withValues(alpha: 0.75))),
+                              child: Text(
+                                'Остаток 0 ₽ — оплачено.',
+                                style: TextStyle(
+                                  color: cs.onSurface.withValues(alpha: 0.75),
+                                ),
+                              ),
                             ),
                         ],
                       ),
@@ -1285,13 +1548,23 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
 
                     // TAB: DISCOUNT
                     SingleChildScrollView(
-                      padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
+                      padding: EdgeInsets.only(
+                        left: 12,
+                        right: 12,
+                        top: 12,
+                        bottom: 16 + MediaQuery.of(context).viewInsets.bottom,
+                      ),
                       child: Column(
                         children: [
                           if (!_discountEnabled)
                             _sectionCard(
                               title: 'Скидка',
-                              child: Text('Функция скидок отключена.', style: TextStyle(color: cs.onSurface.withValues(alpha: 0.75))),
+                              child: Text(
+                                'Функция скидок отключена.',
+                                style: TextStyle(
+                                  color: cs.onSurface.withValues(alpha: 0.75),
+                                ),
+                              ),
                             )
                           else
                             _sectionCard(
@@ -1301,18 +1574,24 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                                   TextField(
                                     controller: discountCtrl,
                                     keyboardType: TextInputType.number,
-                                    decoration: const InputDecoration(labelText: 'Скидка (₽)'),
+                                    decoration: const InputDecoration(
+                                      labelText: 'Скидка (₽)',
+                                    ),
                                   ),
                                   const SizedBox(height: 10),
                                   TextField(
                                     controller: discountReasonCtrl,
-                                    decoration: const InputDecoration(labelText: 'Причина скидки (обязательно)'),
+                                    decoration: const InputDecoration(
+                                      labelText: 'Причина скидки (обязательно)',
+                                    ),
                                   ),
                                   const SizedBox(height: 12),
                                   SizedBox(
                                     width: double.infinity,
                                     child: FilledButton(
-                                      onPressed: loading ? null : _applyDiscount,
+                                      onPressed: loading
+                                          ? null
+                                          : _applyDiscount,
                                       child: const Text('Применить скидку'),
                                     ),
                                   ),
@@ -1325,13 +1604,23 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
 
                     // TAB: MOVE
                     SingleChildScrollView(
-                      padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
+                      padding: EdgeInsets.only(
+                        left: 12,
+                        right: 12,
+                        top: 12,
+                        bottom: 16 + MediaQuery.of(context).viewInsets.bottom,
+                      ),
                       child: Column(
                         children: [
                           if (!_moveEnabled)
                             _sectionCard(
                               title: 'Перенос',
-                              child: Text('Функция переноса отключена.', style: TextStyle(color: cs.onSurface.withValues(alpha: 0.75))),
+                              child: Text(
+                                'Функция переноса отключена.',
+                                style: TextStyle(
+                                  color: cs.onSurface.withValues(alpha: 0.75),
+                                ),
+                              ),
                             )
                           else
                             _sectionCard(
@@ -1343,8 +1632,16 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                                     children: [
                                       Expanded(
                                         child: OutlinedButton(
-                                          onPressed: loading || !_canMove ? null : _pickMoveDateTime,
-                                          child: Text(selectedDateTimeLocal == null ? 'Выбрать дату/время' : _fmtDateTimeLocal(selectedDateTimeLocal!)),
+                                          onPressed: loading || !_canMove
+                                              ? null
+                                              : _pickMoveDateTime,
+                                          child: Text(
+                                            selectedDateTimeLocal == null
+                                                ? 'Выбрать дату/время'
+                                                : _fmtDateTimeLocal(
+                                                    selectedDateTimeLocal!,
+                                                  ),
+                                          ),
                                         ),
                                       ),
                                       const SizedBox(width: 10),
@@ -1352,12 +1649,24 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                                         width: 130,
                                         child: DropdownButtonFormField<int>(
                                           initialValue: selectedBay,
-                                          decoration: const InputDecoration(labelText: 'Пост'),
+                                          decoration: const InputDecoration(
+                                            labelText: 'Пост',
+                                          ),
                                           items: const [
-                                            DropdownMenuItem(value: 1, child: Text('Пост 1')),
-                                            DropdownMenuItem(value: 2, child: Text('Пост 2')),
+                                            DropdownMenuItem(
+                                              value: 1,
+                                              child: Text('Пост 1'),
+                                            ),
+                                            DropdownMenuItem(
+                                              value: 2,
+                                              child: Text('Пост 2'),
+                                            ),
                                           ],
-                                          onChanged: loading || !_canMove ? null : (v) => setState(() => selectedBay = v ?? 1),
+                                          onChanged: loading || !_canMove
+                                              ? null
+                                              : (v) => setState(
+                                                  () => selectedBay = v ?? 1,
+                                                ),
                                         ),
                                       ),
                                     ],
@@ -1367,28 +1676,52 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                                     children: [
                                       Checkbox(
                                         value: clientAgreed,
-                                        onChanged: loading || !_canMove ? null : (v) => setState(() => clientAgreed = v ?? false),
+                                        onChanged: loading || !_canMove
+                                            ? null
+                                            : (v) => setState(
+                                                () => clientAgreed = v ?? false,
+                                              ),
                                       ),
-                                      const Expanded(child: Text('Согласовано с клиентом')),
+                                      const Expanded(
+                                        child: Text('Согласовано с клиентом'),
+                                      ),
                                     ],
                                   ),
                                   const SizedBox(height: 10),
                                   DropdownButtonFormField<String>(
                                     initialValue: moveReasonKind,
-                                    items: _moveReasons.map((x) => DropdownMenuItem(value: x, child: Text(x))).toList(),
-                                    onChanged: loading || !_canMove ? null : (v) => setState(() => moveReasonKind = v ?? _moveReasons.first),
-                                    decoration: const InputDecoration(labelText: 'Причина'),
+                                    items: _moveReasons
+                                        .map(
+                                          (x) => DropdownMenuItem(
+                                            value: x,
+                                            child: Text(x),
+                                          ),
+                                        )
+                                        .toList(),
+                                    onChanged: loading || !_canMove
+                                        ? null
+                                        : (v) => setState(
+                                            () => moveReasonKind =
+                                                v ?? _moveReasons.first,
+                                          ),
+                                    decoration: const InputDecoration(
+                                      labelText: 'Причина',
+                                    ),
                                   ),
                                   const SizedBox(height: 10),
                                   TextField(
                                     controller: moveCommentCtrl,
-                                    decoration: const InputDecoration(labelText: 'Комментарий (обязательно)'),
+                                    decoration: const InputDecoration(
+                                      labelText: 'Комментарий (обязательно)',
+                                    ),
                                   ),
                                   const SizedBox(height: 12),
                                   SizedBox(
                                     width: double.infinity,
                                     child: FilledButton(
-                                      onPressed: loading || !_canMove ? null : _move,
+                                      onPressed: loading || !_canMove
+                                          ? null
+                                          : _move,
                                       child: const Text('Перенести'),
                                     ),
                                   ),
@@ -1401,14 +1734,23 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
 
                     // TAB: PHOTOS
                     SingleChildScrollView(
-                      padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
+                      padding: EdgeInsets.only(
+                        left: 12,
+                        right: 12,
+                        top: 12,
+                        bottom: 16 + MediaQuery.of(context).viewInsets.bottom,
+                      ),
                       child: Column(
                         children: [
                           _sectionCard(
                             title: 'Фото авто',
                             trailing: IconButton(
                               tooltip: 'Обновить',
-                              onPressed: loading ? null : _refreshAddonsAndPhotos,
+                              onPressed: loading
+                                  ? null
+                                  : () => _refreshAddonsAndPhotos(
+                                      showErrors: true,
+                                    ),
                               icon: const Icon(Icons.refresh),
                             ),
                             child: Column(
@@ -1416,53 +1758,71 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                               children: [
                                 DropdownButtonFormField<String>(
                                   initialValue: photoKind,
-                                  decoration: const InputDecoration(labelText: 'Тип'),
+                                  decoration: const InputDecoration(
+                                    labelText: 'Тип',
+                                  ),
                                   items: const [
-                                    DropdownMenuItem(value: 'BEFORE', child: Text('ДО')),
-                                    DropdownMenuItem(value: 'AFTER', child: Text('ПОСЛЕ')),
-                                    DropdownMenuItem(value: 'DAMAGE', child: Text('ПОВРЕЖДЕНИЯ')),
-                                    DropdownMenuItem(value: 'OTHER', child: Text('ДРУГОЕ')),
+                                    DropdownMenuItem(
+                                      value: 'BEFORE',
+                                      child: Text('ДО'),
+                                    ),
+                                    DropdownMenuItem(
+                                      value: 'AFTER',
+                                      child: Text('ПОСЛЕ'),
+                                    ),
+                                    DropdownMenuItem(
+                                      value: 'DAMAGE',
+                                      child: Text('ПОВРЕЖДЕНИЯ'),
+                                    ),
+                                    DropdownMenuItem(
+                                      value: 'OTHER',
+                                      child: Text('ДРУГОЕ'),
+                                    ),
                                   ],
-                                  onChanged: loading ? null : (v) => setState(() => photoKind = (v ?? 'BEFORE')),
+                                  onChanged: loading
+                                      ? null
+                                      : (v) => setState(
+                                          () => photoKind = (v ?? 'BEFORE'),
+                                        ),
                                 ),
                                 const SizedBox(height: 10),
                                 TextField(
                                   controller: photoNoteCtrl,
-                                  decoration: const InputDecoration(labelText: 'Комментарий (необязательно)'),
+                                  decoration: const InputDecoration(
+                                    labelText: 'Комментарий (необязательно)',
+                                  ),
                                 ),
                                 const SizedBox(height: 12),
                                 SizedBox(
                                   width: double.infinity,
                                   child: FilledButton.icon(
-                                    onPressed: loading ? null : () => _uploadPhotoFile(kind: photoKind, replace: false),
+                                    onPressed: loading
+                                        ? null
+                                        : () =>
+                                              _uploadPhotoFile(kind: photoKind),
                                     icon: const Icon(Icons.photo_camera),
-                                    label: const Text('Снять/выбрать и загрузить'),
+                                    label: const Text(
+                                      'Снять/выбрать и загрузить',
+                                    ),
                                   ),
                                 ),
-                                const SizedBox(height: 10),
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: OutlinedButton(
-                                        onPressed: loading ? null : () => _uploadPhotoFile(kind: 'BEFORE', replace: true),
-                                        child: const Text('Переснять ДО'),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: OutlinedButton(
-                                        onPressed: loading ? null : () => _uploadPhotoFile(kind: 'AFTER', replace: true),
-                                        child: const Text('Переснять ПОСЛЕ'),
-                                      ),
-                                    ),
-                                  ],
-                                ),
                                 const SizedBox(height: 14),
-
                                 if (photos.isEmpty)
-                                  Text('Пока нет фото.', style: TextStyle(color: cs.onSurface.withValues(alpha: 0.7)))
+                                  Text(
+                                    'Пока нет фото.',
+                                    style: TextStyle(
+                                      color: cs.onSurface.withValues(
+                                        alpha: 0.7,
+                                      ),
+                                    ),
+                                  )
                                 else
-                                  Column(children: [for (final p in photos) _photoCard(context, p)]),
+                                  Column(
+                                    children: [
+                                      for (final p in photos)
+                                        _photoCard(context, p),
+                                    ],
+                                  ),
                               ],
                             ),
                           ),
