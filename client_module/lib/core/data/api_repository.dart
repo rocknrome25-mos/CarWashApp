@@ -404,6 +404,7 @@ class ApiRepository implements AppRepository {
     required String serviceId,
     required DateTime dateTime,
     int? bayId,
+    int? requestedBayId, // ✅
     int? depositRub,
     int? bufferMin,
     String? comment,
@@ -418,10 +419,18 @@ class ApiRepository implements AppRepository {
       'serviceId': serviceId,
       'dateTime': dateTime.toUtc().toIso8601String(),
       'clientId': cid,
+
+      // назначенный пост (если клиент выбирал конкретный — обычно совпадает,
+      // если "любая" — это то, что мы выбрали автоматически)
       if (bayId != null) 'bayId': bayId,
+
+      // ✅ ВАЖНО: отправляем ВСЕГДА. null = “любой пост”
+      'requestedBayId': requestedBayId,
+
       if (depositRub != null) 'depositRub': depositRub,
       if (bufferMin != null) 'bufferMin': bufferMin,
-      if (comment != null) 'comment': comment,
+      if (comment != null && comment.trim().isNotEmpty)
+        'comment': comment.trim(),
       if (addons != null && addons.isNotEmpty) 'addons': addons,
     };
 

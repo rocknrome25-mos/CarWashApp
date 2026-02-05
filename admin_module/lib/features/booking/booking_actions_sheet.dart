@@ -1,8 +1,6 @@
-// C:\dev\carwash\admin_module\lib\features\booking\booking_actions_sheet.dart
 import 'dart:convert';
-import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart'; // kIsWeb
+import 'package:flutter/foundation.dart'; // kIsWeb, kDebugMode, Uint8List
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
@@ -83,6 +81,10 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
   String get _bookingId => (widget.booking['id'] ?? '').toString();
 
   static const _timeout = Duration(seconds: 25);
+
+  // ✅ fixed colors (same as client)
+  static const Color _greenLine = Color(0xFF2DBD6E);
+  static const Color _blueLine = Color(0xFF2D9CDB);
 
   @override
   void initState() {
@@ -209,6 +211,51 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
       port: base.hasPort ? base.port : null,
       path: u.startsWith('/') ? u : '/$u',
     ).toString();
+  }
+
+  // ---------------- requested dot (IMPORTANT) ----------------
+
+  int? _requestedBayId(Map<String, dynamic> b) {
+    final v = b['requestedBayId'];
+    if (v == null) return null; // any => no dot
+    if (v is num) return v.toInt();
+    return int.tryParse(v.toString());
+  }
+
+  Color _requestedBayColor(int id) {
+    if (id == 1) return _greenLine;
+    if (id == 2) return _blueLine;
+    return Colors.grey;
+  }
+
+  InlineSpan _requestedDotSpan(Map<String, dynamic> b) {
+    final id = _requestedBayId(b);
+    if (id == null) return const TextSpan(text: ''); // Любая линия => нет точки
+
+    final c = _requestedBayColor(id);
+
+    return WidgetSpan(
+      alignment: PlaceholderAlignment.middle,
+      child: Padding(
+        padding: const EdgeInsets.only(left: 6),
+        child: Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(
+            color: c,
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white, width: 2),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.22),
+                blurRadius: 4,
+                offset: const Offset(0, 1),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   // ---------------- status helpers ----------------
@@ -822,8 +869,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
       width: 72,
       height: 72,
       fit: BoxFit.cover,
-      errorBuilder: (_, __, ___) =>
-          const Center(child: Icon(Icons.broken_image)),
+      errorBuilder: (_, _, _) => const Center(child: Icon(Icons.broken_image)),
     );
   }
 
@@ -856,7 +902,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
               child: _photoThumb(p),
             ),
             const SizedBox(width: 12),
-
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -887,9 +932,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                 ],
               ),
             ),
-
             const SizedBox(width: 10),
-
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
@@ -1124,28 +1167,31 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            '$dtLine • $serviceName • Пост $bayIdStr',
+                          Text.rich(
+                            TextSpan(
+                              children: [
+                                TextSpan(
+                                  text:
+                                      '$dtLine • $serviceName • Пост $bayIdStr',
+                                ),
+                                _requestedDotSpan(
+                                  b,
+                                ), // ✅ точка сразу после "Пост X"
+                              ],
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
                               fontWeight: FontWeight.w900,
                               fontSize: 14,
                             ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
                           ),
+
                           const SizedBox(height: 3),
-                          Text(
-                            clientTitle,
-                            style: TextStyle(
-                              fontWeight: FontWeight.w700,
-                              color: cs.onSurface.withValues(alpha: 0.75),
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
                         ],
                       ),
                     ),
+
                     _statusPill(_statusRu),
                   ],
                 ),

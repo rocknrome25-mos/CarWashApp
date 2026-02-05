@@ -262,12 +262,7 @@ export class BookingsService {
 
   /* ===================== BUSY SLOTS ===================== */
 
-  async getBusySlots(args: {
-    locationId: string;
-    bayId: number;
-    from: Date;
-    to: Date;
-  }) {
+  async getBusySlots(args: { locationId: string; bayId: number; from: Date; to: Date }) {
     await this._housekeeping();
 
     const locationId = (args.locationId ?? '').trim();
@@ -281,10 +276,7 @@ export class BookingsService {
     const windowStart = new Date(from.getTime() - 24 * 60 * 60 * 1000);
     const windowEnd = new Date(to.getTime() + 24 * 60 * 60 * 1000);
 
-    const busyStatuses: BookingStatus[] = [
-      BookingStatus.ACTIVE,
-      BookingStatus.PENDING_PAYMENT,
-    ];
+    const busyStatuses: BookingStatus[] = [BookingStatus.ACTIVE, BookingStatus.PENDING_PAYMENT];
 
     const rows = await this.prisma.booking.findMany({
       where: {
@@ -334,13 +326,11 @@ export class BookingsService {
 
   /* ===================== LIST BOOKINGS ===================== */
 
-  // ✅ FIXED: return computed payment fields + isWashing
+  // ✅ return computed payment fields + isWashing
   async findAll(includeCanceled: boolean, clientId?: string) {
     await this._housekeeping();
 
-    const where: any = includeCanceled
-      ? {}
-      : { status: { not: BookingStatus.CANCELED } };
+    const where: any = includeCanceled ? {} : { status: { not: BookingStatus.CANCELED } };
     if (clientId) where.clientId = clientId;
 
     const rows = await this.prisma.booking.findMany({
@@ -363,10 +353,7 @@ export class BookingsService {
         return s + (a.priceRubSnapshot ?? 0) * qty;
       }, 0);
 
-      const effectivePriceRub = Math.max(
-        basePriceRub + addonsSumRub - discountRub,
-        0,
-      );
+      const effectivePriceRub = Math.max(basePriceRub + addonsSumRub - discountRub, 0);
       const remainingRub = Math.max(effectivePriceRub - paidTotalRub, 0);
 
       const badgeSet = new Set<string>();
@@ -510,6 +497,7 @@ export class BookingsService {
     dateTime: string;
     locationId?: string;
     bayId?: number;
+    requestedBayId?: number | null;
     depositRub?: number;
     bufferMin?: number;
     comment?: string;
@@ -521,6 +509,11 @@ export class BookingsService {
     if (!body || !body.carId || !body.serviceId || !body.dateTime) {
       throw new BadRequestException('carId, serviceId and dateTime are required');
     }
+
+    // ✅ quick visibility: what actually arrives
+    this.logger.log(
+      `create booking: bayId=${String((body as any).bayId)} requestedBayId=${String((body as any).requestedBayId)}`,
+    );
 
     const clientId = (body.clientId ?? '').trim();
     if (!clientId) throw new BadRequestException('clientId is required');
@@ -541,6 +534,32 @@ export class BookingsService {
     const bayId = this._clampInt(body.bayId, 1, 1, 20);
     const bufferMin = this._clampInt(body.bufferMin, 15, 0, 120);
     const depositRub = this._clampInt(body.depositRub, 500, 0, 1_000_000);
+
+    // ✅ HARD normalize requestedBayId: ONLY null | 1 | 2
+    const hasRequestedKey = Object.prototype.hasOwnProperty.call(body as any, 'requestedBayId');
+
+    let requestedBayId: number | null = null;
+
+    if (hasRequestedKey) {
+      const raw = (body as any).requestedBayId;
+
+      if (raw === null || raw === undefined || raw === '') {
+        requestedBayId = null; // ANY
+      } else {
+        const n = Number(raw);
+        if (!Number.isFinite(n)) {
+          throw new BadRequestException('requestedBayId must be 1 or 2 or null');
+        }
+        const xi = Math.trunc(n);
+        if (xi !== 1 && xi !== 2) {
+          throw new BadRequestException('requestedBayId must be 1 or 2 or null');
+        }
+        requestedBayId = xi;
+      }
+    } else {
+      // no key => treat as ANY
+      requestedBayId = null;
+    }
 
     const comment =
       typeof body.comment === 'string' && body.comment.trim().length > 0
@@ -600,7 +619,7 @@ export class BookingsService {
           status: WaitlistStatus.WAITING,
           locationId,
           desiredDateTime: dt,
-          desiredBayId: null,
+          desiredBayId: requestedBayId, // ✅ keep requested
           clientId,
           carId: body.carId,
           serviceId: body.serviceId,
@@ -621,7 +640,7 @@ export class BookingsService {
           status: WaitlistStatus.WAITING,
           locationId,
           desiredDateTime: dt,
-          desiredBayId: bayId,
+          desiredBayId: requestedBayId, // ✅ strictly what client requested (or null)
           clientId,
           carId: body.carId,
           serviceId: body.serviceId,
@@ -684,6 +703,7 @@ export class BookingsService {
                 clientId,
                 locationId,
                 bayId,
+                requestedBayId, // ✅ SAVE
                 bufferMin,
                 depositRub,
                 comment,

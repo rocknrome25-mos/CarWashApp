@@ -117,12 +117,19 @@ abstract class AppRepository {
   });
 
   /// ✅ NEW: addons supported
+  /// requestedBayId: what client requested (null = ANY, 1/2 = конкретная линия)
   Future<Booking> createBooking({
     required String locationId,
     required String carId,
     required String serviceId,
     required DateTime dateTime,
+
+    /// Assigned bay (where booking is placed)
     int? bayId,
+
+    /// Requested bay (what user selected)
+    int? requestedBayId,
+
     int? depositRub,
     int? bufferMin,
     String? comment,

@@ -1,5 +1,7 @@
+// C:\dev\carwash\admin_module\lib\features\calendar\calendar_page.dart
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+
 import '../../core/api/admin_api_client.dart';
 import '../../core/models/admin_session.dart';
 import '../../core/storage/session_store.dart';
@@ -107,6 +109,11 @@ class _CalendarPageState extends State<CalendarPage> {
     return DateFormat('HH:mm').format(dt);
   }
 
+  String _fmtDateShort(String iso) {
+    final dt = DateTime.parse(iso).toLocal();
+    return DateFormat('dd.MM').format(dt);
+  }
+
   // status RU + МОЕТСЯ
   String _statusRu(Map<String, dynamic> b) {
     final raw = (b['status'] ?? '').toString();
@@ -143,36 +150,77 @@ class _CalendarPageState extends State<CalendarPage> {
     return ps;
   }
 
+  // ---------------- bays helpers ----------------
 
-  // ---------------- requested/assigned bay helpers ----------------
-  // Backend желательно:
-  // booking.requestedBayId (nullable) OR requestedBayNumber OR requestedBayMode ('ANY'/'SPECIFIC')
-  // booking.bayId = assigned
-  String _requestedBayText(Map<String, dynamic> b) {
-    final mode = (b['requestedBayMode'] ?? b['bayMode'] ?? '').toString();
-    final req =
-        b['requestedBayId'] ?? b['requestedBayNumber'] ?? b['desiredBayId'];
-
-    if (mode.toUpperCase() == 'ANY') return 'Запрошено: Любая';
-    if (req == null) {
-      // если клиент выбирал “любая”, но поле не приехало — покажем “—”
-      return 'Запрошено: —';
-    }
-    final n = (req is num) ? req.toInt() : int.tryParse(req.toString());
-    if (n == null) return 'Запрошено: —';
-    if (n == 1) return 'Запрошено: Зелёная';
-    if (n == 2) return 'Запрошено: Синяя';
-    return 'Запрошено: Пост $n';
-  }
-
-  String _assignedBayText(Map<String, dynamic> b) {
+  int? _assignedBayId(Map<String, dynamic> b) {
     final bay = b['bayId'];
     final n = (bay is num) ? bay.toInt() : int.tryParse(bay?.toString() ?? '');
-    if (n == null) return 'Назначено: —';
-    if (n == 1) return 'Назначено: Зелёная';
-    if (n == 2) return 'Назначено: Синяя';
-    return 'Назначено: Пост $n';
+    return n;
   }
+
+  String _assignedBayTitle(Map<String, dynamic> b) {
+    final n = _assignedBayId(b);
+    if (n == null) return 'Пост —';
+    return 'Пост $n';
+  }
+
+  // ---------------- requested bay dot (what client selected) ----------------
+
+  int? _requestedBayId(Map<String, dynamic> b) {
+    final v = b['requestedBayId'];
+    if (v == null) return null; // null => any => no dot
+    if (v is num) return v.toInt();
+    return int.tryParse(v.toString());
+  }
+
+  static const Color _greenLine = Color(0xFF2DBD6E);
+  static const Color _blueLine = Color(0xFF2D9CDB);
+
+  Color _requestedBayColor(int bayId) {
+    if (bayId == 1) return _greenLine;
+    if (bayId == 2) return _blueLine;
+    return Colors.grey;
+  }
+
+  Widget _requestedDot(Map<String, dynamic> b) {
+    final req = _requestedBayId(b);
+    if (req == null) return const SizedBox.shrink();
+
+    final c = _requestedBayColor(req);
+
+    // ✅ make it very visible
+    return Container(
+      width: 12,
+      height: 12,
+      margin: const EdgeInsets.only(left: 8),
+      decoration: BoxDecoration(
+        color: c,
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white, width: 2),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.22),
+            blurRadius: 4,
+            offset: const Offset(0, 1),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _postWithRequestedDot(Map<String, dynamic> b) {
+    final postTitle = _assignedBayTitle(b);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Text(postTitle, style: const TextStyle(fontWeight: FontWeight.w900)),
+        _requestedDot(b),
+      ],
+    );
+  }
+
+  // ---------------- shift close ----------------
 
   Future<void> _closeShiftNoCash() async {
     final userId = widget.session.userId;
@@ -207,9 +255,31 @@ class _CalendarPageState extends State<CalendarPage> {
       final expectedRub = (exp['expectedRub'] as num).toInt();
 
       final countedCtrl = TextEditingController(text: expectedRub.toString());
-      final handoverCtrl = TextEditingController(text: '0');
       final keepCtrl = TextEditingController(text: expectedRub.toString());
+      final handoverCtrl = TextEditingController(text: '0');
       final noteCtrl = TextEditingController(text: '');
+
+      String lastEdited = 'keep'; // 'keep' or 'handover'
+
+      void recalcFromKeep() {
+        final counted = int.tryParse(countedCtrl.text.trim()) ?? 0;
+        var keep = int.tryParse(keepCtrl.text.trim()) ?? 0;
+        if (keep < 0) keep = 0;
+        if (keep > counted) keep = counted;
+        final handover = counted - keep;
+        handoverCtrl.text = handover.toString();
+      }
+
+      void recalcFromHandover() {
+        final counted = int.tryParse(countedCtrl.text.trim()) ?? 0;
+        var handover = int.tryParse(handoverCtrl.text.trim()) ?? 0;
+        if (handover < 0) handover = 0;
+        if (handover > counted) handover = counted;
+        final keep = counted - handover;
+        keepCtrl.text = keep.toString();
+      }
+
+      recalcFromKeep();
 
       final ok = await showDialog<bool>(
         context: context,
@@ -258,21 +328,40 @@ class _CalendarPageState extends State<CalendarPage> {
                         decoration: const InputDecoration(
                           labelText: 'Фактически в кассе (₽)',
                         ),
-                        onChanged: (_) => setStateDialog(() {}),
+                        onChanged: (_) {
+                          setStateDialog(() {});
+                          if (lastEdited == 'handover') {
+                            recalcFromHandover();
+                          } else {
+                            recalcFromKeep();
+                          }
+                          setStateDialog(() {});
+                        },
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: keepCtrl,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: 'Оставить в кассе (перенос) (₽)',
+                        ),
+                        onChanged: (_) {
+                          lastEdited = 'keep';
+                          recalcFromKeep();
+                          setStateDialog(() {});
+                        },
                       ),
                       TextField(
                         controller: handoverCtrl,
                         keyboardType: TextInputType.number,
                         decoration: const InputDecoration(
-                          labelText: 'Сдать владельцу (₽)',
+                          labelText: 'Сдать инкассатору/владельцу (₽)',
                         ),
-                      ),
-                      TextField(
-                        controller: keepCtrl,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Оставить в кассе (₽)',
-                        ),
+                        onChanged: (_) {
+                          lastEdited = 'handover';
+                          recalcFromHandover();
+                          setStateDialog(() {});
+                        },
                       ),
                       TextField(
                         controller: noteCtrl,
@@ -302,9 +391,15 @@ class _CalendarPageState extends State<CalendarPage> {
       if (ok != true) return;
 
       final counted = int.tryParse(countedCtrl.text.trim()) ?? 0;
-      final handover = int.tryParse(handoverCtrl.text.trim()) ?? 0;
       final keep = int.tryParse(keepCtrl.text.trim()) ?? 0;
+      final handover = int.tryParse(handoverCtrl.text.trim()) ?? 0;
       final note = noteCtrl.text.trim().isEmpty ? null : noteCtrl.text.trim();
+
+      if (keep < 0 || handover < 0 || keep + handover != counted) {
+        throw Exception(
+          'Проверь суммы: "оставить + сдать" должно равняться "фактически в кассе".',
+        );
+      }
 
       await widget.api.cashClose(
         userId,
@@ -344,6 +439,8 @@ class _CalendarPageState extends State<CalendarPage> {
     setState(() => selectedDay = selectedDay.add(Duration(days: deltaDays)));
     _loadAll();
   }
+
+  // ---------------- bays cards ----------------
 
   Future<void> _toggleBayCard(int bayNumber) async {
     final isOpen = bayIsActive[bayNumber] ?? true;
@@ -470,53 +567,11 @@ class _CalendarPageState extends State<CalendarPage> {
     return Row(children: [_bayCard(1), const SizedBox(width: 10), _bayCard(2)]);
   }
 
-  // ===== header row =====
-
-  Widget _bookingHeaderRow() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.03),
-        border: Border(
-          bottom: BorderSide(color: Colors.black.withValues(alpha: 0.06)),
-        ),
-      ),
-      child: const Row(
-        children: [
-          Expanded(
-            flex: 5,
-            child: Text(
-              'Время / Услуга / Клиент / Авто',
-              style: TextStyle(fontWeight: FontWeight.w900, fontSize: 12),
-            ),
-          ),
-          Expanded(
-            flex: 4,
-            child: Center(
-              child: Text(
-                'Запрошено / Назначено',
-                style: TextStyle(fontWeight: FontWeight.w900, fontSize: 12),
-              ),
-            ),
-          ),
-          Expanded(
-            flex: 5,
-            child: Align(
-              alignment: Alignment.centerRight,
-              child: Text(
-                'Оплата / Статус',
-                style: TextStyle(fontWeight: FontWeight.w900, fontSize: 12),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ===== booking row =====
+  // ===== booking row (YANDEX-LIKE layout) =====
 
   Widget _bookingRow(Map<String, dynamic> b) {
+    final cs = Theme.of(context).colorScheme;
+
     final statusRu = _statusRu(b);
     final statusColor = _statusColor(statusRu);
 
@@ -533,9 +588,11 @@ class _CalendarPageState extends State<CalendarPage> {
     final make = b['car']?['makeDisplay']?.toString() ?? '';
     final model = b['car']?['modelDisplay']?.toString() ?? '';
     final plate = b['car']?['plateDisplay']?.toString() ?? '';
+    final body = b['car']?['bodyType']?.toString() ?? '';
     final carTitle = [
+      if (plate.trim().isNotEmpty) plate.trim(),
       if ('$make $model'.trim().isNotEmpty) '$make $model'.trim(),
-      if (plate.isNotEmpty) plate,
+      if (body.trim().isNotEmpty) body.trim(),
     ].join(' • ');
 
     final paid = (b['paidTotalRub'] as num?)?.toInt() ?? 0;
@@ -544,8 +601,24 @@ class _CalendarPageState extends State<CalendarPage> {
     final ps = (b['paymentStatus'] ?? '').toString();
     final psRu = _paymentStatusRu(ps);
 
-    final reqText = _requestedBayText(b);
-    final asgText = _assignedBayText(b);
+    Widget statusPill() {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: statusColor.withValues(alpha: 0.14),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: statusColor.withValues(alpha: 0.8)),
+        ),
+        child: Text(
+          statusRu,
+          style: TextStyle(
+            fontWeight: FontWeight.w900,
+            color: statusColor,
+            fontSize: 12,
+          ),
+        ),
+      );
+    }
 
     return InkWell(
       onTap: () async {
@@ -561,18 +634,19 @@ class _CalendarPageState extends State<CalendarPage> {
         );
       },
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        margin: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+        padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          border: Border(
-            bottom: BorderSide(color: Colors.black.withValues(alpha: 0.06)),
-          ),
+          color: cs.surface.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // LEFT
             Expanded(
-              flex: 5,
+              flex: 6,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -585,17 +659,17 @@ class _CalendarPageState extends State<CalendarPage> {
                     serviceName,
                     style: const TextStyle(fontWeight: FontWeight.w800),
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 8),
                   Text(
                     clientTitle,
-                    style: const TextStyle(fontWeight: FontWeight.w700),
+                    style: const TextStyle(fontWeight: FontWeight.w800),
                   ),
                   if (carTitle.isNotEmpty)
                     Text(
                       carTitle,
                       style: TextStyle(
                         fontSize: 12,
-                        color: Colors.black.withValues(alpha: 0.70),
+                        color: cs.onSurface.withValues(alpha: 0.72),
                         fontWeight: FontWeight.w700,
                       ),
                     ),
@@ -603,28 +677,24 @@ class _CalendarPageState extends State<CalendarPage> {
               ),
             ),
 
-            // MIDDLE
+            const SizedBox(width: 10),
+
+            // MIDDLE (Post + requested dot + status)
             Expanded(
-              flex: 4,
+              flex: 3,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Text(
-                    reqText,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(fontWeight: FontWeight.w800),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    asgText,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(fontWeight: FontWeight.w900),
-                  ),
+                  _postWithRequestedDot(b),
+                  const SizedBox(height: 10),
+                  statusPill(),
                 ],
               ),
             ),
 
-            // RIGHT
+            const SizedBox(width: 10),
+
+            // RIGHT (payment)
             Expanded(
               flex: 5,
               child: Column(
@@ -636,32 +706,19 @@ class _CalendarPageState extends State<CalendarPage> {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    'Опл: $paid ₽ • Ост: $toPay ₽',
+                    'Оплачено: $paid ₽',
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w800,
-                      color: Colors.black.withValues(alpha: 0.75),
+                      color: cs.onSurface.withValues(alpha: 0.75),
                     ),
-                    textAlign: TextAlign.right,
                   ),
-                  const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: statusColor.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: statusColor),
-                    ),
-                    child: Text(
-                      statusRu,
-                      style: TextStyle(
-                        fontWeight: FontWeight.w900,
-                        color: statusColor,
-                        fontSize: 12,
-                      ),
+                  Text(
+                    'К оплате: $toPay ₽',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      color: cs.onSurface.withValues(alpha: 0.75),
                     ),
                   ),
                 ],
@@ -670,6 +727,248 @@ class _CalendarPageState extends State<CalendarPage> {
           ],
         ),
       ),
+    );
+  }
+
+  // ===== WAITLIST: section (simple list) =====
+
+  String _wlClientTitle(Map<String, dynamic> w) {
+    final cn = w['client']?['name']?.toString();
+    final cp = w['client']?['phone']?.toString();
+    if (cn != null && cn.trim().isNotEmpty) return cn.trim();
+    return (cp ?? '').toString().trim();
+  }
+
+  String _wlCarTitle(Map<String, dynamic> w) {
+    final plate = w['car']?['plateDisplay']?.toString() ?? '';
+    final make = w['car']?['makeDisplay']?.toString() ?? '';
+    final model = w['car']?['modelDisplay']?.toString() ?? '';
+    final s = '${plate.trim()} ${make.trim()} ${model.trim()}'.trim();
+    return s.isEmpty ? '—' : s;
+  }
+
+  String _wlReqText(Map<String, dynamic> w) {
+    final bayReq =
+        w['desiredBayId'] ?? w['requestedBayId'] ?? w['requestedBayNumber'];
+    final req = (bayReq is num)
+        ? bayReq.toInt()
+        : int.tryParse(bayReq?.toString() ?? '');
+    if (req == null) return 'Запрошено: Любая';
+    if (req == 1) return 'Запрошено: Зелёная';
+    if (req == 2) return 'Запрошено: Синяя';
+    return 'Запрошено: Пост $req';
+  }
+
+  Future<void> _openWaitlistConvertSheet(Map<String, dynamic> w) async {
+    final uid = widget.session.userId;
+    final sid = widget.session.activeShiftId ?? '';
+    if (sid.isEmpty) return;
+
+    final waitlistId = (w['id'] ?? '').toString().trim();
+    if (waitlistId.isEmpty) return;
+
+    final desiredIso = (w['desiredDateTime'] ?? w['dateTime'] ?? '')
+        .toString()
+        .trim();
+
+    DateTime initialLocal = DateTime.now();
+    if (desiredIso.isNotEmpty) {
+      initialLocal = DateTime.tryParse(desiredIso)?.toLocal() ?? DateTime.now();
+    }
+
+    int selectedBay = 1;
+    final bayReq =
+        w['desiredBayId'] ?? w['requestedBayId'] ?? w['requestedBayNumber'];
+    final req = (bayReq is num)
+        ? bayReq.toInt()
+        : int.tryParse(bayReq?.toString() ?? '');
+    if (req == 1 || req == 2) selectedBay = req!;
+
+    DateTime selectedLocal = initialLocal;
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) {
+        return SafeArea(
+          child: StatefulBuilder(
+            builder: (ctx, setSheet) {
+              final cs = Theme.of(ctx).colorScheme;
+
+              Future<void> pickDateTime() async {
+                final date = await showDatePicker(
+                  context: ctx,
+                  initialDate: selectedLocal,
+                  firstDate: DateTime.now().subtract(const Duration(days: 1)),
+                  lastDate: DateTime.now().add(const Duration(days: 60)),
+                );
+                if (date == null) return;
+
+                final time = await showTimePicker(
+                  context: ctx,
+                  initialTime: TimeOfDay.fromDateTime(selectedLocal),
+                );
+                if (time == null) return;
+
+                setSheet(() {
+                  selectedLocal = DateTime(
+                    date.year,
+                    date.month,
+                    date.day,
+                    time.hour,
+                    time.minute,
+                  );
+                });
+              }
+
+              Future<void> convert() async {
+                try {
+                  setState(() => loading = true);
+
+                  final isoUtc = selectedLocal.toUtc().toIso8601String();
+
+                  await widget.api.convertWaitlistToBooking(
+                    uid,
+                    sid,
+                    waitlistId,
+                    bayId: selectedBay,
+                    dateTimeIso: isoUtc,
+                  );
+
+                  if (!mounted) return;
+                  Navigator.of(ctx).pop();
+                  await _loadAll();
+                } catch (e) {
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
+                } finally {
+                  if (mounted) setState(() => loading = false);
+                }
+              }
+
+              String dtLabel() =>
+                  DateFormat('dd.MM HH:mm').format(selectedLocal);
+
+              return Padding(
+                padding: EdgeInsets.only(
+                  left: 16,
+                  right: 16,
+                  top: 10,
+                  bottom: 16 + MediaQuery.of(ctx).viewInsets.bottom,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Перевести из ожидания',
+                            style: Theme.of(ctx).textTheme.titleMedium
+                                ?.copyWith(fontWeight: FontWeight.w900),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: cs.outlineVariant.withValues(alpha: 0.6),
+                        ),
+                        color: cs.surfaceContainerHighest.withValues(
+                          alpha: 0.18,
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _wlClientTitle(w),
+                            style: const TextStyle(fontWeight: FontWeight.w900),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            _wlCarTitle(w),
+                            style: TextStyle(
+                              color: cs.onSurface.withValues(alpha: 0.75),
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            w['service']?['name']?.toString() ?? 'Услуга',
+                            style: TextStyle(
+                              color: cs.onSurface.withValues(alpha: 0.85),
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            _wlReqText(w),
+                            style: TextStyle(
+                              color: cs.onSurface.withValues(alpha: 0.75),
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: loading ? null : pickDateTime,
+                            icon: const Icon(Icons.schedule),
+                            label: Text(dtLabel()),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        SizedBox(
+                          width: 140,
+                          child: DropdownButtonFormField<int>(
+                            value: selectedBay,
+                            decoration: const InputDecoration(
+                              labelText: 'Пост',
+                            ),
+                            items: const [
+                              DropdownMenuItem(
+                                value: 1,
+                                child: Text('Зелёная'),
+                              ),
+                              DropdownMenuItem(value: 2, child: Text('Синяя')),
+                            ],
+                            onChanged: loading
+                                ? null
+                                : (v) => setSheet(() => selectedBay = v ?? 1),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: loading ? null : convert,
+                        icon: const Icon(Icons.done),
+                        label: const Text('Создать запись'),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                ),
+              );
+            },
+          ),
+        );
+      },
     );
   }
 
@@ -686,7 +985,20 @@ class _CalendarPageState extends State<CalendarPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Waitlist', style: TextStyle(fontWeight: FontWeight.w900)),
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Ожидание',
+                  style: TextStyle(fontWeight: FontWeight.w900),
+                ),
+              ),
+              Text(
+                '${waitlist.length}',
+                style: const TextStyle(fontWeight: FontWeight.w900),
+              ),
+            ],
+          ),
           const SizedBox(height: 8),
           ...waitlist.map((x) {
             final w = x as Map<String, dynamic>;
@@ -694,44 +1006,65 @@ class _CalendarPageState extends State<CalendarPage> {
             final dtIso = (w['desiredDateTime'] ?? w['dateTime'] ?? '')
                 .toString();
             final time = dtIso.isNotEmpty ? _fmtTime(dtIso) : '--:--';
+            final dateShort = dtIso.isNotEmpty ? _fmtDateShort(dtIso) : '';
 
-            final bayReq =
-                w['desiredBayId'] ??
-                w['requestedBayId'] ??
-                w['requestedBayNumber'];
-            final req = (bayReq is num)
-                ? bayReq.toInt()
-                : int.tryParse(bayReq?.toString() ?? '');
-            final reqText = (req == null)
-                ? 'Запрошено: Любая'
-                : (req == 1
-                      ? 'Запрошено: Зелёная'
-                      : req == 2
-                      ? 'Запрошено: Синяя'
-                      : 'Запрошено: Пост $req');
-
+            final reqText = _wlReqText(w);
             final serviceName = w['service']?['name']?.toString() ?? 'Услуга';
 
-            final clientName = w['client']?['name']?.toString();
-            final clientPhone = w['client']?['phone']?.toString();
-            final clientTitle = (clientName != null && clientName.isNotEmpty)
-                ? clientName
-                : (clientPhone ?? '');
-
-            final plate = w['car']?['plateDisplay']?.toString() ?? '';
-            final make = w['car']?['makeDisplay']?.toString() ?? '';
-            final model = w['car']?['modelDisplay']?.toString() ?? '';
-            final carLine = plate.isEmpty ? '' : ' • $plate • $make $model';
+            final clientTitle = _wlClientTitle(w);
+            final carLine = _wlCarTitle(w);
 
             final reason = (w['reason'] ?? w['waitlistReason'] ?? '')
                 .toString();
 
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Text(
-                '$time • $reqText • $serviceName • $clientTitle$carLine\n'
-                'Причина: ${reason.isEmpty ? "—" : reason}',
-                style: const TextStyle(fontSize: 12),
+            return Container(
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
+                color: Colors.black.withValues(alpha: 0.02),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '$time${dateShort.isEmpty ? '' : ' • $dateShort'} • $serviceName',
+                          style: const TextStyle(fontWeight: FontWeight.w900),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          clientTitle,
+                          style: const TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          carLine,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.black.withValues(alpha: 0.70),
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          '$reqText\nПричина: ${reason.isEmpty ? "—" : reason}',
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  FilledButton(
+                    onPressed: loading
+                        ? null
+                        : () => _openWaitlistConvertSheet(w),
+                    child: const Text('В очередь'),
+                  ),
+                ],
               ),
             );
           }),
@@ -792,10 +1125,9 @@ class _CalendarPageState extends State<CalendarPage> {
                   child: bookings.isEmpty
                       ? const Center(child: Text('Нет записей'))
                       : ListView.builder(
-                          itemCount: bookings.length + 1,
+                          itemCount: bookings.length,
                           itemBuilder: (context, i) {
-                            if (i == 0) return _bookingHeaderRow();
-                            final b = bookings[i - 1] as Map<String, dynamic>;
+                            final b = bookings[i] as Map<String, dynamic>;
                             return _bookingRow(b);
                           },
                         ),

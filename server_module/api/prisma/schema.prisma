@@ -271,6 +271,10 @@ model Booking {
   dateTime DateTime
   bayId    Int      @default(1)
 
+  /// ✅ NEW: what client requested
+  /// null => ANY line, 1 => green, 2 => blue (or N for future)
+  requestedBayId Int?
+
   bufferMin  Int @default(0)
   depositRub Int @default(0)
 
@@ -317,6 +321,7 @@ model Booking {
   @@index([status])
   @@index([paymentDueAt])
   @@index([bayId])
+  @@index([requestedBayId])
 }
 
 model BookingAddon {

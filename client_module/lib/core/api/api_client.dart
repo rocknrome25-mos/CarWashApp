@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart'; // kDebugMode
 import 'package:http/http.dart' as http;
 
 /// A clean API exception designed for UI.
@@ -30,11 +31,26 @@ class ApiClient {
   }
 
   Future<dynamic> postJson(String path, Object body) async {
+    // ✅ Debug: see what we REALLY send
+    if (kDebugMode) {
+      try {
+        debugPrint('POST $path BODY: ${jsonEncode(body)}');
+      } catch (_) {
+        debugPrint('POST $path BODY: <failed to encode>');
+      }
+    }
+
     final res = await _http.post(
       _u(path),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode(body),
     );
+
+    // ✅ Debug: see raw response (important for requestedBayId)
+    if (kDebugMode) {
+      debugPrint('POST $path -> ${res.statusCode} ${res.body}');
+    }
+
     return _handle(res);
   }
 
@@ -129,8 +145,7 @@ class ApiClient {
       }
     }
 
-    // ✅ ДУБЛИКАТ по авто/времени (то самое сообщение, которое ты хотел)
-    // сервер: "This car already has a booking at this time"
+    // ✅ ДУБЛИКАТ по авто/времени
     if (code == 409 &&
         (m.contains('this car already has a booking at this time') ||
             (m.contains('car') &&
@@ -193,9 +208,8 @@ class ApiClient {
     if (code == 404) {
       if (m.contains('booking')) return 'Запись не найдена.';
       if (m.contains('car')) return 'Авто не найдено (возможно, удалено).';
-      if (m.contains('service')) {
+      if (m.contains('service'))
         return 'Услуга не найдена (возможно, удалена).';
-      }
       return 'Ресурс не найден.';
     }
 

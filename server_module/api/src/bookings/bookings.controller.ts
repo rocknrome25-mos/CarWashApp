@@ -1,3 +1,4 @@
+// C:\dev\carwash\server_module\api\src\bookings\bookings.controller.ts
 import {
   BadRequestException,
   Body,
@@ -13,6 +14,23 @@ import { BookingsService } from './bookings.service';
 type BookingAddonInput = {
   serviceId: string;
   qty?: number;
+};
+
+type CreateBookingBody = {
+  carId: string;
+  serviceId: string;
+  dateTime: string;
+  locationId?: string;
+  bayId?: number;
+
+  // ✅ what client requested: null | 1 | 2
+  requestedBayId?: number | null;
+
+  depositRub?: number;
+  bufferMin?: number;
+  comment?: string;
+  clientId?: string;
+  addons?: BookingAddonInput[];
 };
 
 @Controller('bookings')
@@ -82,21 +100,7 @@ export class BookingsController {
 
   // ✅ CREATE BOOKING (+ addons)
   @Post()
-  create(
-    @Body()
-    body: {
-      carId: string;
-      serviceId: string;
-      dateTime: string;
-      locationId?: string;
-      bayId?: number;
-      depositRub?: number;
-      bufferMin?: number;
-      comment?: string;
-      clientId?: string;
-      addons?: BookingAddonInput[];
-    },
-  ) {
+  create(@Body() body: CreateBookingBody) {
     if (!body || typeof body !== 'object') {
       throw new BadRequestException('body is required');
     }
@@ -104,6 +108,7 @@ export class BookingsController {
       throw new BadRequestException('carId, serviceId and dateTime are required');
     }
 
+    // ✅ validate addons
     if (body.addons != null) {
       if (!Array.isArray(body.addons)) {
         throw new BadRequestException('addons must be an array');
@@ -122,7 +127,32 @@ export class BookingsController {
       }
     }
 
-    return this.bookingsService.create(body as any);
+    // ✅ validate requestedBayId: null | 1 | 2
+    let requestedBayId: number | null | undefined = body.requestedBayId;
+
+    // if it's a string (can happen), normalize
+    if (requestedBayId !== null && requestedBayId !== undefined) {
+      const n = Number(requestedBayId as any);
+      if (!Number.isFinite(n)) {
+        throw new BadRequestException('requestedBayId must be 1 or 2 or null');
+      }
+      const nn = Math.trunc(n);
+      if (nn !== 1 && nn !== 2) {
+        throw new BadRequestException('requestedBayId must be 1 or 2 or null');
+      }
+      requestedBayId = nn;
+    } else if (requestedBayId === null) {
+      // explicit null is OK: means "ANY"
+      requestedBayId = null;
+    }
+
+    // ✅ pass a normalized object to service
+    const normalized: CreateBookingBody = {
+      ...body,
+      requestedBayId, // keep null | 1 | 2 | undefined
+    };
+
+    return this.bookingsService.create(normalized as any);
   }
 
   @Post(':id/pay')
@@ -145,10 +175,7 @@ export class BookingsController {
 
   // ✅ UPSALE: ADDONS (client-side)
   @Post(':id/addons')
-  addAddon(
-    @Param('id') id?: string,
-    @Body() body: BookingAddonInput = {} as any,
-  ) {
+  addAddon(@Param('id') id?: string, @Body() body: BookingAddonInput = {} as any) {
     const bookingId = (id ?? '').trim();
     if (!bookingId) throw new BadRequestException('booking id is required');
 

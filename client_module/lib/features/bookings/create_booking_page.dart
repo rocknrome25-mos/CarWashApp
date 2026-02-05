@@ -1,4 +1,4 @@
-// (ФАЙЛ ЦЕЛИКОМ — твой, с 2 правками: mounted guard + Align картинки)
+// (ФАЙЛ ЦЕЛИКОМ — твой, с 1 доп правкой: requestedBayId отправляем на сервер)
 
 import 'dart:async';
 import 'dart:math';
@@ -212,6 +212,21 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
   }
 
   int? _currentBayIdOrNull() {
+    switch (_bayMode) {
+      case _BayMode.any:
+        return null;
+      case _BayMode.bay1:
+        return 1;
+      case _BayMode.bay2:
+        return 2;
+    }
+  }
+
+  /// ✅ NEW: what client *requested*
+  /// - any => null
+  /// - bay1 => 1
+  /// - bay2 => 2
+  int? _requestedBayIdOrNull() {
     switch (_bayMode) {
       case _BayMode.any:
         return null;
@@ -541,10 +556,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
               height: 140,
               width: double.infinity,
               child: Align(
-                alignment: const Alignment(
-                  0,
-                  0.15,
-                ), // ✅ сдвиг вниз (вертикальная центровка)
+                alignment: const Alignment(0, 0.15),
                 child: Image.asset(
                   _carIconAsset(c),
                   width: 320,
@@ -1234,7 +1246,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
       bayIdToSend = _pickedBayIdForAny;
       bayIdToSend ??= await _pickBayForSlotAny(slot);
 
-      // ✅ FIX lint: context after await
       if (!mounted) return;
 
       if (bayIdToSend == null) {
@@ -1247,6 +1258,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
       }
     }
 
+    // ✅ IMPORTANT: preserve what client requested
+    final requestedBayId = _requestedBayIdOrNull(); // null means ANY
+
     setState(() => _saving = true);
 
     try {
@@ -1258,6 +1272,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
         serviceId: serviceId!,
         dateTime: slot,
         bayId: bayIdToSend,
+        requestedBayId: requestedBayId, // ✅ NEW
         depositRub: _depositRub,
         bufferMin: _bufferMin,
         comment: _commentCtrl.text.trim().isEmpty
@@ -1535,11 +1550,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
               ),
               const SizedBox(height: 12),
             ],
-
             _sectionTitle('Авто'),
             _sectionCard(child: _carsSelector()),
             const SizedBox(height: 12),
-
             _sectionTitle('Услуга'),
             _sectionCard(
               child: DropdownButtonFormField<String>(
@@ -1574,14 +1587,11 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
               ),
             ),
             const SizedBox(height: 12),
-
             _addonsSection(),
             const SizedBox(height: 12),
-
             _sectionTitle('Линия'),
             _sectionCard(child: _lineSelectorRow()),
             const SizedBox(height: 12),
-
             _sectionTitle('Дата'),
             _sectionCard(
               child: SizedBox(
@@ -1595,7 +1605,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
               ),
             ),
             const SizedBox(height: 12),
-
             _sectionTitle('Время'),
             _sectionCard(
               child: (visibleSlots.isEmpty)
@@ -1633,7 +1642,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                     ),
             ),
             const SizedBox(height: 12),
-
             _sectionTitle('Комментарий'),
             _sectionCard(
               child: TextFormField(
@@ -1649,7 +1657,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
               ),
             ),
             const SizedBox(height: 12),
-
             _sectionTitle('Итого'),
             _sectionCard(
               child: Column(
@@ -1717,7 +1724,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
               ),
             ),
             const SizedBox(height: 12),
-
             SizedBox(
               width: double.infinity,
               child: FilledButton.icon(
