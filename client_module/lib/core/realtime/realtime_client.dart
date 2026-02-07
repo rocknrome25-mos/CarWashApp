@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 class BookingRealtimeEvent {
@@ -98,10 +99,20 @@ class RealtimeClient {
     _reconnectTimer?.cancel();
 
     try {
+      if (kDebugMode) {
+        // ignore: avoid_print
+        print('WS CONNECT -> $wsUri');
+      }
+
       _ch = WebSocketChannel.connect(wsUri);
 
       _sub = _ch!.stream.listen(
         (msg) {
+          if (kDebugMode) {
+            // ignore: avoid_print
+            print('WS IN <- $msg');
+          }
+
           try {
             final raw = msg is String ? msg : msg.toString();
             final decoded = jsonDecode(raw);
@@ -117,11 +128,27 @@ class RealtimeClient {
             // ignore malformed
           }
         },
-        onError: (_) => _scheduleReconnect(),
-        onDone: () => _scheduleReconnect(),
+        onError: (e) {
+          if (kDebugMode) {
+            // ignore: avoid_print
+            print('WS ERROR: $e');
+          }
+          _scheduleReconnect();
+        },
+        onDone: () {
+          if (kDebugMode) {
+            // ignore: avoid_print
+            print('WS DONE (closed)');
+          }
+          _scheduleReconnect();
+        },
         cancelOnError: true,
       );
-    } catch (_) {
+    } catch (e) {
+      if (kDebugMode) {
+        // ignore: avoid_print
+        print('WS CONNECT FAILED: $e');
+      }
       _scheduleReconnect();
     }
   }

@@ -188,7 +188,6 @@ class _CalendarPageState extends State<CalendarPage> {
 
     final c = _requestedBayColor(req);
 
-    // ✅ make it very visible
     return Container(
       width: 12,
       height: 12,
@@ -242,7 +241,6 @@ class _CalendarPageState extends State<CalendarPage> {
       setState(() => error = e.toString());
     }
   }
-
   Future<void> _closeShiftWithCash() async {
     final userId = widget.session.userId;
     final shiftId = widget.session.activeShiftId ?? '';
@@ -566,8 +564,7 @@ class _CalendarPageState extends State<CalendarPage> {
   Widget _baysRow() {
     return Row(children: [_bayCard(1), const SizedBox(width: 10), _bayCard(2)]);
   }
-
-  // ===== booking row (YANDEX-LIKE layout) =====
+  // ===== booking row =====
 
   Widget _bookingRow(Map<String, dynamic> b) {
     final cs = Theme.of(context).colorScheme;
@@ -644,26 +641,16 @@ class _CalendarPageState extends State<CalendarPage> {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // LEFT
             Expanded(
               flex: 6,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    time,
-                    style: const TextStyle(fontWeight: FontWeight.w900),
-                  ),
+                  Text(time, style: const TextStyle(fontWeight: FontWeight.w900)),
                   const SizedBox(height: 2),
-                  Text(
-                    serviceName,
-                    style: const TextStyle(fontWeight: FontWeight.w800),
-                  ),
+                  Text(serviceName, style: const TextStyle(fontWeight: FontWeight.w800)),
                   const SizedBox(height: 8),
-                  Text(
-                    clientTitle,
-                    style: const TextStyle(fontWeight: FontWeight.w800),
-                  ),
+                  Text(clientTitle, style: const TextStyle(fontWeight: FontWeight.w800)),
                   if (carTitle.isNotEmpty)
                     Text(
                       carTitle,
@@ -676,10 +663,7 @@ class _CalendarPageState extends State<CalendarPage> {
                 ],
               ),
             ),
-
             const SizedBox(width: 10),
-
-            // MIDDLE (Post + requested dot + status)
             Expanded(
               flex: 3,
               child: Column(
@@ -691,19 +675,13 @@ class _CalendarPageState extends State<CalendarPage> {
                 ],
               ),
             ),
-
             const SizedBox(width: 10),
-
-            // RIGHT (payment)
             Expanded(
               flex: 5,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Text(
-                    psRu,
-                    style: const TextStyle(fontWeight: FontWeight.w900),
-                  ),
+                  Text(psRu, style: const TextStyle(fontWeight: FontWeight.w900)),
                   const SizedBox(height: 6),
                   Text(
                     'Оплачено: $paid ₽',
@@ -730,7 +708,7 @@ class _CalendarPageState extends State<CalendarPage> {
     );
   }
 
-  // ===== WAITLIST: section (simple list) =====
+  // ===== WAITLIST =====
 
   String _wlClientTitle(Map<String, dynamic> w) {
     final cn = w['client']?['name']?.toString();
@@ -767,9 +745,8 @@ class _CalendarPageState extends State<CalendarPage> {
     final waitlistId = (w['id'] ?? '').toString().trim();
     if (waitlistId.isEmpty) return;
 
-    final desiredIso = (w['desiredDateTime'] ?? w['dateTime'] ?? '')
-        .toString()
-        .trim();
+    final desiredIso =
+        (w['desiredDateTime'] ?? w['dateTime'] ?? '').toString().trim();
 
     DateTime initialLocal = DateTime.now();
     if (desiredIso.isNotEmpty) {
@@ -795,6 +772,9 @@ class _CalendarPageState extends State<CalendarPage> {
           child: StatefulBuilder(
             builder: (ctx, setSheet) {
               final cs = Theme.of(ctx).colorScheme;
+
+              // ✅ защита от двойного клика
+              bool converting = false;
 
               Future<void> pickDateTime() async {
                 final date = await showDatePicker(
@@ -823,6 +803,9 @@ class _CalendarPageState extends State<CalendarPage> {
               }
 
               Future<void> convert() async {
+                if (converting) return;
+                setSheet(() => converting = true);
+
                 try {
                   setState(() => loading = true);
 
@@ -837,15 +820,22 @@ class _CalendarPageState extends State<CalendarPage> {
                   );
 
                   if (!mounted) return;
-                  Navigator.of(ctx).pop();
+
+                  // ✅ закрываем sheet только если ctx ещё жив
+                  if (ctx.mounted && Navigator.of(ctx).canPop()) {
+                    Navigator.of(ctx).pop();
+                  }
+
+                  if (!mounted) return;
                   await _loadAll();
                 } catch (e) {
                   if (!mounted) return;
-                  ScaffoldMessenger.of(
-                    context,
-                  ).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Ошибка: $e')),
+                  );
                 } finally {
                   if (mounted) setState(() => loading = false);
+                  if (ctx.mounted) setSheet(() => converting = false);
                 }
               }
 
@@ -867,7 +857,9 @@ class _CalendarPageState extends State<CalendarPage> {
                         Expanded(
                           child: Text(
                             'Перевести из ожидания',
-                            style: Theme.of(ctx).textTheme.titleMedium
+                            style: Theme.of(ctx)
+                                .textTheme
+                                .titleMedium
                                 ?.copyWith(fontWeight: FontWeight.w900),
                           ),
                         ),
@@ -882,9 +874,8 @@ class _CalendarPageState extends State<CalendarPage> {
                         border: Border.all(
                           color: cs.outlineVariant.withValues(alpha: 0.6),
                         ),
-                        color: cs.surfaceContainerHighest.withValues(
-                          alpha: 0.18,
-                        ),
+                        color:
+                            cs.surfaceContainerHighest.withValues(alpha: 0.18),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -925,7 +916,7 @@ class _CalendarPageState extends State<CalendarPage> {
                       children: [
                         Expanded(
                           child: OutlinedButton.icon(
-                            onPressed: loading ? null : pickDateTime,
+                            onPressed: (loading || converting) ? null : pickDateTime,
                             icon: const Icon(Icons.schedule),
                             label: Text(dtLabel()),
                           ),
@@ -934,7 +925,8 @@ class _CalendarPageState extends State<CalendarPage> {
                         SizedBox(
                           width: 140,
                           child: DropdownButtonFormField<int>(
-                            value: selectedBay,
+                            // ✅ FIX: deprecated value -> initialValue
+                            initialValue: selectedBay,
                             decoration: const InputDecoration(
                               labelText: 'Пост',
                             ),
@@ -945,7 +937,7 @@ class _CalendarPageState extends State<CalendarPage> {
                               ),
                               DropdownMenuItem(value: 2, child: Text('Синяя')),
                             ],
-                            onChanged: loading
+                            onChanged: (loading || converting)
                                 ? null
                                 : (v) => setSheet(() => selectedBay = v ?? 1),
                           ),
@@ -956,9 +948,15 @@ class _CalendarPageState extends State<CalendarPage> {
                     SizedBox(
                       width: double.infinity,
                       child: FilledButton.icon(
-                        onPressed: loading ? null : convert,
-                        icon: const Icon(Icons.done),
-                        label: const Text('Создать запись'),
+                        onPressed: (loading || converting) ? null : convert,
+                        icon: converting
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.done),
+                        label: Text(converting ? 'Создаю...' : 'Создать запись'),
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -1003,8 +1001,8 @@ class _CalendarPageState extends State<CalendarPage> {
           ...waitlist.map((x) {
             final w = x as Map<String, dynamic>;
 
-            final dtIso = (w['desiredDateTime'] ?? w['dateTime'] ?? '')
-                .toString();
+            final dtIso =
+                (w['desiredDateTime'] ?? w['dateTime'] ?? '').toString();
             final time = dtIso.isNotEmpty ? _fmtTime(dtIso) : '--:--';
             final dateShort = dtIso.isNotEmpty ? _fmtDateShort(dtIso) : '';
 
@@ -1014,8 +1012,7 @@ class _CalendarPageState extends State<CalendarPage> {
             final clientTitle = _wlClientTitle(w);
             final carLine = _wlCarTitle(w);
 
-            final reason = (w['reason'] ?? w['waitlistReason'] ?? '')
-                .toString();
+            final reason = (w['reason'] ?? w['waitlistReason'] ?? '').toString();
 
             return Container(
               margin: const EdgeInsets.only(bottom: 10),
@@ -1059,9 +1056,7 @@ class _CalendarPageState extends State<CalendarPage> {
                   ),
                   const SizedBox(width: 10),
                   FilledButton(
-                    onPressed: loading
-                        ? null
-                        : () => _openWaitlistConvertSheet(w),
+                    onPressed: loading ? null : () => _openWaitlistConvertSheet(w),
                     child: const Text('В очередь'),
                   ),
                 ],
@@ -1110,30 +1105,30 @@ class _CalendarPageState extends State<CalendarPage> {
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : error != null
-          ? Center(
-              child: Text(error!, style: const TextStyle(color: Colors.red)),
-            )
-          : Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-                  child: _baysRow(),
+              ? Center(
+                  child: Text(error!, style: const TextStyle(color: Colors.red)),
+                )
+              : Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+                      child: _baysRow(),
+                    ),
+                    _waitlistSection(),
+                    const SizedBox(height: 6),
+                    Expanded(
+                      child: bookings.isEmpty
+                          ? const Center(child: Text('Нет записей'))
+                          : ListView.builder(
+                              itemCount: bookings.length,
+                              itemBuilder: (context, i) {
+                                final b = bookings[i] as Map<String, dynamic>;
+                                return _bookingRow(b);
+                              },
+                            ),
+                    ),
+                  ],
                 ),
-                _waitlistSection(),
-                const SizedBox(height: 6),
-                Expanded(
-                  child: bookings.isEmpty
-                      ? const Center(child: Text('Нет записей'))
-                      : ListView.builder(
-                          itemCount: bookings.length,
-                          itemBuilder: (context, i) {
-                            final b = bookings[i] as Map<String, dynamic>;
-                            return _bookingRow(b);
-                          },
-                        ),
-                ),
-              ],
-            ),
       bottomNavigationBar: Padding(
         padding: const EdgeInsets.all(8),
         child: Text(

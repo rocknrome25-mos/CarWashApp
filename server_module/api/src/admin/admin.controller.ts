@@ -214,6 +214,25 @@ export class AdminController {
       dateTime,
     });
   }
+    @Delete('waitlist/:id')
+  deleteWaitlist(
+    @Headers('x-user-id') userId?: string,
+    @Headers('x-shift-id') shiftId?: string,
+    @Param('id') waitlistId?: string,
+    @Body() body: any = {},
+  ) {
+    const uid = (userId ?? '').trim();
+    const sid = (shiftId ?? '').trim();
+    const wid = (waitlistId ?? '').trim();
+
+    if (!uid) throw new BadRequestException('x-user-id is required');
+    if (!sid) throw new BadRequestException('x-shift-id is required');
+    if (!wid) throw new BadRequestException('waitlist id is required');
+
+    const reason = (body?.reason ?? '').toString();
+    return this.admin.deleteWaitlistRequest(uid, sid, wid, reason);
+  }
+
 
   // ===== CALENDAR =====
 

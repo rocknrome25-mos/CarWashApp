@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "AuditType" ADD VALUE 'WAITLIST_DELETE';

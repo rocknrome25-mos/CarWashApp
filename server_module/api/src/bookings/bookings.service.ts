@@ -9,12 +9,14 @@ import {
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import {
+  AuditType,
   BookingStatus,
   PaymentKind,
   PaymentMethodType,
   Prisma,
   WaitlistStatus,
 } from '@prisma/client';
+
 import { BookingsGateway } from './bookings.gateway';
 
 type PayBody = {
@@ -323,6 +325,73 @@ export class BookingsService {
       end: x.end.toISOString(),
     }));
   }
+
+// ✅ CANCEL WAITLIST (client)
+async cancelWaitlistRequest(waitlistId: string, clientId: string) {
+  await this._housekeeping();
+
+  const wid = (waitlistId ?? '').trim();
+  const cid = (clientId ?? '').trim();
+  if (!wid) throw new BadRequestException('waitlist id is required');
+  if (!cid) throw new BadRequestException('clientId is required');
+
+  const wl = await this.prisma.waitlistRequest.findUnique({
+    where: { id: wid },
+    select: {
+      id: true,
+      clientId: true,
+      locationId: true,
+      status: true,
+      desiredBayId: true,
+      desiredDateTime: true,
+      reason: true,
+    },
+  });
+
+  if (!wl) throw new NotFoundException('Waitlist request not found');
+
+  if (wl.clientId !== cid) {
+    throw new ForbiddenException('Not your waitlist request');
+  }
+
+  // already not waiting => idempotent OK
+  if (wl.status !== WaitlistStatus.WAITING) {
+    return { ok: true, id: wl.id, status: wl.status };
+  }
+
+  const updated = await this.prisma.waitlistRequest.update({
+    where: { id: wl.id },
+    data: {
+      status: WaitlistStatus.CANCELED,
+      reason: 'CLIENT_CANCELED',
+    },
+    select: { id: true, status: true, locationId: true, desiredBayId: true },
+  });
+
+  // ✅ audit without prisma enum migration: reuse existing BOOKING_DELETE
+  await this.prisma.auditEvent.create({
+    data: {
+      type: AuditType.BOOKING_DELETE,
+      locationId: wl.locationId,
+      clientId: wl.clientId,
+      reason: 'WAITLIST_CLIENT_CANCEL',
+      payload: {
+        waitlistId: wl.id,
+        prevStatus: wl.status,
+        newStatus: updated.status,
+        desiredBayId: wl.desiredBayId ?? null,
+        desiredDateTime: wl.desiredDateTime?.toISOString?.() ?? null,
+      },
+    },
+  });
+
+  // ✅ realtime refresh for both apps
+  const bay = wl.desiredBayId ?? 1;
+  this.ws.emitBookingChanged(wl.locationId, bay);
+
+  return { ok: true, id: updated.id, status: updated.status };
+}
+
 
   /* ===================== LIST BOOKINGS ===================== */
 

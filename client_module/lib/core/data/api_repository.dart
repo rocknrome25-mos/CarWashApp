@@ -1,3 +1,4 @@
+// C:\dev\carwash\client_module\lib\core\data\api_repository.dart
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -22,6 +23,13 @@ class ApiRepository implements AppRepository {
   StreamSubscription<BookingRealtimeEvent>? _rtSub;
   Timer? _rtDebounce;
 
+  // ✅ NEW: UI refresh trigger (broadcast)
+  final StreamController<void> _refreshCtrl =
+      StreamController<void>.broadcast();
+
+  /// ✅ UI can subscribe to this and refresh data when backend changes happen.
+  Stream<void> get refresh$ => _refreshCtrl.stream;
+
   ApiRepository({
     required this.api,
     required this.cache,
@@ -36,15 +44,15 @@ class ApiRepository implements AppRepository {
     _rtSub = realtime.events.listen((ev) {
       if (ev.type != 'booking.changed') return;
 
-      final curLocId = currentLocation?.id;
-      if (curLocId == null || curLocId.trim().isEmpty) return;
-
-      if (ev.locationId.trim().isEmpty) return;
-      if (ev.locationId.trim() != curLocId.trim()) return;
-
+      // ✅ ВСЕГДА: записи/ожидание относятся к клиенту, не зависят от выбранной локации в UI
       _rtDebounce?.cancel();
       _rtDebounce = Timer(const Duration(milliseconds: 250), () {
         _invalidateBookingCaches();
+
+        // ✅ IMPORTANT: notify UI that it should refresh
+        if (!_refreshCtrl.isClosed) {
+          _refreshCtrl.add(null);
+        }
       });
     });
   }
@@ -59,6 +67,9 @@ class ApiRepository implements AppRepository {
     cache.set(_kClient, c, ttl: const Duration(days: 365));
     cache.invalidate('cars');
     _invalidateBookingCaches();
+
+    // ✅ optional UI nudge (client changed => refresh screens)
+    if (!_refreshCtrl.isClosed) _refreshCtrl.add(null);
   }
 
   @override
@@ -67,6 +78,8 @@ class ApiRepository implements AppRepository {
     cache.invalidate(_kLocation);
     cache.invalidate('cars');
     _invalidateBookingCaches();
+
+    if (!_refreshCtrl.isClosed) _refreshCtrl.add(null);
   }
 
   String _requireClientId() {
@@ -91,6 +104,8 @@ class ApiRepository implements AppRepository {
     }
     cache.invalidatePrefix('busy_slots_');
     _invalidateBookingCaches();
+
+    if (!_refreshCtrl.isClosed) _refreshCtrl.add(null);
   }
 
   @override
@@ -287,6 +302,7 @@ class ApiRepository implements AppRepository {
 
     cache.invalidate('cars');
     _invalidateBookingCaches();
+    if (!_refreshCtrl.isClosed) _refreshCtrl.add(null);
 
     return Car.fromJson(j);
   }
@@ -298,6 +314,7 @@ class ApiRepository implements AppRepository {
 
     cache.invalidate('cars');
     _invalidateBookingCaches();
+    if (!_refreshCtrl.isClosed) _refreshCtrl.add(null);
   }
 
   // ---------------- BOOKINGS ----------------
@@ -395,6 +412,18 @@ class ApiRepository implements AppRepository {
     return list;
   }
 
+  // ✅ CANCEL WAITLIST (client)
+  Future<void> cancelWaitlistRequest(String waitlistId) async {
+    final cid = _requireClientId();
+    final wid = waitlistId.trim();
+    if (wid.isEmpty) throw Exception('waitlistId is required');
+
+    await api.deleteJson('/bookings/waitlist/$wid', query: {'clientId': cid});
+
+    _invalidateBookingCaches();
+    if (!_refreshCtrl.isClosed) _refreshCtrl.add(null);
+  }
+
   // ---------------- CREATE / PAY / CANCEL ----------------
 
   @override
@@ -419,12 +448,9 @@ class ApiRepository implements AppRepository {
       'serviceId': serviceId,
       'dateTime': dateTime.toUtc().toIso8601String(),
       'clientId': cid,
-
-      // назначенный пост (если клиент выбирал конкретный — обычно совпадает,
-      // если "любая" — это то, что мы выбрали автоматически)
       if (bayId != null) 'bayId': bayId,
 
-      // ✅ ВАЖНО: отправляем ВСЕГДА. null = “любой пост”
+      // ✅ ALWAYS send. null = “любой пост”
       'requestedBayId': requestedBayId,
 
       if (depositRub != null) 'depositRub': depositRub,
@@ -437,6 +463,8 @@ class ApiRepository implements AppRepository {
     final j = await api.postJson('/bookings', payload) as Map<String, dynamic>;
 
     _invalidateBookingCaches();
+    if (!_refreshCtrl.isClosed) _refreshCtrl.add(null);
+
     return Booking.fromJson(j);
   }
 
@@ -452,6 +480,8 @@ class ApiRepository implements AppRepository {
             as Map<String, dynamic>;
 
     _invalidateBookingCaches();
+    if (!_refreshCtrl.isClosed) _refreshCtrl.add(null);
+
     return Booking.fromJson(j);
   }
 
@@ -463,6 +493,8 @@ class ApiRepository implements AppRepository {
             as Map<String, dynamic>;
 
     _invalidateBookingCaches();
+    if (!_refreshCtrl.isClosed) _refreshCtrl.add(null);
+
     return Booking.fromJson(j);
   }
 
@@ -472,8 +504,12 @@ class ApiRepository implements AppRepository {
   Future<void> dispose() async {
     _rtDebounce?.cancel();
     _rtDebounce = null;
+
     await _rtSub?.cancel();
     _rtSub = null;
+
     await realtime.close();
+
+    await _refreshCtrl.close();
   }
 }

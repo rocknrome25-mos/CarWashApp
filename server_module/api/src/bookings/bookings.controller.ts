@@ -85,6 +85,22 @@ export class BookingsController {
     return this.bookingsService.findWaitlistForClient(cid, all);
   }
 
+  // ✅ CANCEL WAITLIST (client)
+  // DELETE /bookings/waitlist/:id?clientId=...
+  @Delete('waitlist/:id')
+  cancelWaitlist(
+    @Param('id') id?: string,
+    @Query('clientId') clientId?: string,
+  ) {
+    const wid = (id ?? '').trim();
+    if (!wid) throw new BadRequestException('waitlist id is required');
+
+    const cid = (clientId ?? '').trim();
+    if (!cid) throw new BadRequestException('clientId is required');
+
+    return this.bookingsService.cancelWaitlistRequest(wid, cid);
+  }
+
   // GET /bookings?includeCanceled=true&clientId=...
   @Get()
   getAll(
@@ -130,7 +146,6 @@ export class BookingsController {
     // ✅ validate requestedBayId: null | 1 | 2
     let requestedBayId: number | null | undefined = body.requestedBayId;
 
-    // if it's a string (can happen), normalize
     if (requestedBayId !== null && requestedBayId !== undefined) {
       const n = Number(requestedBayId as any);
       if (!Number.isFinite(n)) {
@@ -142,14 +157,12 @@ export class BookingsController {
       }
       requestedBayId = nn;
     } else if (requestedBayId === null) {
-      // explicit null is OK: means "ANY"
-      requestedBayId = null;
+      requestedBayId = null; // explicit null ok
     }
 
-    // ✅ pass a normalized object to service
     const normalized: CreateBookingBody = {
       ...body,
-      requestedBayId, // keep null | 1 | 2 | undefined
+      requestedBayId,
     };
 
     return this.bookingsService.create(normalized as any);

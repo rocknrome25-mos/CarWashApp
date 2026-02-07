@@ -1,3 +1,4 @@
+// C:\dev\carwash\admin_module\lib\core\api\admin_api_client.dart
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
@@ -27,6 +28,7 @@ class AdminApiClient {
     }
     final d = jsonDecode(res.body);
     if (d is Map<String, dynamic>) return d;
+    if (d is Map) return d.cast<String, dynamic>();
     throw Exception('$opName failed: unexpected response');
   }
 
@@ -37,6 +39,7 @@ class AdminApiClient {
     final d = jsonDecode(res.body);
     if (d is List) return d;
     if (d is Map<String, dynamic>) return [d];
+    if (d is Map) return [d.cast<String, dynamic>()];
     throw Exception('$opName failed: unexpected response');
   }
 
@@ -137,6 +140,56 @@ class AdminApiClient {
     return _decodeMap(res, 'waitlist convert');
   }
 
+  /// ✅ NEW: delete waitlist request (soft delete on backend as CANCELED)
+  /// DELETE /admin/waitlist/:id  body: { reason: string }
+  Future<Map<String, dynamic>> deleteWaitlist(
+    String userId,
+    String shiftId,
+    String waitlistId, {
+    String? reason,
+  }) async {
+    final wid = waitlistId.trim();
+    if (wid.isEmpty) throw Exception('waitlistId is required');
+
+    final payload = <String, dynamic>{
+      if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
+    };
+
+    // http.delete with body is not always reliable => use Request
+    final req = http.Request('DELETE', _u('/admin/waitlist/$wid'));
+    req.headers.addAll(_jsonHeaders(userId: userId, shiftId: shiftId));
+    req.body = jsonEncode(payload);
+
+    final streamed = await req.send().timeout(_timeout);
+    final res = await http.Response.fromStream(streamed);
+
+    return _decodeMap(res, 'waitlist delete');
+  }
+
+  // ===== PUBLIC BUSY SLOTS (NO ADMIN HEADERS) =====
+  // GET /bookings/busy?locationId=...&bayId=1&from=...&to=...
+  // response: [{ start: ISO, end: ISO }, ...]
+  Future<List<dynamic>> publicBusySlots({
+    required String locationId,
+    required int bayId,
+    required String fromIsoUtc,
+    required String toIsoUtc,
+  }) async {
+    final res = await http
+        .get(
+          _u('/bookings/busy', {
+            'locationId': locationId,
+            'bayId': bayId.toString(),
+            'from': fromIsoUtc,
+            'to': toIsoUtc,
+          }),
+          headers: _jsonHeaders(), // no x-user-id / x-shift-id
+        )
+        .timeout(_timeout);
+
+    return _decodeList(res, 'busy slots');
+  }
+
   // ===== BAYS =====
 
   Future<List<dynamic>> listBays(String userId, String shiftId) async {
@@ -159,9 +212,8 @@ class AdminApiClient {
     required bool isActive,
     String? reason,
   }) async {
-    final path = isActive
-        ? '/admin/bays/$bayNumber/open'
-        : '/admin/bays/$bayNumber/close';
+    final path =
+        isActive ? '/admin/bays/$bayNumber/open' : '/admin/bays/$bayNumber/close';
 
     String? body;
     if (!isActive) {

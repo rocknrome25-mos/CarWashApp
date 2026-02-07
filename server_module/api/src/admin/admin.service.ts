@@ -1170,6 +1170,84 @@ export class AdminService {
   async getWaitlistDay(userId: string, shiftId: string, dateYmd: string) {
     return this.waitlistDay(userId, shiftId, dateYmd);
   }
+    /* ===================== WAITLIST: delete (admin) ===================== */
+
+  async deleteWaitlistRequest(
+    userId: string,
+    shiftId: string,
+    waitlistId: string,
+    reasonRaw?: string,
+  ) {
+    const { user, shift } = await this._requireActiveShift(userId, shiftId);
+
+    const wid = (waitlistId ?? '').trim();
+    if (!wid) throw new BadRequestException('waitlist id is required');
+
+    const wl = await this.prisma.waitlistRequest.findUnique({
+      where: { id: wid },
+      select: {
+        id: true,
+        locationId: true,
+        status: true,
+        clientId: true,
+        carId: true,
+        serviceId: true,
+        desiredDateTime: true,
+        desiredBayId: true,
+        reason: true,
+      },
+    });
+
+    if (!wl) throw new NotFoundException('Waitlist request not found');
+    if (wl.locationId !== shift.locationId) {
+      throw new ForbiddenException('Not your location waitlist');
+    }
+    if (wl.status !== WaitlistStatus.WAITING) {
+      throw new ConflictException('Waitlist request is not WAITING');
+    }
+
+    const reason = this._normNote(reasonRaw, 200) ?? 'ADMIN_DELETED';
+
+    // ✅ НЕ удаляем из БД. Помечаем как CANCELED, чтобы была история.
+    const updated = await this.prisma.waitlistRequest.update({
+      where: { id: wl.id },
+      data: {
+        status: WaitlistStatus.CANCELED,
+        reason: `ADMIN_DELETED: ${reason}`,
+        invitedAt: null,
+      },
+      select: { id: true, status: true, reason: true, updatedAt: true },
+    });
+
+    // ✅ Аудит "подозрительное действие"
+    await this.prisma.auditEvent.create({
+      data: {
+        type: AuditType.WAITLIST_DELETE,
+        locationId: shift.locationId,
+        userId: user.id,
+        shiftId: shift.id,
+        clientId: wl.clientId,
+        reason: 'WAITLIST_DELETE',
+        payload: {
+          waitlistId: wl.id,
+          prevStatus: String(wl.status),
+          newStatus: String(updated.status),
+          reason,
+          desiredDateTime:
+            (wl as any).desiredDateTime?.toISOString?.() ?? wl.desiredDateTime,
+          desiredBayId: wl.desiredBayId ?? null,
+          carId: wl.carId,
+          serviceId: wl.serviceId,
+        },
+      },
+    });
+
+    // 🔔 дергаем WS чтобы админка/клиентка обновились
+    this.ws.emitBookingChanged(shift.locationId, 1);
+
+    return { ok: true, waitlistId: wl.id };
+  }
+
 
   /* ===================== WAITLIST -> BOOKING (convert) ===================== */
 

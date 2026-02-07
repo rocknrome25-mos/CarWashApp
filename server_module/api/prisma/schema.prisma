@@ -61,7 +61,11 @@ enum AuditType {
 
   CLIENT_BLOCK
   CLIENT_UNBLOCK
+
+  // ✅ suspicious admin action (waitlist removed by admin)
+  WAITLIST_DELETE
 }
+
 
 enum ShiftCashEventType {
   OPEN_FLOAT

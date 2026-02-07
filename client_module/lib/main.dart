@@ -1,5 +1,4 @@
 import 'dart:io' show Platform;
-
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
@@ -27,16 +26,27 @@ class _RootState extends State<_Root> {
   bool _authed = false;
   late final AppRepository repo;
 
+  /// ✅ One source of truth:
+  /// - web: defaults to http://localhost:3000
+  /// - android emulator: http://10.0.2.2:3000
+  /// - real device / others: MUST be provided via --dart-define=BASE_URL=...
+  ///
+  /// Examples:
+  /// flutter run -d chrome --dart-define=BASE_URL=http://localhost:3000
+  /// flutter run -d emulator-5554 --dart-define=BASE_URL=http://10.0.2.2:3000
+  /// flutter run -d <your_phone> --dart-define=BASE_URL=http://192.168.1.10:3000
   String _resolveBaseUrl() {
-    if (kIsWeb) return 'http://localhost:3000';
-    if (!kIsWeb && Platform.isAndroid) return 'http://10.0.2.2:3000';
-    return 'http://localhost:3000';
-  }
+    const defined = String.fromEnvironment('BASE_URL', defaultValue: '');
+    if (defined.trim().isNotEmpty) return defined.trim();
 
-  Uri _resolveWsUrl(String baseUrl) {
-    final u = Uri.parse(baseUrl);
-    final scheme = u.scheme == 'https' ? 'wss' : 'ws';
-    return Uri(scheme: scheme, host: u.host, port: u.port, path: '/ws');
+    if (kIsWeb) return 'http://localhost:3000';
+
+    // Android emulator default
+    if (!kIsWeb && Platform.isAndroid) return 'http://10.0.2.2:3000';
+
+    // ✅ Do NOT guess localhost on real devices — it will not work
+    // Put a clear default so the problem is obvious during testing
+    return 'http://CHANGE_ME:3000';
   }
 
   @override
@@ -44,8 +54,8 @@ class _RootState extends State<_Root> {
     super.initState();
 
     final baseUrl = _resolveBaseUrl();
-    final rt = RealtimeClient(wsUri: _resolveWsUrl(baseUrl));
-    rt.connect();
+
+    final rt = RealtimeClient.fromBaseUrl(baseUrl);
 
     repo = ApiRepository(
       api: ApiClient(baseUrl: baseUrl),

@@ -1,3 +1,4 @@
+// C:\dev\carwash\admin_module\lib\features\shell\shell_page.dart
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -31,36 +32,129 @@ class ShellPage extends StatefulWidget {
 class _ShellPageState extends State<ShellPage> {
   int idx = 0;
 
+  // ✅ waitlist badge count
+  int waitlistCount = 0;
+  bool _loadingWaitlistCount = false;
+
+  // ✅ realtime for badge
+  late final RealtimeClient _rt;
+  StreamSubscription<BookingRealtimeEvent>? _rtSub;
+  Timer? _rtDebounce;
+
+  String get _todayYmd => DateFormat('yyyy-MM-dd').format(DateTime.now());
+
+  @override
+  void initState() {
+    super.initState();
+
+    _rt = RealtimeClient(baseHttpUrl: widget.api.baseUrl);
+    _rt.connect();
+    _subscribeRealtimeForBadge();
+
+    _loadWaitlistCount();
+  }
+
+  @override
+  void dispose() {
+    _rtDebounce?.cancel();
+    _rtSub?.cancel();
+    _rt.close();
+    super.dispose();
+  }
+
+  void _subscribeRealtimeForBadge() {
+    _rtSub?.cancel();
+    _rtSub = _rt.events.listen((ev) {
+      if (ev.type != 'booking.changed') return;
+
+      final loc = widget.session.locationId.trim();
+      if (loc.isEmpty) return;
+      if (ev.locationId.trim() != loc) return;
+
+      _rtDebounce?.cancel();
+      _rtDebounce = Timer(const Duration(milliseconds: 300), () {
+        if (!mounted) return;
+        _loadWaitlistCount();
+      });
+    });
+  }
+
+  Future<void> _loadWaitlistCount() async {
+    if (_loadingWaitlistCount) return;
+
+    setState(() => _loadingWaitlistCount = true);
+
+    try {
+      final sid = widget.session.activeShiftId ?? '';
+      if (sid.isEmpty) return;
+
+      final wl = await widget.api.waitlistDay(
+        widget.session.userId,
+        sid,
+        _todayYmd,
+      );
+
+      if (!mounted) return;
+      setState(() => waitlistCount = wl.length);
+    } catch (_) {
+      // ignore badge errors
+    } finally {
+      if (mounted) setState(() => _loadingWaitlistCount = false);
+    }
+  }
+
+  Widget _queueIconWithBadge() {
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        const Icon(Icons.queue),
+        if (waitlistCount > 0)
+          Positioned(
+            right: -10,
+            top: -6,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.red,
+                borderRadius: BorderRadius.circular(999),
+              ),
+              constraints: const BoxConstraints(minWidth: 18),
+              child: Text(
+                waitlistCount > 99 ? '99+' : waitlistCount.toString(),
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: IndexedStack(
         index: idx,
         children: [
-          ShiftTab(
-            api: widget.api,
-            store: widget.store,
-            session: widget.session,
-          ),
-          BaysTab(
-            api: widget.api,
-            store: widget.store,
-            session: widget.session,
-          ),
-          WaitlistTab(
-            api: widget.api,
-            store: widget.store,
-            session: widget.session,
-          ),
+          ShiftTab(api: widget.api, store: widget.store, session: widget.session),
+          BaysTab(api: widget.api, store: widget.store, session: widget.session),
+          WaitlistTab(api: widget.api, store: widget.store, session: widget.session),
         ],
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: idx,
-        onDestinationSelected: (v) => setState(() => idx = v),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.event_note), label: 'Смена'),
-          NavigationDestination(icon: Icon(Icons.car_repair), label: 'Посты'),
-          NavigationDestination(icon: Icon(Icons.queue), label: 'Ожидание'),
+        onDestinationSelected: (v) {
+          setState(() => idx = v);
+          if (v == 2) _loadWaitlistCount(); // refresh badge when entering waitlist
+        },
+        destinations: [
+          const NavigationDestination(icon: Icon(Icons.event_note), label: 'Смена'),
+          const NavigationDestination(icon: Icon(Icons.car_repair), label: 'Посты'),
+          NavigationDestination(icon: _queueIconWithBadge(), label: 'Ожидание'),
         ],
       ),
     );
@@ -92,16 +186,13 @@ class _ShiftTabState extends State<ShiftTab> {
   List<dynamic> bookings = [];
   DateTime selectedDay = DateTime.now();
 
-  // realtime
   late final RealtimeClient _rt;
   StreamSubscription<BookingRealtimeEvent>? _rtSub;
   Timer? _rtDebounce;
 
-  // Dispatcher tabs: Bay 1 / Bay 2
   int bayTab = 0; // 0 => bay 1, 1 => bay 2
 
-  bool get cashEnabled =>
-      widget.session.featureOn('CASH_DRAWER', defaultValue: true);
+  bool get cashEnabled => widget.session.featureOn('CASH_DRAWER', defaultValue: true);
 
   String get ymd => DateFormat('yyyy-MM-dd').format(selectedDay);
 
@@ -158,11 +249,7 @@ class _ShiftTabState extends State<ShiftTab> {
       final sid = widget.session.activeShiftId ?? '';
       if (sid.isEmpty) throw Exception('Нет активной смены. Перезайди.');
 
-      final list = await widget.api.calendarDay(
-        widget.session.userId,
-        sid,
-        ymd,
-      );
+      final list = await widget.api.calendarDay(widget.session.userId, sid, ymd);
 
       if (!mounted) return;
       setState(() => bookings = list);
@@ -226,7 +313,6 @@ class _ShiftTabState extends State<ShiftTab> {
         return Icons.receipt_long;
     }
   }
-
   Future<void> closeShiftNoCash() async {
     final userId = widget.session.userId;
     final shiftId = widget.session.activeShiftId ?? '';
@@ -281,21 +367,15 @@ class _ShiftTabState extends State<ShiftTab> {
                     children: [
                       Row(
                         children: [
-                          const Expanded(
-                            child: Text('Ожидаемая сумма наличных'),
-                          ),
-                          Text(
-                            '$expectedRub ₽',
-                            style: const TextStyle(fontWeight: FontWeight.w800),
-                          ),
+                          const Expanded(child: Text('Ожидаемая сумма наличных')),
+                          Text('$expectedRub ₽',
+                              style: const TextStyle(fontWeight: FontWeight.w800)),
                         ],
                       ),
                       const SizedBox(height: 8),
                       Row(
                         children: [
-                          const Expanded(
-                            child: Text('Разница (факт - ожидаемая)'),
-                          ),
+                          const Expanded(child: Text('Разница (факт - ожидаемая)')),
                           Text(
                             '${diff >= 0 ? '+' : ''}$diff ₽',
                             style: TextStyle(
@@ -411,10 +491,8 @@ class _ShiftTabState extends State<ShiftTab> {
       }
     }
     out.sort((a, b) {
-      final ad =
-          DateTime.tryParse((a['dateTime'] ?? '').toString()) ?? DateTime(1970);
-      final bd =
-          DateTime.tryParse((b['dateTime'] ?? '').toString()) ?? DateTime(1970);
+      final ad = DateTime.tryParse((a['dateTime'] ?? '').toString()) ?? DateTime(1970);
+      final bd = DateTime.tryParse((b['dateTime'] ?? '').toString()) ?? DateTime(1970);
       return ad.compareTo(bd);
     });
     return out;
@@ -437,14 +515,10 @@ class _ShiftTabState extends State<ShiftTab> {
             duration: const Duration(milliseconds: 180),
             padding: const EdgeInsets.symmetric(vertical: 10),
             decoration: BoxDecoration(
-              color: selected
-                  ? cs.surface
-                  : cs.surfaceContainerHighest.withValues(alpha: 0.55),
+              color: selected ? cs.surface : cs.surfaceContainerHighest.withValues(alpha: 0.55),
               borderRadius: BorderRadius.circular(14),
               border: Border.all(
-                color: selected
-                    ? cs.outlineVariant.withValues(alpha: 0.7)
-                    : cs.outlineVariant.withValues(alpha: 0.35),
+                color: selected ? cs.outlineVariant.withValues(alpha: 0.7) : cs.outlineVariant.withValues(alpha: 0.35),
               ),
               boxShadow: selected
                   ? [
@@ -462,9 +536,7 @@ class _ShiftTabState extends State<ShiftTab> {
                   label,
                   style: TextStyle(
                     fontWeight: FontWeight.w900,
-                    color: selected
-                        ? cs.onSurface
-                        : cs.onSurface.withValues(alpha: 0.75),
+                    color: selected ? cs.onSurface : cs.onSurface.withValues(alpha: 0.75),
                   ),
                 ),
                 const SizedBox(height: 6),
@@ -473,9 +545,7 @@ class _ShiftTabState extends State<ShiftTab> {
                   height: 3,
                   width: 46,
                   decoration: BoxDecoration(
-                    color: selected
-                        ? indicatorColor(index)
-                        : Colors.transparent,
+                    color: selected ? indicatorColor(index) : Colors.transparent,
                     borderRadius: BorderRadius.circular(999),
                   ),
                 ),
@@ -529,9 +599,7 @@ class _ShiftTabState extends State<ShiftTab> {
 
     final clientName = b['client']?['name']?.toString();
     final clientPhone = b['client']?['phone']?.toString();
-    final clientTitle = (clientName != null && clientName.isNotEmpty)
-        ? clientName
-        : (clientPhone ?? '');
+    final clientTitle = (clientName != null && clientName.isNotEmpty) ? clientName : (clientPhone ?? '');
 
     final carLine = _buildCarLineFromBooking(b);
 
@@ -581,23 +649,11 @@ class _ShiftTabState extends State<ShiftTab> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    time,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w900,
-                      fontSize: 15,
-                    ),
-                  ),
+                  Text(time, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
                   const SizedBox(height: 4),
-                  Text(
-                    serviceName,
-                    style: const TextStyle(fontWeight: FontWeight.w800),
-                  ),
+                  Text(serviceName, style: const TextStyle(fontWeight: FontWeight.w800)),
                   const SizedBox(height: 10),
-                  Text(
-                    clientTitle,
-                    style: const TextStyle(fontWeight: FontWeight.w900),
-                  ),
+                  Text(clientTitle, style: const TextStyle(fontWeight: FontWeight.w900)),
                   if (carLine.isNotEmpty) ...[
                     const SizedBox(height: 4),
                     Text(
@@ -618,29 +674,16 @@ class _ShiftTabState extends State<ShiftTab> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Text(
-                    'Пост $bayId',
-                    style: const TextStyle(fontWeight: FontWeight.w900),
-                  ),
+                  Text('Пост $bayId', style: const TextStyle(fontWeight: FontWeight.w900)),
                   const SizedBox(height: 10),
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
-                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     decoration: BoxDecoration(
                       color: stColor.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(color: stColor),
                     ),
-                    child: Text(
-                      st,
-                      style: TextStyle(
-                        color: stColor,
-                        fontWeight: FontWeight.w900,
-                        fontSize: 12,
-                      ),
-                    ),
+                    child: Text(st, style: TextStyle(color: stColor, fontWeight: FontWeight.w900, fontSize: 12)),
                   ),
                 ],
               ),
@@ -651,10 +694,7 @@ class _ShiftTabState extends State<ShiftTab> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Text(
-                    psRu,
-                    style: const TextStyle(fontWeight: FontWeight.w900),
-                  ),
+                  Text(psRu, style: const TextStyle(fontWeight: FontWeight.w900)),
                   const SizedBox(height: 8),
                   Text(
                     'Оплачено: $paid ₽\nК оплате: $toPay ₽',
@@ -675,13 +715,7 @@ class _ShiftTabState extends State<ShiftTab> {
                         for (final x in badges)
                           Chip(
                             avatar: Icon(payIcon(x), size: 18),
-                            label: Text(
-                              x == 'CARD'
-                                  ? 'Карта'
-                                  : x == 'CASH'
-                                  ? 'Наличные'
-                                  : 'Контракт',
-                            ),
+                            label: Text(x == 'CARD' ? 'Карта' : x == 'CASH' ? 'Наличные' : 'Контракт'),
                             visualDensity: VisualDensity.compact,
                           ),
                       ],
@@ -705,11 +739,7 @@ class _ShiftTabState extends State<ShiftTab> {
       appBar: AppBar(
         title: Text(ruTitle()),
         actions: [
-          IconButton(
-            tooltip: 'Вчера',
-            onPressed: () => shiftDay(-1),
-            icon: const Icon(Icons.chevron_left),
-          ),
+          IconButton(tooltip: 'Вчера', onPressed: () => shiftDay(-1), icon: const Icon(Icons.chevron_left)),
           IconButton(
             tooltip: 'Сегодня',
             onPressed: () {
@@ -718,11 +748,7 @@ class _ShiftTabState extends State<ShiftTab> {
             },
             icon: const Icon(Icons.today),
           ),
-          IconButton(
-            tooltip: 'Завтра',
-            onPressed: () => shiftDay(1),
-            icon: const Icon(Icons.chevron_right),
-          ),
+          IconButton(tooltip: 'Завтра', onPressed: () => shiftDay(1), icon: const Icon(Icons.chevron_right)),
           IconButton(icon: const Icon(Icons.refresh), onPressed: load),
           TextButton(onPressed: closeShift, child: const Text('Закрыть смену')),
           const SizedBox(width: 8),
@@ -735,28 +761,15 @@ class _ShiftTabState extends State<ShiftTab> {
             child: loading
                 ? const Center(child: CircularProgressIndicator())
                 : (error != null)
-                ? Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Text(
-                        error!,
-                        style: const TextStyle(color: Colors.red),
-                      ),
-                    ),
-                  )
-                : list.isEmpty
-                ? Center(
-                    child: Text(
-                      'Нет записей на Пост $bayId',
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                  )
-                : ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                    itemCount: list.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 10),
-                    itemBuilder: (context, i) => _bookingCard(context, list[i]),
-                  ),
+                    ? Center(child: Padding(padding: const EdgeInsets.all(16), child: Text(error!, style: const TextStyle(color: Colors.red))))
+                    : list.isEmpty
+                        ? Center(child: Text('Нет записей на Пост $bayId', style: const TextStyle(fontWeight: FontWeight.w700)))
+                        : ListView.separated(
+                            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                            itemCount: list.length,
+                            separatorBuilder: (_, _) => const SizedBox(height: 10),
+                            itemBuilder: (context, i) => _bookingCard(context, list[i]),
+                          ),
           ),
         ],
       ),
@@ -829,7 +842,6 @@ class _BaysTabState extends State<BaysTab> {
       if (mounted) setState(() => loading = false);
     }
   }
-
   Future<void> toggleBay(int bayNumber) async {
     final isOpen = bayIsActive[bayNumber] ?? true;
     final uid = widget.session.userId;
@@ -846,19 +858,11 @@ class _BaysTabState extends State<BaysTab> {
             title: Text('Закрыть пост $bayNumber'),
             content: TextField(
               controller: ctrl,
-              decoration: const InputDecoration(
-                labelText: 'Причина (обязательно)',
-              ),
+              decoration: const InputDecoration(labelText: 'Причина (обязательно)'),
             ),
             actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(false),
-                child: const Text('Отмена'),
-              ),
-              ElevatedButton(
-                onPressed: () => Navigator.of(ctx).pop(true),
-                child: const Text('Закрыть'),
-              ),
+              TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Отмена')),
+              ElevatedButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Закрыть')),
             ],
           ),
         );
@@ -870,20 +874,9 @@ class _BaysTabState extends State<BaysTab> {
           return;
         }
 
-        await widget.api.setBayActive(
-          uid,
-          sid,
-          bayNumber: bayNumber,
-          isActive: false,
-          reason: reason,
-        );
+        await widget.api.setBayActive(uid, sid, bayNumber: bayNumber, isActive: false, reason: reason);
       } else {
-        await widget.api.setBayActive(
-          uid,
-          sid,
-          bayNumber: bayNumber,
-          isActive: true,
-        );
+        await widget.api.setBayActive(uid, sid, bayNumber: bayNumber, isActive: true);
       }
 
       await loadBays();
@@ -905,16 +898,8 @@ class _BaysTabState extends State<BaysTab> {
     final btnIcon = isOpen ? Icons.lock : Icons.lock_open;
 
     final button = isOpen
-        ? OutlinedButton.icon(
-            onPressed: loading ? null : () => toggleBay(bayNumber),
-            icon: Icon(btnIcon),
-            label: Text(btnText),
-          )
-        : FilledButton.icon(
-            onPressed: loading ? null : () => toggleBay(bayNumber),
-            icon: Icon(btnIcon),
-            label: Text(btnText),
-          );
+        ? OutlinedButton.icon(onPressed: loading ? null : () => toggleBay(bayNumber), icon: Icon(btnIcon), label: Text(btnText))
+        : FilledButton.icon(onPressed: loading ? null : () => toggleBay(bayNumber), icon: Icon(btnIcon), label: Text(btnText));
 
     return Expanded(
       child: Container(
@@ -924,32 +909,19 @@ class _BaysTabState extends State<BaysTab> {
           borderRadius: BorderRadius.circular(18),
           border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
           boxShadow: [
-            BoxShadow(
-              blurRadius: 10,
-              offset: const Offset(0, 6),
-              color: Colors.black.withValues(alpha: 0.04),
-            ),
+            BoxShadow(blurRadius: 10, offset: const Offset(0, 6), color: Colors.black.withValues(alpha: 0.04)),
           ],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Пост $bayNumber',
-              style: const TextStyle(fontWeight: FontWeight.w900),
-            ),
+            Text('Пост $bayNumber', style: const TextStyle(fontWeight: FontWeight.w900)),
             const SizedBox(height: 10),
             Row(
               children: [
                 Icon(statusIcon, color: statusColor),
                 const SizedBox(width: 8),
-                Text(
-                  statusText,
-                  style: TextStyle(
-                    fontWeight: FontWeight.w900,
-                    color: statusColor,
-                  ),
-                ),
+                Text(statusText, style: TextStyle(fontWeight: FontWeight.w900, color: statusColor)),
               ],
             ),
             const SizedBox(height: 12),
@@ -973,18 +945,11 @@ class _BaysTabState extends State<BaysTab> {
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : (error != null)
-          ? Center(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Text(error!, style: const TextStyle(color: Colors.red)),
-              ),
-            )
-          : Padding(
-              padding: const EdgeInsets.all(12),
-              child: Row(
-                children: [bayCard(1), const SizedBox(width: 10), bayCard(2)],
-              ),
-            ),
+              ? Center(child: Padding(padding: const EdgeInsets.all(16), child: Text(error!, style: const TextStyle(color: Colors.red))))
+              : Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(children: [bayCard(1), const SizedBox(width: 10), bayCard(2)]),
+                ),
     );
   }
 }
@@ -1014,10 +979,15 @@ class _WaitlistTabState extends State<WaitlistTab> {
   List<dynamic> waitlist = [];
   DateTime selectedDay = DateTime.now();
 
-  // realtime
   late final RealtimeClient _rt;
   StreamSubscription<BookingRealtimeEvent>? _rtSub;
   Timer? _rtDebounce;
+
+  // slot rules (align with server)
+  static const int _slotStepMin = 30;
+  static const int _bufferMin = 15;
+  static const int _openHour = 8;
+  static const int _closeHour = 22;
 
   String get ymd => DateFormat('yyyy-MM-dd').format(selectedDay);
 
@@ -1095,6 +1065,151 @@ class _WaitlistTabState extends State<WaitlistTab> {
     return DateFormat('HH:mm').format(dt);
   }
 
+  // ✅ new day chips + sections (Yandex-ish)
+  String _weekdayShortRu(int weekday) {
+    switch (weekday) {
+      case DateTime.monday:
+        return 'ПН';
+      case DateTime.tuesday:
+        return 'ВТ';
+      case DateTime.wednesday:
+        return 'СР';
+      case DateTime.thursday:
+        return 'ЧТ';
+      case DateTime.friday:
+        return 'ПТ';
+      case DateTime.saturday:
+        return 'СБ';
+      case DateTime.sunday:
+        return 'ВС';
+    }
+    return '';
+  }
+
+  Widget _sectionBox(BuildContext ctx, {required String title, required Widget child}) {
+    final cs = Theme.of(ctx).colorScheme;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: TextStyle(fontWeight: FontWeight.w900, color: cs.onSurface.withValues(alpha: 0.9))),
+          const SizedBox(height: 10),
+          child,
+        ],
+      ),
+    );
+  }
+
+  Widget _dayChip(BuildContext ctx, DateTime d, {required bool selected}) {
+    final cs = Theme.of(ctx).colorScheme;
+    final bg = selected ? cs.primary.withValues(alpha: 0.18) : cs.surfaceContainerHighest.withValues(alpha: 0.18);
+    final border = selected ? cs.primary.withValues(alpha: 0.65) : cs.outlineVariant.withValues(alpha: 0.55);
+    final label = '${_weekdayShortRu(d.weekday)} ${d.day}';
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: border),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(fontWeight: FontWeight.w900, color: cs.onSurface.withValues(alpha: 0.92)),
+      ),
+    );
+  }
+
+  Widget _timeSlotBtn(BuildContext ctx, DateTime s, {required bool selected, required VoidCallback onTap, required bool disabled}) {
+    final cs = Theme.of(ctx).colorScheme;
+    final label = DateFormat('HH:mm').format(s);
+
+    if (selected) {
+      return FilledButton(
+        onPressed: disabled ? null : onTap,
+        style: FilledButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          shape: const StadiumBorder(),
+        ),
+        child: Text(label, style: const TextStyle(fontWeight: FontWeight.w900)),
+      );
+    }
+
+    return OutlinedButton(
+      onPressed: disabled ? null : onTap,
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        shape: const StadiumBorder(),
+        side: BorderSide(color: cs.outlineVariant.withValues(alpha: 0.8)),
+      ),
+      child: Text(label, style: const TextStyle(fontWeight: FontWeight.w900)),
+    );
+  }
+
+  DateTime _dateOnly(DateTime dt) => DateTime(dt.year, dt.month, dt.day);
+
+  int _roundUpToStepMin(int totalMin, int stepMin) {
+    if (totalMin <= 0) return 0;
+    final q = (totalMin + stepMin - 1) ~/ stepMin;
+    return q * stepMin;
+  }
+
+  // ✅ FIX: TODAY => not show slots in the past
+  List<DateTime> _buildSlotsForDay(DateTime day) {
+    final now = DateTime.now();
+
+    var start = DateTime(day.year, day.month, day.day, _openHour, 0);
+    final end = DateTime(day.year, day.month, day.day, _closeHour, 0);
+
+    final isToday = day.year == now.year && day.month == now.month && day.day == now.day;
+
+    if (isToday) {
+      final min = now.add(const Duration(minutes: 5));
+      final mod = min.minute % _slotStepMin;
+      final add = mod == 0 ? 0 : (_slotStepMin - mod);
+
+      final rounded = DateTime(min.year, min.month, min.day, min.hour, min.minute).add(Duration(minutes: add));
+      if (rounded.isAfter(start)) start = rounded;
+    }
+
+    if (!start.isBefore(end)) return const [];
+
+    final out = <DateTime>[];
+    var cur = start;
+    while (cur.isBefore(end)) {
+      out.add(cur);
+      cur = cur.add(const Duration(minutes: _slotStepMin));
+    }
+    return out;
+  }
+
+  bool _overlaps(DateTime aStart, DateTime aEnd, DateTime bStart, DateTime bEnd) {
+    return aStart.isBefore(bEnd) && bStart.isBefore(aEnd);
+  }
+
+  List<DateTimeRange> _parseBusyRanges(List<dynamic> rows) {
+    final out = <DateTimeRange>[];
+    for (final x in rows) {
+      if (x is Map) {
+        final s = x['start']?.toString() ?? '';
+        final e = x['end']?.toString() ?? '';
+        final ds = DateTime.tryParse(s);
+        final de = DateTime.tryParse(e);
+        if (ds != null && de != null) {
+          out.add(DateTimeRange(start: ds.toLocal(), end: de.toLocal()));
+        }
+      }
+    }
+    return out;
+  }
+
   String _buildCarLineFromWaitlist(Map<String, dynamic> w) {
     final plate = (w['car']?['plateDisplay'] ?? '').toString().trim();
     final make = (w['car']?['makeDisplay'] ?? '').toString().trim();
@@ -1115,11 +1230,9 @@ class _WaitlistTabState extends State<WaitlistTab> {
     if (r.isEmpty) return '—';
 
     final up = r.toUpperCase();
-
     if (up.contains('ALL_BAYS_CLOSED')) return 'Все посты закрыты';
     if (up.contains('BAY_CLOSED')) return 'Пост закрыт';
 
-    // Если причина уже человеческая ("Авария", "Тех.перерыв") — показываем как есть.
     return r;
   }
 
@@ -1133,24 +1246,363 @@ class _WaitlistTabState extends State<WaitlistTab> {
     await Clipboard.setData(ClipboardData(text: p));
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Номер скопирован'),
-        behavior: SnackBarBehavior.floating,
-      ),
+      const SnackBar(content: Text('Номер скопирован'), behavior: SnackBarBehavior.floating),
     );
   }
 
-  // “по диспетчерски”: копируем и подсказываем
   Future<void> _dispatcherCall(String phone) async {
     final p = phone.trim();
     if (p.isEmpty) return;
     await _copyPhone(p);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Номер скопирован. Вставь в телефон для звонка.'),
-        behavior: SnackBarBehavior.floating,
+      const SnackBar(content: Text('Номер скопирован. Вставь в телефон для звонка.'), behavior: SnackBarBehavior.floating),
+    );
+  }
+
+  // ✅ NEW: delete waitlist from UI (with reason + audit on backend)
+  Future<void> _deleteWaitlist(Map<String, dynamic> w, {required BuildContext sheetCtx}) async {
+    final sid = widget.session.activeShiftId ?? '';
+    if (sid.isEmpty) return;
+
+    final wid = (w['id'] ?? '').toString().trim();
+    if (wid.isEmpty) return;
+
+    final reasonCtrl = TextEditingController(text: 'Клиент не отвечает');
+    final ok = await showDialog<bool>(
+      context: sheetCtx,
+      barrierDismissible: false,
+      builder: (dctx) => AlertDialog(
+        title: const Text('Удалить из ожидания?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Запись будет скрыта из WAITING и попадёт в аудит.'),
+            const SizedBox(height: 12),
+            TextField(
+              controller: reasonCtrl,
+              decoration: const InputDecoration(labelText: 'Причина (обязательно)'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(dctx).pop(false), child: const Text('Отмена')),
+          ElevatedButton(
+            onPressed: () => Navigator.of(dctx).pop(true),
+            child: const Text('Удалить'),
+          ),
+        ],
       ),
+    );
+
+    if (ok != true) return;
+
+    final reason = reasonCtrl.text.trim();
+    if (reason.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Причина обязательна'), behavior: SnackBarBehavior.floating),
+      );
+      return;
+    }
+
+    try {
+      setState(() => loading = true);
+
+      await widget.api.deleteWaitlist(
+        widget.session.userId,
+        sid,
+        wid,
+        reason: reason,
+      );
+
+      if (!mounted) return;
+
+      // закрываем sheet
+      Navigator.of(sheetCtx).pop();
+
+      // обновляем список
+      await load();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Удалено из ожидания'), behavior: SnackBarBehavior.floating),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Ошибка: $e'), behavior: SnackBarBehavior.floating),
+      );
+    } finally {
+      if (mounted) setState(() => loading = false);
+    }
+  }
+
+  Future<void> _openConvertToQueueSheet(Map<String, dynamic> w) async {
+    final sid = widget.session.activeShiftId ?? '';
+    if (sid.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Нет активной смены. Перезайди.')));
+      return;
+    }
+
+    // запрет если все посты закрыты
+    final bays = await widget.api.listBays(widget.session.userId, sid);
+    final activeBays = <int>[];
+    for (final x in bays) {
+      if (x is Map<String, dynamic>) {
+        final n = (x['number'] as num?)?.toInt();
+        final a = x['isActive'] == true;
+        if (n != null && a && (n == 1 || n == 2)) activeBays.add(n);
+      }
+    }
+
+    if (activeBays.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Посты закрыты. Открой пост, чтобы поставить в очередь.'), behavior: SnackBarBehavior.floating),
+      );
+      return;
+    }
+
+    final waitlistId = (w['id'] ?? '').toString().trim();
+    if (waitlistId.isEmpty) return;
+
+    final locId = widget.session.locationId.trim();
+    if (locId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Нет locationId в сессии.')));
+      return;
+    }
+
+    // длительность слота: service.duration + buffer, округляем вверх до 30
+    final dur = (w['service']?['durationMin'] as num?)?.toInt() ?? 30;
+    final blockMin = _roundUpToStepMin(dur + _bufferMin, _slotStepMin);
+
+    DateTime selectedDayLocal = _dateOnly(DateTime.now());
+    int selectedBay = activeBays.first;
+    DateTime? selectedSlot;
+
+    List<DateTimeRange> busy = const [];
+
+    Future<void> loadBusy() async {
+      final from = DateTime(selectedDayLocal.year, selectedDayLocal.month, selectedDayLocal.day, _openHour, 0);
+      final to = DateTime(selectedDayLocal.year, selectedDayLocal.month, selectedDayLocal.day, _closeHour, 0);
+
+      final rows = await widget.api.publicBusySlots(
+        locationId: locId,
+        bayId: selectedBay,
+        fromIsoUtc: from.toUtc().toIso8601String(),
+        toIsoUtc: to.toUtc().toIso8601String(),
+      );
+
+      busy = _parseBusyRanges(rows);
+    }
+
+    bool isFree(DateTime start) {
+      final end = start.add(Duration(minutes: blockMin));
+      for (final r in busy) {
+        if (_overlaps(start, end, r.start, r.end)) return false;
+      }
+      return true;
+    }
+
+    List<DateTime> freeSlots() {
+      final all = _buildSlotsForDay(selectedDayLocal);
+      return all.where(isFree).toList();
+    }
+
+    await loadBusy();
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) {
+        bool converting = false;
+        bool loadingSlots = false;
+
+        Future<void> refresh(StateSetter setSheet) async {
+          setSheet(() => loadingSlots = true);
+          try {
+            await loadBusy();
+            if (selectedSlot != null && !isFree(selectedSlot!)) {
+              selectedSlot = null;
+            }
+          } catch (_) {
+            // ignore
+          } finally {
+            setSheet(() => loadingSlots = false);
+          }
+        }
+
+        Future<void> convert(BuildContext ctx, StateSetter setSheet) async {
+          if (converting) return;
+          if (selectedSlot == null) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Выбери время.')));
+            return;
+          }
+
+          setSheet(() => converting = true);
+
+          try {
+            await widget.api.convertWaitlistToBooking(
+              widget.session.userId,
+              sid,
+              waitlistId,
+              bayId: selectedBay,
+              dateTimeIso: selectedSlot!.toUtc().toIso8601String(),
+            );
+
+            if (!mounted) return;
+            Navigator.of(ctx).pop(); // close convert sheet
+            await load();
+          } catch (e) {
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
+          } finally {
+            setSheet(() => converting = false);
+          }
+        }
+
+        return SafeArea(
+          child: StatefulBuilder(
+            builder: (ctx, setSheet) {
+              final cs = Theme.of(ctx).colorScheme;
+              final slots = freeSlots();
+              final days = List.generate(7, (i) => _dateOnly(DateTime.now().add(Duration(days: i))));
+
+              return Padding(
+                padding: EdgeInsets.only(left: 16, right: 16, top: 10, bottom: 16 + MediaQuery.of(ctx).viewInsets.bottom),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text('В очередь', style: Theme.of(ctx).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900)),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+
+                    Row(
+                      children: [
+                        Expanded(
+                          child: DropdownButtonFormField<int>(
+                            initialValue: selectedBay,
+                            decoration: const InputDecoration(labelText: 'Пост'),
+                            items: [for (final b in activeBays) DropdownMenuItem(value: b, child: Text('Пост $b'))],
+                            onChanged: (loadingSlots || converting)
+                                ? null
+                                : (v) async {
+                                    selectedBay = v ?? activeBays.first;
+                                    selectedSlot = null;
+                                    await refresh(setSheet);
+                                  },
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
+                            color: cs.surfaceContainerHighest.withValues(alpha: 0.14),
+                          ),
+                          child: Text('Слот: $blockMin мин', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12)),
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    _sectionBox(
+                      ctx,
+                      title: 'Дата',
+                      child: SizedBox(
+                        height: 44,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: days.length,
+                          separatorBuilder: (_, _) => const SizedBox(width: 10),
+                          itemBuilder: (_, i) {
+                            final d = days[i];
+                            final selected = _dateOnly(d) == selectedDayLocal;
+
+                            return InkWell(
+                              borderRadius: BorderRadius.circular(999),
+                              onTap: (loadingSlots || converting)
+                                  ? null
+                                  : () async {
+                                      selectedDayLocal = _dateOnly(d);
+                                      selectedSlot = null;
+                                      await refresh(setSheet);
+                                    },
+                              child: _dayChip(ctx, d, selected: selected),
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    _sectionBox(
+                      ctx,
+                      title: 'Время',
+                      child: () {
+                        if (loadingSlots) {
+                          return const Padding(
+                            padding: EdgeInsets.all(12),
+                            child: Center(child: CircularProgressIndicator()),
+                          );
+                        }
+                        if (slots.isEmpty) {
+                          return Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Text(
+                              'Нет доступных слотов на выбранный день.',
+                              style: TextStyle(color: cs.onSurface.withValues(alpha: 0.75), fontWeight: FontWeight.w700),
+                            ),
+                          );
+                        }
+
+                        return Align(
+                          alignment: Alignment.centerLeft,
+                          child: Wrap(
+                            spacing: 10,
+                            runSpacing: 10,
+                            children: [
+                              for (final s in slots)
+                                _timeSlotBtn(
+                                  ctx,
+                                  s,
+                                  selected: selectedSlot == s,
+                                  disabled: converting,
+                                  onTap: () => setSheet(() => selectedSlot = s),
+                                ),
+                            ],
+                          ),
+                        );
+                      }(),
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: (loadingSlots || converting) ? null : () => convert(ctx, setSheet),
+                        icon: converting
+                            ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                            : const Icon(Icons.done),
+                        label: Text(converting ? 'Создаю...' : 'Создать запись'),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                ),
+              );
+            },
+          ),
+        );
+      },
     );
   }
 
@@ -1165,10 +1617,7 @@ class _WaitlistTabState extends State<WaitlistTab> {
 
     final clientName = (w['client']?['name'] ?? '').toString().trim();
     final clientPhone = _phoneFromWaitlist(w);
-
-    final clientTitle = clientName.isNotEmpty
-        ? clientName
-        : (clientPhone.isNotEmpty ? clientPhone : 'Клиент');
+    final clientTitle = clientName.isNotEmpty ? clientName : (clientPhone.isNotEmpty ? clientPhone : 'Клиент');
 
     final carLine = _buildCarLineFromWaitlist(w);
 
@@ -1181,7 +1630,7 @@ class _WaitlistTabState extends State<WaitlistTab> {
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (_) {
+      builder: (sheetCtx) {
         return SafeArea(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
@@ -1193,56 +1642,38 @@ class _WaitlistTabState extends State<WaitlistTab> {
                     Expanded(
                       child: Text(
                         'Ожидание • $time • Пост ${bay.isEmpty ? '—' : bay}',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w900,
-                          fontSize: 14,
-                        ),
+                        style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14),
                       ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 10),
 
-                // карточка инфо
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
                     color: cs.surface,
                     borderRadius: BorderRadius.circular(18),
-                    border: Border.all(
-                      color: cs.outlineVariant.withValues(alpha: 0.6),
-                    ),
+                    border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        serviceName,
-                        style: const TextStyle(fontWeight: FontWeight.w900),
-                      ),
+                      Text(serviceName, style: const TextStyle(fontWeight: FontWeight.w900)),
                       const SizedBox(height: 8),
-                      Text(
-                        clientTitle,
-                        style: const TextStyle(fontWeight: FontWeight.w800),
-                      ),
+                      Text(clientTitle, style: const TextStyle(fontWeight: FontWeight.w800)),
                       if (carLine.isNotEmpty) ...[
                         const SizedBox(height: 6),
                         Text(
                           carLine,
-                          style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            color: cs.onSurface.withValues(alpha: 0.75),
-                          ),
+                          style: TextStyle(fontWeight: FontWeight.w700, color: cs.onSurface.withValues(alpha: 0.75)),
                         ),
                       ],
                       const SizedBox(height: 10),
                       Text(
                         'Причина: $reason',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w700,
-                          color: cs.onSurface.withValues(alpha: 0.75),
-                        ),
+                        style: TextStyle(fontWeight: FontWeight.w700, color: cs.onSurface.withValues(alpha: 0.75)),
                       ),
                     ],
                   ),
@@ -1250,44 +1681,29 @@ class _WaitlistTabState extends State<WaitlistTab> {
 
                 const SizedBox(height: 12),
 
-                // телефон крупно + кнопки “диспетчер”
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
                     color: cs.surface,
                     borderRadius: BorderRadius.circular(18),
-                    border: Border.all(
-                      color: cs.outlineVariant.withValues(alpha: 0.6),
-                    ),
+                    border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        'Телефон',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w800,
-                          color: cs.onSurface.withValues(alpha: 0.7),
-                        ),
-                      ),
+                      Text('Телефон', style: TextStyle(fontWeight: FontWeight.w800, color: cs.onSurface.withValues(alpha: 0.7))),
                       const SizedBox(height: 8),
                       SelectableText(
                         hasPhone ? clientPhone : '—',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w900,
-                          fontSize: 22,
-                          letterSpacing: 0.2,
-                        ),
+                        style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 22, letterSpacing: 0.2),
                       ),
                       const SizedBox(height: 12),
                       Row(
                         children: [
                           Expanded(
                             child: FilledButton.icon(
-                              onPressed: hasPhone
-                                  ? () => _copyPhone(clientPhone)
-                                  : null,
+                              onPressed: hasPhone ? () => _copyPhone(clientPhone) : null,
                               icon: const Icon(Icons.copy),
                               label: const Text('Скопировать'),
                             ),
@@ -1295,9 +1711,7 @@ class _WaitlistTabState extends State<WaitlistTab> {
                           const SizedBox(width: 10),
                           Expanded(
                             child: OutlinedButton.icon(
-                              onPressed: hasPhone
-                                  ? () => Share.share(clientPhone)
-                                  : null,
+                              onPressed: hasPhone ? () => Share.share(clientPhone) : null,
                               icon: const Icon(Icons.share),
                               label: const Text('Поделиться'),
                             ),
@@ -1308,9 +1722,7 @@ class _WaitlistTabState extends State<WaitlistTab> {
                       SizedBox(
                         width: double.infinity,
                         child: OutlinedButton.icon(
-                          onPressed: hasPhone
-                              ? () => _dispatcherCall(clientPhone)
-                              : null,
+                          onPressed: hasPhone ? () => _dispatcherCall(clientPhone) : null,
                           icon: const Icon(Icons.phone),
                           label: const Text('Позвонить'),
                         ),
@@ -1319,11 +1731,38 @@ class _WaitlistTabState extends State<WaitlistTab> {
                   ),
                 ),
 
-                const SizedBox(height: 8),
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Закрыть'),
+                const SizedBox(height: 12),
+
+                // ✅ ACTIONS: "В очередь" + "Удалить"
+                Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: loading
+                            ? null
+                            : () async {
+                                Navigator.of(sheetCtx).pop();
+                                await Future<void>.delayed(const Duration(milliseconds: 150));
+                                if (!mounted) return;
+                                await _openConvertToQueueSheet(w);
+                              },
+                        icon: const Icon(Icons.playlist_add),
+                        label: const Text('В очередь'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: loading ? null : () => _deleteWaitlist(w, sheetCtx: sheetCtx),
+                        icon: const Icon(Icons.delete_outline),
+                        label: const Text('Удалить'),
+                      ),
+                    ),
+                  ],
                 ),
+
+                const SizedBox(height: 8),
+                TextButton(onPressed: () => Navigator.of(sheetCtx).pop(), child: const Text('Закрыть')),
               ],
             ),
           ),
@@ -1343,10 +1782,7 @@ class _WaitlistTabState extends State<WaitlistTab> {
 
     final clientName = (w['client']?['name'] ?? '').toString().trim();
     final clientPhone = _phoneFromWaitlist(w);
-
-    final clientTitle = clientName.isNotEmpty
-        ? clientName
-        : (clientPhone.isNotEmpty ? clientPhone : 'Клиент');
+    final clientTitle = clientName.isNotEmpty ? clientName : (clientPhone.isNotEmpty ? clientPhone : 'Клиент');
 
     final carLine = _buildCarLineFromWaitlist(w);
 
@@ -1363,43 +1799,24 @@ class _WaitlistTabState extends State<WaitlistTab> {
           borderRadius: BorderRadius.circular(18),
           border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
           boxShadow: [
-            BoxShadow(
-              blurRadius: 10,
-              offset: const Offset(0, 6),
-              color: Colors.black.withValues(alpha: 0.04),
-            ),
+            BoxShadow(blurRadius: 10, offset: const Offset(0, 6), color: Colors.black.withValues(alpha: 0.04)),
           ],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              '$time • Пост ${bay.isEmpty ? '—' : bay} • $serviceName',
-              style: const TextStyle(fontWeight: FontWeight.w900),
-            ),
+            Text('$time • Пост ${bay.isEmpty ? '—' : bay} • $serviceName', style: const TextStyle(fontWeight: FontWeight.w900)),
             const SizedBox(height: 8),
-            Text(
-              clientTitle,
-              style: const TextStyle(fontWeight: FontWeight.w800),
-            ),
+            Text(clientTitle, style: const TextStyle(fontWeight: FontWeight.w800)),
             if (carLine.isNotEmpty) ...[
               const SizedBox(height: 4),
               Text(
                 carLine,
-                style: TextStyle(
-                  color: cs.onSurface.withValues(alpha: 0.75),
-                  fontWeight: FontWeight.w700,
-                ),
+                style: TextStyle(color: cs.onSurface.withValues(alpha: 0.75), fontWeight: FontWeight.w700),
               ),
             ],
             const SizedBox(height: 8),
-            Text(
-              'Причина: $reason',
-              style: TextStyle(
-                color: cs.onSurface.withValues(alpha: 0.75),
-                fontWeight: FontWeight.w700,
-              ),
-            ),
+            Text('Причина: $reason', style: TextStyle(color: cs.onSurface.withValues(alpha: 0.75), fontWeight: FontWeight.w700)),
           ],
         ),
       ),
@@ -1412,11 +1829,7 @@ class _WaitlistTabState extends State<WaitlistTab> {
       appBar: AppBar(
         title: Text(ruTitle()),
         actions: [
-          IconButton(
-            tooltip: 'Вчера',
-            onPressed: () => shiftDay(-1),
-            icon: const Icon(Icons.chevron_left),
-          ),
+          IconButton(tooltip: 'Вчера', onPressed: () => shiftDay(-1), icon: const Icon(Icons.chevron_left)),
           IconButton(
             tooltip: 'Сегодня',
             onPressed: () {
@@ -1425,11 +1838,7 @@ class _WaitlistTabState extends State<WaitlistTab> {
             },
             icon: const Icon(Icons.today),
           ),
-          IconButton(
-            tooltip: 'Завтра',
-            onPressed: () => shiftDay(1),
-            icon: const Icon(Icons.chevron_right),
-          ),
+          IconButton(tooltip: 'Завтра', onPressed: () => shiftDay(1), icon: const Icon(Icons.chevron_right)),
           IconButton(icon: const Icon(Icons.refresh), onPressed: load),
           const SizedBox(width: 8),
         ],
@@ -1437,23 +1846,15 @@ class _WaitlistTabState extends State<WaitlistTab> {
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : (error != null)
-          ? Center(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Text(error!, style: const TextStyle(color: Colors.red)),
-              ),
-            )
-          : waitlist.isEmpty
-          ? const Center(child: Text('Очередь пуста'))
-          : ListView.separated(
-              padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-              itemCount: waitlist.length,
-              separatorBuilder: (_, _) => const SizedBox(height: 10),
-              itemBuilder: (context, i) {
-                final w = waitlist[i] as Map<String, dynamic>;
-                return _waitlistCard(context, w);
-              },
-            ),
+              ? Center(child: Padding(padding: const EdgeInsets.all(16), child: Text(error!, style: const TextStyle(color: Colors.red))))
+              : waitlist.isEmpty
+                  ? const Center(child: Text('Очередь пуста'))
+                  : ListView.separated(
+                      padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+                      itemCount: waitlist.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 10),
+                      itemBuilder: (context, i) => _waitlistCard(context, waitlist[i] as Map<String, dynamic>),
+                    ),
     );
   }
 }

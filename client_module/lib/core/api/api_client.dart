@@ -208,8 +208,9 @@ class ApiClient {
     if (code == 404) {
       if (m.contains('booking')) return 'Запись не найдена.';
       if (m.contains('car')) return 'Авто не найдено (возможно, удалено).';
-      if (m.contains('service'))
+      if (m.contains('service')) {
         return 'Услуга не найдена (возможно, удалена).';
+      }
       return 'Ресурс не найден.';
     }
 

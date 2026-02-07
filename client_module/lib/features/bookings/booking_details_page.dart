@@ -37,27 +37,30 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
   bool _canceling = false;
   bool _paying = false;
 
-  StreamSubscription? _rtSub;
-  Timer? _rtDebounce;
+  // ✅ subscribe to repo.refresh$ (fallback bookingEvents)
+  StreamSubscription? _sub;
+  Timer? _debounce;
 
   // Fallback polling: if server doesn't emit WS on start, we still refresh
   Timer? _pollTimer;
+
   Booking? _lastBooking;
+  String? _lastFingerprint; // ✅ to avoid spamming notify
 
   @override
   void initState() {
     super.initState();
-    _future = _load();
-    _subscribeRealtime();
+    _future = _load(forceRefresh: false, showNotify: false);
+    _subscribeRefresh();
     _startPollingFallback();
   }
 
   @override
   void dispose() {
-    _rtDebounce?.cancel();
-    _rtDebounce = null;
-    _rtSub?.cancel();
-    _rtSub = null;
+    _debounce?.cancel();
+    _debounce = null;
+    _sub?.cancel();
+    _sub = null;
 
     _pollTimer?.cancel();
     _pollTimer = null;
@@ -65,13 +68,30 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
     super.dispose();
   }
 
-  void _subscribeRealtime() {
-    _rtSub?.cancel();
-    _rtSub = widget.repo.bookingEvents.listen((_) {
-      _rtDebounce?.cancel();
-      _rtDebounce = Timer(const Duration(milliseconds: 250), () {
+  // ✅ Prefer repo.refresh$ if exists (ApiRepository), fallback to bookingEvents
+  void _subscribeRefresh() {
+    _sub?.cancel();
+
+    Stream<dynamic>? s;
+    try {
+      final dyn = widget.repo as dynamic;
+      final candidate = dyn.refresh$;
+      if (candidate is Stream) {
+        s = candidate;
+      }
+    } catch (_) {
+      s = null;
+    }
+
+    s ??= widget.repo.bookingEvents;
+
+    _sub = s.listen((_) {
+      _debounce?.cancel();
+      _debounce = Timer(const Duration(milliseconds: 250), () {
         if (!mounted) return;
-        setState(() => _future = _load(forceRefresh: true));
+        setState(() {
+          _future = _load(forceRefresh: true, showNotify: true);
+        });
       });
     });
   }
@@ -98,16 +118,40 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
       final shouldPoll = minsFrom >= -30 && minsFrom <= 240;
 
       if (shouldPoll) {
-        setState(() => _future = _load(forceRefresh: true));
+        setState(() => _future = _load(forceRefresh: true, showNotify: false));
       }
     });
   }
 
-  Future<_Details> _load({bool forceRefresh = false}) async {
+  String _fingerprint(Booking b) {
+    final started = b.startedAt?.toIso8601String() ?? '';
+    final finished = b.finishedAt?.toIso8601String() ?? '';
+    final due = b.paymentDueAt?.toIso8601String() ?? '';
+    return [
+      b.id,
+      b.status.name,
+      b.isWashing ? 'WASHING' : 'NOWASH',
+      b.bayId?.toString() ?? '',
+      b.dateTime.toIso8601String(),
+      started,
+      finished,
+      due,
+      b.paidTotalRub.toString(),
+      b.discountRub.toString(),
+      (b.discountNote ?? '').trim(),
+      (b.comment ?? '').trim(),
+    ].join('|');
+  }
+
+  Future<_Details> _load({
+    bool forceRefresh = false,
+    required bool showNotify,
+  }) async {
     final bookings = await widget.repo.getBookings(
       includeCanceled: true,
       forceRefresh: forceRefresh,
     );
+
     final booking = bookings.where((b) => b.id == widget.bookingId).firstOrNull;
 
     final cars = await widget.repo.getCars(forceRefresh: forceRefresh);
@@ -121,7 +165,29 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
         ? null
         : services.where((s) => s.id == booking.serviceId).firstOrNull;
 
+    // keep for polling window
     _lastBooking = booking;
+
+    // ✅ notify only when actual booking changed
+    if (showNotify && booking != null && mounted) {
+      final fp = _fingerprint(booking);
+      final changed = fp != _lastFingerprint;
+      _lastFingerprint = fp;
+
+      if (changed) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Запись обновлена администратором'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } else {
+      // still keep fingerprint so next time we don't “double notify”
+      if (booking != null) {
+        _lastFingerprint = _fingerprint(booking);
+      }
+    }
 
     return _Details(booking: booking, car: car, service: service);
   }
@@ -325,7 +391,6 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
   }) async {
     if (_paying) return;
 
-    // capture before await -> removes lint use_build_context_synchronously
     final messenger = ScaffoldMessenger.of(context);
     final navigator = Navigator.of(context);
 
@@ -358,7 +423,7 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
         messenger.showSnackBar(
           const SnackBar(content: Text('Оплата прошла. Запись подтверждена.')),
         );
-        setState(() => _future = _load(forceRefresh: true));
+        setState(() => _future = _load(forceRefresh: true, showNotify: false));
       } else {
         messenger.showSnackBar(
           const SnackBar(content: Text('Оплата не завершена.')),
@@ -408,7 +473,7 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
       messenger.showSnackBar(const SnackBar(content: Text('Запись отменена')));
       setState(() {
         _canceling = false;
-        _future = _load(forceRefresh: true);
+        _future = _load(forceRefresh: true, showNotify: false);
       });
 
       navigator.pop(true);
@@ -608,7 +673,12 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                 padding: const EdgeInsets.all(16),
                 child: FilledButton(
                   onPressed: () {
-                    setState(() => _future = _load(forceRefresh: true));
+                    setState(
+                      () => _future = _load(
+                        forceRefresh: true,
+                        showNotify: false,
+                      ),
+                    );
                   },
                   child: const Text('Повторить'),
                 ),

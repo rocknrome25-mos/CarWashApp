@@ -1,4 +1,5 @@
-// (ФАЙЛ ЦЕЛИКОМ — твой, с 1 доп правкой: requestedBayId отправляем на сервер)
+// C:\dev\carwash\client_module\lib\features\bookings\create_booking_page.dart
+// (ФАЙЛ ЦЕЛИКОМ — твой, + ДОБАВЛЕНО: защита от мульти-бронирований по клиенту)
 
 import 'dart:async';
 import 'dart:math';
@@ -222,7 +223,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     }
   }
 
-  /// ✅ NEW: what client *requested*
+  /// ✅ what client *requested*
   /// - any => null
   /// - bay1 => 1
   /// - bay2 => 2
@@ -315,6 +316,99 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     final v = int.tryParse(h, radix: 16);
     if (v == null) return fallback;
     return Color(v);
+  }
+
+  // ---------------- MULTI-BOOKING GUARD (client-side) ----------------
+
+  int _addonsDurationFromBookingSafe(Booking b) {
+    // booking may contain addons from backend as List<Map> or List<objects>
+    try {
+      final dyn = b as dynamic;
+      final addons = dyn.addons;
+      if (addons is List) {
+        int sum = 0;
+        for (final x in addons) {
+          int qty = 1;
+          int dur = 0;
+
+          if (x is Map) {
+            final q = x['qty'];
+            if (q is num && q.toInt() > 0) qty = q.toInt();
+            final d = x['durationMinSnapshot'];
+            if (d is num && d.toInt() > 0) dur = d.toInt();
+          } else {
+            try {
+              final dx = x as dynamic;
+              final q = dx.qty;
+              if (q is num && q.toInt() > 0) qty = q.toInt();
+              final d = dx.durationMinSnapshot;
+              if (d is num && d.toInt() > 0) dur = d.toInt();
+            } catch (_) {}
+          }
+
+          sum += qty * dur;
+        }
+        return max(sum, 0);
+      }
+    } catch (_) {}
+    return 0;
+  }
+
+  int _blockMinForExistingBooking(Booking b) {
+    final base = _serviceDurationOrDefault(b.serviceId);
+    final addonSum = _addonsDurationFromBookingSafe(b);
+
+    int buf = 0;
+    try {
+      final dyn = b as dynamic;
+      final v = dyn.bufferMin;
+      if (v is num && v.toInt() >= 0) buf = v.toInt();
+    } catch (_) {}
+
+    final raw = base + addonSum + buf;
+    return _roundUpToStepMin(raw, _slotStepMin);
+  }
+
+  bool _isBookingStillBlocking(Booking b) {
+    // active always blocks; pending_payment blocks only while dueAt in future (or missing dueAt)
+    if (b.status == BookingStatus.active) return true;
+    if (b.status == BookingStatus.pendingPayment) {
+      final due = b.paymentDueAt;
+      if (due == null) return true;
+      return due.isAfter(DateTime.now());
+    }
+    return false;
+  }
+
+  Future<bool> _hasClientOverlapForSelectedSlot(DateTime slotStart) async {
+    final blockMin = _effectiveBlockMinForSelectedService();
+    final slotEnd = slotStart.add(Duration(minutes: blockMin));
+
+    // We check client bookings irrespective of car: "one person can't hold multiple slots at same time"
+    final list = await widget.repo.getBookings(
+      includeCanceled: true,
+      forceRefresh: true,
+    );
+
+    for (final b in list) {
+      if (!_isBookingStillBlocking(b)) continue;
+
+      // ignore canceled/completed explicitly (defensive)
+      if (b.status == BookingStatus.canceled ||
+          b.status == BookingStatus.completed)
+        continue;
+
+      final bStart = b.dateTime.toLocal();
+      final bEnd = bStart.add(
+        Duration(minutes: _blockMinForExistingBooking(b)),
+      );
+
+      if (_overlaps(slotStart, slotEnd, bStart, bEnd)) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   // ---------------- auto-pick slot logic ----------------
@@ -1200,6 +1294,8 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
       ),
     );
     if (!mounted) return;
+
+    // ✅ caller should switch user to Bookings tab
     Navigator.of(context).pop('waitlisted');
   }
 
@@ -1240,6 +1336,25 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     final minNow = _minSelectableNowLocal();
     if (isToday && slot.isBefore(minNow)) return;
     if (_isBusySlot(slot)) return;
+
+    // ✅ NEW: client-level overlap guard (prevents “кучу бронирований на одно и то же время”)
+    try {
+      final hasOverlap = await _hasClientOverlapForSelectedSlot(slot);
+      if (!mounted) return;
+      if (hasOverlap) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'У вас уже есть запись на это время. Выберите другое время или отмените текущую запись.',
+            ),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        return;
+      }
+    } catch (_) {
+      // ignore: server will still protect, and UI won't block if repo fails
+    }
 
     int? bayIdToSend = _currentBayIdOrNull();
     if (bayIdToSend == null) {

@@ -1,3 +1,6 @@
+// C:\dev\carwash\client_module\lib\features\bookings\waitlist_page.dart
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -17,10 +20,53 @@ class _WaitlistPageState extends State<WaitlistPage> {
   String? error;
   List<Map<String, dynamic>> rows = const [];
 
+  StreamSubscription? _subRefresh;
+  StreamSubscription? _subEvents;
+  Timer? _debounce;
+
+  // ✅ prevent double taps
+  bool _canceling = false;
+
   @override
   void initState() {
     super.initState();
+    _subscribeRefresh();
     load(force: true);
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _subRefresh?.cancel();
+    _subEvents?.cancel();
+    super.dispose();
+  }
+
+  void _subscribeRefresh() {
+    _subRefresh?.cancel();
+    _subEvents?.cancel();
+
+    // 1) repo.refresh$ if exists
+    try {
+      final dyn = widget.repo as dynamic;
+      final candidate = dyn.refresh$;
+      if (candidate is Stream) {
+        _subRefresh = candidate.listen((_) => _onAnyRefreshEvent());
+      }
+    } catch (_) {
+      _subRefresh = null;
+    }
+
+    // 2) always listen bookingEvents as fallback
+    _subEvents = widget.repo.bookingEvents.listen((_) => _onAnyRefreshEvent());
+  }
+
+  void _onAnyRefreshEvent() {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 250), () {
+      if (!mounted) return;
+      load(force: true);
+    });
   }
 
   Future<void> load({bool force = false}) async {
@@ -34,10 +80,12 @@ class _WaitlistPageState extends State<WaitlistPage> {
       if (cid.isEmpty) {
         throw Exception('Нет активного клиента. Перезайди.');
       }
+
       final list = await widget.repo.getWaitlist(
         clientId: cid,
         includeAll: false,
       );
+
       if (!mounted) return;
       setState(() => rows = list);
     } catch (e) {
@@ -61,7 +109,12 @@ class _WaitlistPageState extends State<WaitlistPage> {
   String _reasonRu(String raw) {
     final r = raw.trim();
     if (r.isEmpty) return 'Ожидаем свободный пост';
-    if (r == 'ALL_BAYS_CLOSED') return 'Посты закрыты. Ожидаем открытие.';
+    final up = r.toUpperCase();
+    if (up.contains('ALL_BAYS_CLOSED')) {
+      return 'Посты закрыты. Ожидаем открытие.';
+    }
+    if (up.contains('BAY_CLOSED')) return 'Пост закрыт. Ожидаем открытие.';
+    if (up.contains('CLIENT_CANCELED')) return 'Вы отменили ожидание.';
     return r;
   }
 
@@ -98,6 +151,91 @@ class _WaitlistPageState extends State<WaitlistPage> {
         ],
       ),
     );
+  }
+
+  Future<void> _cancelWaitlist(Map<String, dynamic> w) async {
+    if (_canceling) return;
+
+    final wid = _s(w, 'id');
+    if (wid.isEmpty) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Убрать из ожидания?'),
+        content: const Text(
+          'Заявка будет отменена и исчезнет из очереди ожидания.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Нет'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Отменить'),
+          ),
+        ],
+      ),
+    );
+
+    if (!mounted) return;
+    if (ok != true) return;
+
+    setState(() => _canceling = true);
+
+    try {
+      // ✅ We prefer a strongly-typed method if you added it:
+      // ApiRepository.cancelWaitlistRequest(waitlistId)
+      final dyn = widget.repo as dynamic;
+
+      Future<void> call() async {
+        // Most likely name (the one I gave you)
+        if (dyn.cancelWaitlistRequest is Function) {
+          await dyn.cancelWaitlistRequest(wid);
+          return;
+        }
+        // Alternative name if you chose differently
+        if (dyn.cancelWaitlist is Function) {
+          await dyn.cancelWaitlist(wid);
+          return;
+        }
+        throw Exception('CANCEL_WAITLIST_NOT_IMPLEMENTED');
+      }
+
+      await call();
+
+      if (!mounted) return;
+
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Заявка в ожидании отменена'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+
+      await load(force: true);
+
+      // ✅ optional: go back automatically if queue is empty
+      if (!mounted) return;
+      if (rows.isEmpty) {
+        Navigator.of(context).pop(true);
+      }
+    } catch (e) {
+      if (!mounted) return;
+
+      final msg = e.toString().contains('CANCEL_WAITLIST_NOT_IMPLEMENTED')
+          ? 'Отмена ожидания пока не подключена на сервере.'
+          : 'Ошибка: $e';
+
+      messenger.showSnackBar(
+        SnackBar(content: Text(msg), behavior: SnackBarBehavior.floating),
+      );
+    } finally {
+      if (mounted) setState(() => _canceling = false);
+    }
   }
 
   @override
@@ -157,7 +295,6 @@ class _WaitlistPageState extends State<WaitlistPage> {
                 final dtIso = _s(w, 'desiredDateTime').isNotEmpty
                     ? _s(w, 'desiredDateTime')
                     : _s(w, 'dateTime');
-
                 final reason = _reasonRu(_s(w, 'reason'));
 
                 return _sectionCard(
@@ -184,7 +321,6 @@ class _WaitlistPageState extends State<WaitlistPage> {
                         ),
                       ],
                       const SizedBox(height: 12),
-
                       Container(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 12,
@@ -218,7 +354,6 @@ class _WaitlistPageState extends State<WaitlistPage> {
                           ],
                         ),
                       ),
-
                       const SizedBox(height: 10),
                       Text(
                         'Мы свяжемся, когда появится свободное окно.',
@@ -227,7 +362,6 @@ class _WaitlistPageState extends State<WaitlistPage> {
                           fontWeight: FontWeight.w600,
                         ),
                       ),
-
                       const SizedBox(height: 12),
                       Wrap(
                         spacing: 10,
@@ -254,6 +388,29 @@ class _WaitlistPageState extends State<WaitlistPage> {
                             label: const Text('WhatsApp'),
                           ),
                         ],
+                      ),
+                      const SizedBox(height: 12),
+
+                      // ✅ Cancel waitlist (double-click safe)
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          onPressed: (_canceling || loading)
+                              ? null
+                              : () => _cancelWaitlist(w),
+                          icon: _canceling
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.cancel_outlined),
+                          label: Text(
+                            _canceling ? 'Отменяю...' : 'Отменить ожидание',
+                          ),
+                        ),
                       ),
                     ],
                   ),

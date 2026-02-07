@@ -1,3 +1,4 @@
+// C:\dev\carwash\client_module\lib\features\bookings\bookings_page.dart
 import 'dart:async';
 import 'dart:math';
 
@@ -30,39 +31,61 @@ class _BookingsPageState extends State<BookingsPage> {
 
   late Future<_BookingsBundle> _future;
 
-  StreamSubscription? _rtSub;
-  Timer? _rtDebounce;
+  StreamSubscription? _subRefresh; // repo.refresh$ (if exists)
+  StreamSubscription? _subEvents; // repo.bookingEvents (always)
+  Timer? _debounce;
 
   @override
   void initState() {
     super.initState();
     _future = _load(force: false);
-    _subscribeRealtime();
+    _subscribeRefresh();
   }
 
   @override
   void dispose() {
-    _rtDebounce?.cancel();
-    _rtSub?.cancel();
+    _debounce?.cancel();
+    _subRefresh?.cancel();
+    _subEvents?.cancel();
     super.dispose();
   }
 
-  void _subscribeRealtime() {
-    _rtSub?.cancel();
-    _rtSub = widget.repo.bookingEvents.listen((_) {
-      _rtDebounce?.cancel();
-      _rtDebounce = Timer(const Duration(milliseconds: 250), () {
-        if (!mounted) return;
-        _refresh();
-      });
+  void _subscribeRefresh() {
+    _subRefresh?.cancel();
+    _subEvents?.cancel();
+
+    // 1) Prefer repo.refresh$ if exists (ApiRepository)
+    try {
+      final dyn = widget.repo as dynamic;
+      final candidate = dyn.refresh$;
+      if (candidate is Stream) {
+        _subRefresh = candidate.listen((_) => _onAnyRefreshEvent());
+      }
+    } catch (_) {
+      _subRefresh = null;
+    }
+
+    // 2) Always listen to bookingEvents as a safety net
+    _subEvents = widget.repo.bookingEvents.listen((_) => _onAnyRefreshEvent());
+  }
+
+  void _onAnyRefreshEvent() {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 250), () {
+      if (!mounted) return;
+      _refresh();
     });
   }
 
   @override
   void didUpdateWidget(covariant BookingsPage oldWidget) {
     super.didUpdateWidget(oldWidget);
+
     if (oldWidget.refreshToken != widget.refreshToken) {
       _refresh();
+    }
+    if (oldWidget.repo != widget.repo) {
+      _subscribeRefresh();
     }
   }
 
@@ -82,9 +105,12 @@ class _BookingsPageState extends State<BookingsPage> {
     );
   }
 
-  Future<List<Map<String, dynamic>>> _loadWaitlist({required bool force}) async {
+  Future<List<Map<String, dynamic>>> _loadWaitlist({
+    required bool force,
+  }) async {
     final cid = widget.repo.currentClient?.id.trim() ?? '';
     if (cid.isEmpty) return const [];
+    // NOTE: repo.getWaitlist currently doesn't use forceRefresh; ok for now
     return widget.repo.getWaitlist(clientId: cid, includeAll: false);
   }
 
@@ -176,7 +202,9 @@ class _BookingsPageState extends State<BookingsPage> {
 
   String _serviceImage(Service? s) {
     final name = (s?.name ?? '').toLowerCase();
-    if (name.contains('комплекс')) return 'assets/images/services/kompleks_512.jpg';
+    if (name.contains('комплекс')) {
+      return 'assets/images/services/kompleks_512.jpg';
+    }
     if (name.contains('воск')) return 'assets/images/services/vosk_512.jpg';
     return 'assets/images/services/kuzov_512.jpg';
   }
@@ -193,13 +221,12 @@ class _BookingsPageState extends State<BookingsPage> {
 
   // ---------------- Yandex-like layers ----------------
 
-  /// слой 2: секция (чуть светлее фона)
   Widget _sectionBox({required Widget child}) {
     final cs = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: cs.surface.withValues(alpha: 0.10), // базовый слой секции
+        color: cs.surface.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
       ),
@@ -207,12 +234,7 @@ class _BookingsPageState extends State<BookingsPage> {
     );
   }
 
-  /// слой 3: элемент внутри секции (ещё светлее)
-  Widget _pill({
-    required String text,
-    IconData? icon,
-    Color? borderTint,
-  }) {
+  Widget _pill({required String text, IconData? icon, Color? borderTint}) {
     final cs = Theme.of(context).colorScheme;
     final bg = cs.surfaceContainerHighest.withValues(alpha: 0.22);
     final border = (borderTint ?? cs.outlineVariant).withValues(alpha: 0.55);
@@ -324,7 +346,6 @@ class _BookingsPageState extends State<BookingsPage> {
       ],
     );
   }
-
   // ---------------- card ----------------
 
   Widget _bookingCard({
@@ -353,7 +374,6 @@ class _BookingsPageState extends State<BookingsPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // header
                   Row(
                     children: [
                       Expanded(
@@ -361,28 +381,20 @@ class _BookingsPageState extends State<BookingsPage> {
                           service?.name ?? 'Услуга удалена',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w900,
-                            color: cs.onSurface.withValues(alpha: 0.92),
-                          ),
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(
+                                fontWeight: FontWeight.w900,
+                                color: cs.onSurface.withValues(alpha: 0.92),
+                              ),
                         ),
                       ),
                       const SizedBox(width: 8),
                       _statusBadge(b),
                     ],
                   ),
-
                   const SizedBox(height: 10),
-
-                  // date/time as a clear pill (layer 3)
-                  _pill(
-                    text: _dtInline(b.dateTime),
-                    icon: Icons.schedule,
-                  ),
-
+                  _pill(text: _dtInline(b.dateTime), icon: Icons.schedule),
                   const SizedBox(height: 8),
-
-                  // car (single line)
                   Text(
                     car == null
                         ? 'Авто удалено'
@@ -394,21 +406,26 @@ class _BookingsPageState extends State<BookingsPage> {
                       color: secondary,
                     ),
                   ),
-
                   const SizedBox(height: 10),
-
-                  // money pills (layer 3)
                   Wrap(
                     spacing: 10,
                     runSpacing: 10,
                     children: [
-                      _pill(text: 'Стоимость: $total ₽', icon: Icons.payments_outlined),
-                      _pill(text: 'К оплате: $toPay ₽', icon: Icons.credit_card),
+                      _pill(
+                        text: 'Стоимость: $total ₽',
+                        icon: Icons.payments_outlined,
+                      ),
+                      _pill(
+                        text: 'К оплате: $toPay ₽',
+                        icon: Icons.credit_card,
+                      ),
                       if (addonsCount > 0)
-                        _pill(text: 'Доп. услуги: +$addonsCount', icon: Icons.add_circle_outline),
+                        _pill(
+                          text: 'Доп. услуги: +$addonsCount',
+                          icon: Icons.add_circle_outline,
+                        ),
                     ],
                   ),
-
                   const SizedBox(height: 12),
                   _bayRow(b.bayId),
                 ],
@@ -440,7 +457,9 @@ class _BookingsPageState extends State<BookingsPage> {
           FilledButton(
             onPressed: () {
               Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => WaitlistPage(repo: widget.repo)),
+                MaterialPageRoute(
+                  builder: (_) => WaitlistPage(repo: widget.repo),
+                ),
               );
             },
             child: const Text('Показать'),
@@ -449,8 +468,6 @@ class _BookingsPageState extends State<BookingsPage> {
       ),
     );
   }
-
-  // ---------------- build ----------------
 
   @override
   Widget build(BuildContext context) {
@@ -482,12 +499,11 @@ class _BookingsPageState extends State<BookingsPage> {
 
         final listChildren = <Widget>[
           const SizedBox(height: 12),
-          if (data.waitlist.isNotEmpty) ...[
+          if (data.waitlist.isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
               child: _waitlistTopCard(data.waitlist.length),
             ),
-          ],
         ];
 
         if (bookings.isEmpty) {
@@ -516,7 +532,9 @@ class _BookingsPageState extends State<BookingsPage> {
                   _dateHeader(b.dateTime),
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
                     fontWeight: FontWeight.w900,
-                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.92),
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.onSurface.withValues(alpha: 0.92),
                   ),
                 ),
               ),
