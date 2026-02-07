@@ -140,20 +140,39 @@ class _ShellPageState extends State<ShellPage> {
       body: IndexedStack(
         index: idx,
         children: [
-          ShiftTab(api: widget.api, store: widget.store, session: widget.session),
-          BaysTab(api: widget.api, store: widget.store, session: widget.session),
-          WaitlistTab(api: widget.api, store: widget.store, session: widget.session),
+          ShiftTab(
+            api: widget.api,
+            store: widget.store,
+            session: widget.session,
+          ),
+          BaysTab(
+            api: widget.api,
+            store: widget.store,
+            session: widget.session,
+          ),
+          WaitlistTab(
+            api: widget.api,
+            store: widget.store,
+            session: widget.session,
+          ),
         ],
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: idx,
         onDestinationSelected: (v) {
           setState(() => idx = v);
-          if (v == 2) _loadWaitlistCount(); // refresh badge when entering waitlist
+          if (v == 2)
+            _loadWaitlistCount(); // refresh badge when entering waitlist
         },
         destinations: [
-          const NavigationDestination(icon: Icon(Icons.event_note), label: 'Смена'),
-          const NavigationDestination(icon: Icon(Icons.car_repair), label: 'Посты'),
+          const NavigationDestination(
+            icon: Icon(Icons.event_note),
+            label: 'Смена',
+          ),
+          const NavigationDestination(
+            icon: Icon(Icons.car_repair),
+            label: 'Посты',
+          ),
           NavigationDestination(icon: _queueIconWithBadge(), label: 'Ожидание'),
         ],
       ),
@@ -192,7 +211,8 @@ class _ShiftTabState extends State<ShiftTab> {
 
   int bayTab = 0; // 0 => bay 1, 1 => bay 2
 
-  bool get cashEnabled => widget.session.featureOn('CASH_DRAWER', defaultValue: true);
+  bool get cashEnabled =>
+      widget.session.featureOn('CASH_DRAWER', defaultValue: true);
 
   String get ymd => DateFormat('yyyy-MM-dd').format(selectedDay);
 
@@ -249,7 +269,11 @@ class _ShiftTabState extends State<ShiftTab> {
       final sid = widget.session.activeShiftId ?? '';
       if (sid.isEmpty) throw Exception('Нет активной смены. Перезайди.');
 
-      final list = await widget.api.calendarDay(widget.session.userId, sid, ymd);
+      final list = await widget.api.calendarDay(
+        widget.session.userId,
+        sid,
+        ymd,
+      );
 
       if (!mounted) return;
       setState(() => bookings = list);
@@ -313,6 +337,7 @@ class _ShiftTabState extends State<ShiftTab> {
         return Icons.receipt_long;
     }
   }
+
   Future<void> closeShiftNoCash() async {
     final userId = widget.session.userId;
     final shiftId = widget.session.activeShiftId ?? '';
@@ -335,6 +360,7 @@ class _ShiftTabState extends State<ShiftTab> {
     }
   }
 
+  // ✅ AUTOCALC: keep + handover = counted (two-way)
   Future<void> closeShiftWithCash() async {
     final userId = widget.session.userId;
     final shiftId = widget.session.activeShiftId ?? '';
@@ -347,9 +373,32 @@ class _ShiftTabState extends State<ShiftTab> {
       final expectedRub = (exp['expectedRub'] as num).toInt();
 
       final countedCtrl = TextEditingController(text: expectedRub.toString());
-      final handoverCtrl = TextEditingController(text: '0');
       final keepCtrl = TextEditingController(text: expectedRub.toString());
+      final handoverCtrl = TextEditingController(text: '0');
       final noteCtrl = TextEditingController(text: '');
+
+      String lastEdited = 'keep'; // 'keep' | 'handover'
+
+      void recalcFromKeep() {
+        final counted = int.tryParse(countedCtrl.text.trim()) ?? 0;
+        var keep = int.tryParse(keepCtrl.text.trim()) ?? 0;
+        if (keep < 0) keep = 0;
+        if (keep > counted) keep = counted;
+        final handover = counted - keep;
+        handoverCtrl.text = handover.toString();
+      }
+
+      void recalcFromHandover() {
+        final counted = int.tryParse(countedCtrl.text.trim()) ?? 0;
+        var handover = int.tryParse(handoverCtrl.text.trim()) ?? 0;
+        if (handover < 0) handover = 0;
+        if (handover > counted) handover = counted;
+        final keep = counted - handover;
+        keepCtrl.text = keep.toString();
+      }
+
+      // initial fill
+      recalcFromKeep();
 
       final ok = await showDialog<bool>(
         context: context,
@@ -367,15 +416,21 @@ class _ShiftTabState extends State<ShiftTab> {
                     children: [
                       Row(
                         children: [
-                          const Expanded(child: Text('Ожидаемая сумма наличных')),
-                          Text('$expectedRub ₽',
-                              style: const TextStyle(fontWeight: FontWeight.w800)),
+                          const Expanded(
+                            child: Text('Ожидаемая сумма наличных'),
+                          ),
+                          Text(
+                            '$expectedRub ₽',
+                            style: const TextStyle(fontWeight: FontWeight.w800),
+                          ),
                         ],
                       ),
                       const SizedBox(height: 8),
                       Row(
                         children: [
-                          const Expanded(child: Text('Разница (факт - ожидаемая)')),
+                          const Expanded(
+                            child: Text('Разница (факт - ожидаемая)'),
+                          ),
                           Text(
                             '${diff >= 0 ? '+' : ''}$diff ₽',
                             style: TextStyle(
@@ -386,28 +441,51 @@ class _ShiftTabState extends State<ShiftTab> {
                         ],
                       ),
                       const SizedBox(height: 12),
+
                       TextField(
                         controller: countedCtrl,
                         keyboardType: TextInputType.number,
                         decoration: const InputDecoration(
                           labelText: 'Фактически в кассе (₽)',
                         ),
-                        onChanged: (_) => setStateDialog(() {}),
+                        onChanged: (_) {
+                          if (lastEdited == 'handover') {
+                            recalcFromHandover();
+                          } else {
+                            recalcFromKeep();
+                          }
+                          setStateDialog(() {});
+                        },
                       ),
-                      TextField(
-                        controller: handoverCtrl,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Сдать владельцу (₽)',
-                        ),
-                      ),
+
+                      const SizedBox(height: 10),
+
                       TextField(
                         controller: keepCtrl,
                         keyboardType: TextInputType.number,
                         decoration: const InputDecoration(
                           labelText: 'Оставить в кассе (₽)',
                         ),
+                        onChanged: (_) {
+                          lastEdited = 'keep';
+                          recalcFromKeep();
+                          setStateDialog(() {});
+                        },
                       ),
+
+                      TextField(
+                        controller: handoverCtrl,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: 'Сдать владельцу (₽)',
+                        ),
+                        onChanged: (_) {
+                          lastEdited = 'handover';
+                          recalcFromHandover();
+                          setStateDialog(() {});
+                        },
+                      ),
+
                       TextField(
                         controller: noteCtrl,
                         decoration: const InputDecoration(
@@ -436,9 +514,15 @@ class _ShiftTabState extends State<ShiftTab> {
       if (ok != true) return;
 
       final counted = int.tryParse(countedCtrl.text.trim()) ?? 0;
-      final handover = int.tryParse(handoverCtrl.text.trim()) ?? 0;
       final keep = int.tryParse(keepCtrl.text.trim()) ?? 0;
+      final handover = int.tryParse(handoverCtrl.text.trim()) ?? 0;
       final note = noteCtrl.text.trim().isEmpty ? null : noteCtrl.text.trim();
+
+      if (keep < 0 || handover < 0 || keep + handover != counted) {
+        throw Exception(
+          'Проверь суммы: "оставить + сдать" должно равняться "фактически в кассе".',
+        );
+      }
 
       await widget.api.cashClose(
         userId,
@@ -491,8 +575,10 @@ class _ShiftTabState extends State<ShiftTab> {
       }
     }
     out.sort((a, b) {
-      final ad = DateTime.tryParse((a['dateTime'] ?? '').toString()) ?? DateTime(1970);
-      final bd = DateTime.tryParse((b['dateTime'] ?? '').toString()) ?? DateTime(1970);
+      final ad =
+          DateTime.tryParse((a['dateTime'] ?? '').toString()) ?? DateTime(1970);
+      final bd =
+          DateTime.tryParse((b['dateTime'] ?? '').toString()) ?? DateTime(1970);
       return ad.compareTo(bd);
     });
     return out;
@@ -515,10 +601,14 @@ class _ShiftTabState extends State<ShiftTab> {
             duration: const Duration(milliseconds: 180),
             padding: const EdgeInsets.symmetric(vertical: 10),
             decoration: BoxDecoration(
-              color: selected ? cs.surface : cs.surfaceContainerHighest.withValues(alpha: 0.55),
+              color: selected
+                  ? cs.surface
+                  : cs.surfaceContainerHighest.withValues(alpha: 0.55),
               borderRadius: BorderRadius.circular(14),
               border: Border.all(
-                color: selected ? cs.outlineVariant.withValues(alpha: 0.7) : cs.outlineVariant.withValues(alpha: 0.35),
+                color: selected
+                    ? cs.outlineVariant.withValues(alpha: 0.7)
+                    : cs.outlineVariant.withValues(alpha: 0.35),
               ),
               boxShadow: selected
                   ? [
@@ -536,7 +626,9 @@ class _ShiftTabState extends State<ShiftTab> {
                   label,
                   style: TextStyle(
                     fontWeight: FontWeight.w900,
-                    color: selected ? cs.onSurface : cs.onSurface.withValues(alpha: 0.75),
+                    color: selected
+                        ? cs.onSurface
+                        : cs.onSurface.withValues(alpha: 0.75),
                   ),
                 ),
                 const SizedBox(height: 6),
@@ -545,7 +637,9 @@ class _ShiftTabState extends State<ShiftTab> {
                   height: 3,
                   width: 46,
                   decoration: BoxDecoration(
-                    color: selected ? indicatorColor(index) : Colors.transparent,
+                    color: selected
+                        ? indicatorColor(index)
+                        : Colors.transparent,
                     borderRadius: BorderRadius.circular(999),
                   ),
                 ),
@@ -599,7 +693,9 @@ class _ShiftTabState extends State<ShiftTab> {
 
     final clientName = b['client']?['name']?.toString();
     final clientPhone = b['client']?['phone']?.toString();
-    final clientTitle = (clientName != null && clientName.isNotEmpty) ? clientName : (clientPhone ?? '');
+    final clientTitle = (clientName != null && clientName.isNotEmpty)
+        ? clientName
+        : (clientPhone ?? '');
 
     final carLine = _buildCarLineFromBooking(b);
 
@@ -649,11 +745,23 @@ class _ShiftTabState extends State<ShiftTab> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(time, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
+                  Text(
+                    time,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w900,
+                      fontSize: 15,
+                    ),
+                  ),
                   const SizedBox(height: 4),
-                  Text(serviceName, style: const TextStyle(fontWeight: FontWeight.w800)),
+                  Text(
+                    serviceName,
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
                   const SizedBox(height: 10),
-                  Text(clientTitle, style: const TextStyle(fontWeight: FontWeight.w900)),
+                  Text(
+                    clientTitle,
+                    style: const TextStyle(fontWeight: FontWeight.w900),
+                  ),
                   if (carLine.isNotEmpty) ...[
                     const SizedBox(height: 4),
                     Text(
@@ -674,16 +782,29 @@ class _ShiftTabState extends State<ShiftTab> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Text('Пост $bayId', style: const TextStyle(fontWeight: FontWeight.w900)),
+                  Text(
+                    'Пост $bayId',
+                    style: const TextStyle(fontWeight: FontWeight.w900),
+                  ),
                   const SizedBox(height: 10),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
                     decoration: BoxDecoration(
                       color: stColor.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(color: stColor),
                     ),
-                    child: Text(st, style: TextStyle(color: stColor, fontWeight: FontWeight.w900, fontSize: 12)),
+                    child: Text(
+                      st,
+                      style: TextStyle(
+                        color: stColor,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 12,
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -694,7 +815,10 @@ class _ShiftTabState extends State<ShiftTab> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Text(psRu, style: const TextStyle(fontWeight: FontWeight.w900)),
+                  Text(
+                    psRu,
+                    style: const TextStyle(fontWeight: FontWeight.w900),
+                  ),
                   const SizedBox(height: 8),
                   Text(
                     'Оплачено: $paid ₽\nК оплате: $toPay ₽',
@@ -715,7 +839,13 @@ class _ShiftTabState extends State<ShiftTab> {
                         for (final x in badges)
                           Chip(
                             avatar: Icon(payIcon(x), size: 18),
-                            label: Text(x == 'CARD' ? 'Карта' : x == 'CASH' ? 'Наличные' : 'Контракт'),
+                            label: Text(
+                              x == 'CARD'
+                                  ? 'Карта'
+                                  : x == 'CASH'
+                                  ? 'Наличные'
+                                  : 'Контракт',
+                            ),
                             visualDensity: VisualDensity.compact,
                           ),
                       ],
@@ -739,7 +869,11 @@ class _ShiftTabState extends State<ShiftTab> {
       appBar: AppBar(
         title: Text(ruTitle()),
         actions: [
-          IconButton(tooltip: 'Вчера', onPressed: () => shiftDay(-1), icon: const Icon(Icons.chevron_left)),
+          IconButton(
+            tooltip: 'Вчера',
+            onPressed: () => shiftDay(-1),
+            icon: const Icon(Icons.chevron_left),
+          ),
           IconButton(
             tooltip: 'Сегодня',
             onPressed: () {
@@ -748,7 +882,11 @@ class _ShiftTabState extends State<ShiftTab> {
             },
             icon: const Icon(Icons.today),
           ),
-          IconButton(tooltip: 'Завтра', onPressed: () => shiftDay(1), icon: const Icon(Icons.chevron_right)),
+          IconButton(
+            tooltip: 'Завтра',
+            onPressed: () => shiftDay(1),
+            icon: const Icon(Icons.chevron_right),
+          ),
           IconButton(icon: const Icon(Icons.refresh), onPressed: load),
           TextButton(onPressed: closeShift, child: const Text('Закрыть смену')),
           const SizedBox(width: 8),
@@ -761,22 +899,34 @@ class _ShiftTabState extends State<ShiftTab> {
             child: loading
                 ? const Center(child: CircularProgressIndicator())
                 : (error != null)
-                    ? Center(child: Padding(padding: const EdgeInsets.all(16), child: Text(error!, style: const TextStyle(color: Colors.red))))
-                    : list.isEmpty
-                        ? Center(child: Text('Нет записей на Пост $bayId', style: const TextStyle(fontWeight: FontWeight.w700)))
-                        : ListView.separated(
-                            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                            itemCount: list.length,
-                            separatorBuilder: (_, _) => const SizedBox(height: 10),
-                            itemBuilder: (context, i) => _bookingCard(context, list[i]),
-                          ),
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Text(
+                        error!,
+                        style: const TextStyle(color: Colors.red),
+                      ),
+                    ),
+                  )
+                : list.isEmpty
+                ? Center(
+                    child: Text(
+                      'Нет записей на Пост $bayId',
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                    itemCount: list.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 10),
+                    itemBuilder: (context, i) => _bookingCard(context, list[i]),
+                  ),
           ),
         ],
       ),
     );
   }
 }
-
 /* ========================= TAB 2: ПОСТЫ ========================= */
 
 class BaysTab extends StatefulWidget {
@@ -842,6 +992,7 @@ class _BaysTabState extends State<BaysTab> {
       if (mounted) setState(() => loading = false);
     }
   }
+
   Future<void> toggleBay(int bayNumber) async {
     final isOpen = bayIsActive[bayNumber] ?? true;
     final uid = widget.session.userId;
@@ -858,11 +1009,19 @@ class _BaysTabState extends State<BaysTab> {
             title: Text('Закрыть пост $bayNumber'),
             content: TextField(
               controller: ctrl,
-              decoration: const InputDecoration(labelText: 'Причина (обязательно)'),
+              decoration: const InputDecoration(
+                labelText: 'Причина (обязательно)',
+              ),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Отмена')),
-              ElevatedButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Закрыть')),
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('Отмена'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text('Закрыть'),
+              ),
             ],
           ),
         );
@@ -874,9 +1033,20 @@ class _BaysTabState extends State<BaysTab> {
           return;
         }
 
-        await widget.api.setBayActive(uid, sid, bayNumber: bayNumber, isActive: false, reason: reason);
+        await widget.api.setBayActive(
+          uid,
+          sid,
+          bayNumber: bayNumber,
+          isActive: false,
+          reason: reason,
+        );
       } else {
-        await widget.api.setBayActive(uid, sid, bayNumber: bayNumber, isActive: true);
+        await widget.api.setBayActive(
+          uid,
+          sid,
+          bayNumber: bayNumber,
+          isActive: true,
+        );
       }
 
       await loadBays();
@@ -898,8 +1068,16 @@ class _BaysTabState extends State<BaysTab> {
     final btnIcon = isOpen ? Icons.lock : Icons.lock_open;
 
     final button = isOpen
-        ? OutlinedButton.icon(onPressed: loading ? null : () => toggleBay(bayNumber), icon: Icon(btnIcon), label: Text(btnText))
-        : FilledButton.icon(onPressed: loading ? null : () => toggleBay(bayNumber), icon: Icon(btnIcon), label: Text(btnText));
+        ? OutlinedButton.icon(
+            onPressed: loading ? null : () => toggleBay(bayNumber),
+            icon: Icon(btnIcon),
+            label: Text(btnText),
+          )
+        : FilledButton.icon(
+            onPressed: loading ? null : () => toggleBay(bayNumber),
+            icon: Icon(btnIcon),
+            label: Text(btnText),
+          );
 
     return Expanded(
       child: Container(
@@ -909,19 +1087,32 @@ class _BaysTabState extends State<BaysTab> {
           borderRadius: BorderRadius.circular(18),
           border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
           boxShadow: [
-            BoxShadow(blurRadius: 10, offset: const Offset(0, 6), color: Colors.black.withValues(alpha: 0.04)),
+            BoxShadow(
+              blurRadius: 10,
+              offset: const Offset(0, 6),
+              color: Colors.black.withValues(alpha: 0.04),
+            ),
           ],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Пост $bayNumber', style: const TextStyle(fontWeight: FontWeight.w900)),
+            Text(
+              'Пост $bayNumber',
+              style: const TextStyle(fontWeight: FontWeight.w900),
+            ),
             const SizedBox(height: 10),
             Row(
               children: [
                 Icon(statusIcon, color: statusColor),
                 const SizedBox(width: 8),
-                Text(statusText, style: TextStyle(fontWeight: FontWeight.w900, color: statusColor)),
+                Text(
+                  statusText,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w900,
+                    color: statusColor,
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 12),
@@ -945,11 +1136,18 @@ class _BaysTabState extends State<BaysTab> {
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : (error != null)
-              ? Center(child: Padding(padding: const EdgeInsets.all(16), child: Text(error!, style: const TextStyle(color: Colors.red))))
-              : Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Row(children: [bayCard(1), const SizedBox(width: 10), bayCard(2)]),
-                ),
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(error!, style: const TextStyle(color: Colors.red)),
+              ),
+            )
+          : Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                children: [bayCard(1), const SizedBox(width: 10), bayCard(2)],
+              ),
+            ),
     );
   }
 }
@@ -1086,7 +1284,11 @@ class _WaitlistTabState extends State<WaitlistTab> {
     return '';
   }
 
-  Widget _sectionBox(BuildContext ctx, {required String title, required Widget child}) {
+  Widget _sectionBox(
+    BuildContext ctx, {
+    required String title,
+    required Widget child,
+  }) {
     final cs = Theme.of(ctx).colorScheme;
     return Container(
       width: double.infinity,
@@ -1099,7 +1301,13 @@ class _WaitlistTabState extends State<WaitlistTab> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: TextStyle(fontWeight: FontWeight.w900, color: cs.onSurface.withValues(alpha: 0.9))),
+          Text(
+            title,
+            style: TextStyle(
+              fontWeight: FontWeight.w900,
+              color: cs.onSurface.withValues(alpha: 0.9),
+            ),
+          ),
           const SizedBox(height: 10),
           child,
         ],
@@ -1109,8 +1317,12 @@ class _WaitlistTabState extends State<WaitlistTab> {
 
   Widget _dayChip(BuildContext ctx, DateTime d, {required bool selected}) {
     final cs = Theme.of(ctx).colorScheme;
-    final bg = selected ? cs.primary.withValues(alpha: 0.18) : cs.surfaceContainerHighest.withValues(alpha: 0.18);
-    final border = selected ? cs.primary.withValues(alpha: 0.65) : cs.outlineVariant.withValues(alpha: 0.55);
+    final bg = selected
+        ? cs.primary.withValues(alpha: 0.18)
+        : cs.surfaceContainerHighest.withValues(alpha: 0.18);
+    final border = selected
+        ? cs.primary.withValues(alpha: 0.65)
+        : cs.outlineVariant.withValues(alpha: 0.55);
     final label = '${_weekdayShortRu(d.weekday)} ${d.day}';
 
     return Container(
@@ -1122,12 +1334,21 @@ class _WaitlistTabState extends State<WaitlistTab> {
       ),
       child: Text(
         label,
-        style: TextStyle(fontWeight: FontWeight.w900, color: cs.onSurface.withValues(alpha: 0.92)),
+        style: TextStyle(
+          fontWeight: FontWeight.w900,
+          color: cs.onSurface.withValues(alpha: 0.92),
+        ),
       ),
     );
   }
 
-  Widget _timeSlotBtn(BuildContext ctx, DateTime s, {required bool selected, required VoidCallback onTap, required bool disabled}) {
+  Widget _timeSlotBtn(
+    BuildContext ctx,
+    DateTime s, {
+    required bool selected,
+    required VoidCallback onTap,
+    required bool disabled,
+  }) {
     final cs = Theme.of(ctx).colorScheme;
     final label = DateFormat('HH:mm').format(s);
 
@@ -1168,14 +1389,21 @@ class _WaitlistTabState extends State<WaitlistTab> {
     var start = DateTime(day.year, day.month, day.day, _openHour, 0);
     final end = DateTime(day.year, day.month, day.day, _closeHour, 0);
 
-    final isToday = day.year == now.year && day.month == now.month && day.day == now.day;
+    final isToday =
+        day.year == now.year && day.month == now.month && day.day == now.day;
 
     if (isToday) {
       final min = now.add(const Duration(minutes: 5));
       final mod = min.minute % _slotStepMin;
       final add = mod == 0 ? 0 : (_slotStepMin - mod);
 
-      final rounded = DateTime(min.year, min.month, min.day, min.hour, min.minute).add(Duration(minutes: add));
+      final rounded = DateTime(
+        min.year,
+        min.month,
+        min.day,
+        min.hour,
+        min.minute,
+      ).add(Duration(minutes: add));
       if (rounded.isAfter(start)) start = rounded;
     }
 
@@ -1190,7 +1418,12 @@ class _WaitlistTabState extends State<WaitlistTab> {
     return out;
   }
 
-  bool _overlaps(DateTime aStart, DateTime aEnd, DateTime bStart, DateTime bEnd) {
+  bool _overlaps(
+    DateTime aStart,
+    DateTime aEnd,
+    DateTime bStart,
+    DateTime bEnd,
+  ) {
     return aStart.isBefore(bEnd) && bStart.isBefore(aEnd);
   }
 
@@ -1246,7 +1479,10 @@ class _WaitlistTabState extends State<WaitlistTab> {
     await Clipboard.setData(ClipboardData(text: p));
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Номер скопирован'), behavior: SnackBarBehavior.floating),
+      const SnackBar(
+        content: Text('Номер скопирован'),
+        behavior: SnackBarBehavior.floating,
+      ),
     );
   }
 
@@ -1256,12 +1492,18 @@ class _WaitlistTabState extends State<WaitlistTab> {
     await _copyPhone(p);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Номер скопирован. Вставь в телефон для звонка.'), behavior: SnackBarBehavior.floating),
+      const SnackBar(
+        content: Text('Номер скопирован. Вставь в телефон для звонка.'),
+        behavior: SnackBarBehavior.floating,
+      ),
     );
   }
 
   // ✅ NEW: delete waitlist from UI (with reason + audit on backend)
-  Future<void> _deleteWaitlist(Map<String, dynamic> w, {required BuildContext sheetCtx}) async {
+  Future<void> _deleteWaitlist(
+    Map<String, dynamic> w, {
+    required BuildContext sheetCtx,
+  }) async {
     final sid = widget.session.activeShiftId ?? '';
     if (sid.isEmpty) return;
 
@@ -1281,12 +1523,17 @@ class _WaitlistTabState extends State<WaitlistTab> {
             const SizedBox(height: 12),
             TextField(
               controller: reasonCtrl,
-              decoration: const InputDecoration(labelText: 'Причина (обязательно)'),
+              decoration: const InputDecoration(
+                labelText: 'Причина (обязательно)',
+              ),
             ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(dctx).pop(false), child: const Text('Отмена')),
+          TextButton(
+            onPressed: () => Navigator.of(dctx).pop(false),
+            child: const Text('Отмена'),
+          ),
           ElevatedButton(
             onPressed: () => Navigator.of(dctx).pop(true),
             child: const Text('Удалить'),
@@ -1300,7 +1547,10 @@ class _WaitlistTabState extends State<WaitlistTab> {
     final reason = reasonCtrl.text.trim();
     if (reason.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Причина обязательна'), behavior: SnackBarBehavior.floating),
+        const SnackBar(
+          content: Text('Причина обязательна'),
+          behavior: SnackBarBehavior.floating,
+        ),
       );
       return;
     }
@@ -1324,12 +1574,18 @@ class _WaitlistTabState extends State<WaitlistTab> {
       await load();
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Удалено из ожидания'), behavior: SnackBarBehavior.floating),
+        const SnackBar(
+          content: Text('Удалено из ожидания'),
+          behavior: SnackBarBehavior.floating,
+        ),
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Ошибка: $e'), behavior: SnackBarBehavior.floating),
+        SnackBar(
+          content: Text('Ошибка: $e'),
+          behavior: SnackBarBehavior.floating,
+        ),
       );
     } finally {
       if (mounted) setState(() => loading = false);
@@ -1339,7 +1595,9 @@ class _WaitlistTabState extends State<WaitlistTab> {
   Future<void> _openConvertToQueueSheet(Map<String, dynamic> w) async {
     final sid = widget.session.activeShiftId ?? '';
     if (sid.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Нет активной смены. Перезайди.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Нет активной смены. Перезайди.')),
+      );
       return;
     }
 
@@ -1356,7 +1614,12 @@ class _WaitlistTabState extends State<WaitlistTab> {
 
     if (activeBays.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Посты закрыты. Открой пост, чтобы поставить в очередь.'), behavior: SnackBarBehavior.floating),
+        const SnackBar(
+          content: Text(
+            'Посты закрыты. Открой пост, чтобы поставить в очередь.',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
       );
       return;
     }
@@ -1366,7 +1629,9 @@ class _WaitlistTabState extends State<WaitlistTab> {
 
     final locId = widget.session.locationId.trim();
     if (locId.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Нет locationId в сессии.')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Нет locationId в сессии.')));
       return;
     }
 
@@ -1381,8 +1646,20 @@ class _WaitlistTabState extends State<WaitlistTab> {
     List<DateTimeRange> busy = const [];
 
     Future<void> loadBusy() async {
-      final from = DateTime(selectedDayLocal.year, selectedDayLocal.month, selectedDayLocal.day, _openHour, 0);
-      final to = DateTime(selectedDayLocal.year, selectedDayLocal.month, selectedDayLocal.day, _closeHour, 0);
+      final from = DateTime(
+        selectedDayLocal.year,
+        selectedDayLocal.month,
+        selectedDayLocal.day,
+        _openHour,
+        0,
+      );
+      final to = DateTime(
+        selectedDayLocal.year,
+        selectedDayLocal.month,
+        selectedDayLocal.day,
+        _closeHour,
+        0,
+      );
 
       final rows = await widget.api.publicBusySlots(
         locationId: locId,
@@ -1434,7 +1711,9 @@ class _WaitlistTabState extends State<WaitlistTab> {
         Future<void> convert(BuildContext ctx, StateSetter setSheet) async {
           if (converting) return;
           if (selectedSlot == null) {
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Выбери время.')));
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(const SnackBar(content: Text('Выбери время.')));
             return;
           }
 
@@ -1454,7 +1733,9 @@ class _WaitlistTabState extends State<WaitlistTab> {
             await load();
           } catch (e) {
             if (!mounted) return;
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
           } finally {
             setSheet(() => converting = false);
           }
@@ -1465,17 +1746,29 @@ class _WaitlistTabState extends State<WaitlistTab> {
             builder: (ctx, setSheet) {
               final cs = Theme.of(ctx).colorScheme;
               final slots = freeSlots();
-              final days = List.generate(7, (i) => _dateOnly(DateTime.now().add(Duration(days: i))));
+              final days = List.generate(
+                7,
+                (i) => _dateOnly(DateTime.now().add(Duration(days: i))),
+              );
 
               return Padding(
-                padding: EdgeInsets.only(left: 16, right: 16, top: 10, bottom: 16 + MediaQuery.of(ctx).viewInsets.bottom),
+                padding: EdgeInsets.only(
+                  left: 16,
+                  right: 16,
+                  top: 10,
+                  bottom: 16 + MediaQuery.of(ctx).viewInsets.bottom,
+                ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Row(
                       children: [
                         Expanded(
-                          child: Text('В очередь', style: Theme.of(ctx).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900)),
+                          child: Text(
+                            'В очередь',
+                            style: Theme.of(ctx).textTheme.titleMedium
+                                ?.copyWith(fontWeight: FontWeight.w900),
+                          ),
                         ),
                       ],
                     ),
@@ -1486,8 +1779,16 @@ class _WaitlistTabState extends State<WaitlistTab> {
                         Expanded(
                           child: DropdownButtonFormField<int>(
                             initialValue: selectedBay,
-                            decoration: const InputDecoration(labelText: 'Пост'),
-                            items: [for (final b in activeBays) DropdownMenuItem(value: b, child: Text('Пост $b'))],
+                            decoration: const InputDecoration(
+                              labelText: 'Пост',
+                            ),
+                            items: [
+                              for (final b in activeBays)
+                                DropdownMenuItem(
+                                  value: b,
+                                  child: Text('Пост $b'),
+                                ),
+                            ],
                             onChanged: (loadingSlots || converting)
                                 ? null
                                 : (v) async {
@@ -1499,13 +1800,26 @@ class _WaitlistTabState extends State<WaitlistTab> {
                         ),
                         const SizedBox(width: 10),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 8,
+                          ),
                           decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(999),
-                            border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
-                            color: cs.surfaceContainerHighest.withValues(alpha: 0.14),
+                            border: Border.all(
+                              color: cs.outlineVariant.withValues(alpha: 0.6),
+                            ),
+                            color: cs.surfaceContainerHighest.withValues(
+                              alpha: 0.14,
+                            ),
                           ),
-                          child: Text('Слот: $blockMin мин', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12)),
+                          child: Text(
+                            'Слот: $blockMin мин',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w900,
+                              fontSize: 12,
+                            ),
+                          ),
                         ),
                       ],
                     ),
@@ -1558,7 +1872,10 @@ class _WaitlistTabState extends State<WaitlistTab> {
                             padding: const EdgeInsets.all(12),
                             child: Text(
                               'Нет доступных слотов на выбранный день.',
-                              style: TextStyle(color: cs.onSurface.withValues(alpha: 0.75), fontWeight: FontWeight.w700),
+                              style: TextStyle(
+                                color: cs.onSurface.withValues(alpha: 0.75),
+                                fontWeight: FontWeight.w700,
+                              ),
                             ),
                           );
                         }
@@ -1588,11 +1905,21 @@ class _WaitlistTabState extends State<WaitlistTab> {
                     SizedBox(
                       width: double.infinity,
                       child: FilledButton.icon(
-                        onPressed: (loadingSlots || converting) ? null : () => convert(ctx, setSheet),
+                        onPressed: (loadingSlots || converting)
+                            ? null
+                            : () => convert(ctx, setSheet),
                         icon: converting
-                            ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
                             : const Icon(Icons.done),
-                        label: Text(converting ? 'Создаю...' : 'Создать запись'),
+                        label: Text(
+                          converting ? 'Создаю...' : 'Создать запись',
+                        ),
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -1617,7 +1944,9 @@ class _WaitlistTabState extends State<WaitlistTab> {
 
     final clientName = (w['client']?['name'] ?? '').toString().trim();
     final clientPhone = _phoneFromWaitlist(w);
-    final clientTitle = clientName.isNotEmpty ? clientName : (clientPhone.isNotEmpty ? clientPhone : 'Клиент');
+    final clientTitle = clientName.isNotEmpty
+        ? clientName
+        : (clientPhone.isNotEmpty ? clientPhone : 'Клиент');
 
     final carLine = _buildCarLineFromWaitlist(w);
 
@@ -1642,7 +1971,10 @@ class _WaitlistTabState extends State<WaitlistTab> {
                     Expanded(
                       child: Text(
                         'Ожидание • $time • Пост ${bay.isEmpty ? '—' : bay}',
-                        style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14),
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 14,
+                        ),
                       ),
                     ),
                   ],
@@ -1655,25 +1987,39 @@ class _WaitlistTabState extends State<WaitlistTab> {
                   decoration: BoxDecoration(
                     color: cs.surface,
                     borderRadius: BorderRadius.circular(18),
-                    border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
+                    border: Border.all(
+                      color: cs.outlineVariant.withValues(alpha: 0.6),
+                    ),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(serviceName, style: const TextStyle(fontWeight: FontWeight.w900)),
+                      Text(
+                        serviceName,
+                        style: const TextStyle(fontWeight: FontWeight.w900),
+                      ),
                       const SizedBox(height: 8),
-                      Text(clientTitle, style: const TextStyle(fontWeight: FontWeight.w800)),
+                      Text(
+                        clientTitle,
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
                       if (carLine.isNotEmpty) ...[
                         const SizedBox(height: 6),
                         Text(
                           carLine,
-                          style: TextStyle(fontWeight: FontWeight.w700, color: cs.onSurface.withValues(alpha: 0.75)),
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            color: cs.onSurface.withValues(alpha: 0.75),
+                          ),
                         ),
                       ],
                       const SizedBox(height: 10),
                       Text(
                         'Причина: $reason',
-                        style: TextStyle(fontWeight: FontWeight.w700, color: cs.onSurface.withValues(alpha: 0.75)),
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: cs.onSurface.withValues(alpha: 0.75),
+                        ),
                       ),
                     ],
                   ),
@@ -1687,23 +2033,37 @@ class _WaitlistTabState extends State<WaitlistTab> {
                   decoration: BoxDecoration(
                     color: cs.surface,
                     borderRadius: BorderRadius.circular(18),
-                    border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
+                    border: Border.all(
+                      color: cs.outlineVariant.withValues(alpha: 0.6),
+                    ),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Телефон', style: TextStyle(fontWeight: FontWeight.w800, color: cs.onSurface.withValues(alpha: 0.7))),
+                      Text(
+                        'Телефон',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          color: cs.onSurface.withValues(alpha: 0.7),
+                        ),
+                      ),
                       const SizedBox(height: 8),
                       SelectableText(
                         hasPhone ? clientPhone : '—',
-                        style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 22, letterSpacing: 0.2),
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 22,
+                          letterSpacing: 0.2,
+                        ),
                       ),
                       const SizedBox(height: 12),
                       Row(
                         children: [
                           Expanded(
                             child: FilledButton.icon(
-                              onPressed: hasPhone ? () => _copyPhone(clientPhone) : null,
+                              onPressed: hasPhone
+                                  ? () => _copyPhone(clientPhone)
+                                  : null,
                               icon: const Icon(Icons.copy),
                               label: const Text('Скопировать'),
                             ),
@@ -1711,7 +2071,9 @@ class _WaitlistTabState extends State<WaitlistTab> {
                           const SizedBox(width: 10),
                           Expanded(
                             child: OutlinedButton.icon(
-                              onPressed: hasPhone ? () => Share.share(clientPhone) : null,
+                              onPressed: hasPhone
+                                  ? () => Share.share(clientPhone)
+                                  : null,
                               icon: const Icon(Icons.share),
                               label: const Text('Поделиться'),
                             ),
@@ -1722,7 +2084,9 @@ class _WaitlistTabState extends State<WaitlistTab> {
                       SizedBox(
                         width: double.infinity,
                         child: OutlinedButton.icon(
-                          onPressed: hasPhone ? () => _dispatcherCall(clientPhone) : null,
+                          onPressed: hasPhone
+                              ? () => _dispatcherCall(clientPhone)
+                              : null,
                           icon: const Icon(Icons.phone),
                           label: const Text('Позвонить'),
                         ),
@@ -1742,7 +2106,9 @@ class _WaitlistTabState extends State<WaitlistTab> {
                             ? null
                             : () async {
                                 Navigator.of(sheetCtx).pop();
-                                await Future<void>.delayed(const Duration(milliseconds: 150));
+                                await Future<void>.delayed(
+                                  const Duration(milliseconds: 150),
+                                );
                                 if (!mounted) return;
                                 await _openConvertToQueueSheet(w);
                               },
@@ -1753,7 +2119,9 @@ class _WaitlistTabState extends State<WaitlistTab> {
                     const SizedBox(width: 10),
                     Expanded(
                       child: OutlinedButton.icon(
-                        onPressed: loading ? null : () => _deleteWaitlist(w, sheetCtx: sheetCtx),
+                        onPressed: loading
+                            ? null
+                            : () => _deleteWaitlist(w, sheetCtx: sheetCtx),
                         icon: const Icon(Icons.delete_outline),
                         label: const Text('Удалить'),
                       ),
@@ -1762,7 +2130,10 @@ class _WaitlistTabState extends State<WaitlistTab> {
                 ),
 
                 const SizedBox(height: 8),
-                TextButton(onPressed: () => Navigator.of(sheetCtx).pop(), child: const Text('Закрыть')),
+                TextButton(
+                  onPressed: () => Navigator.of(sheetCtx).pop(),
+                  child: const Text('Закрыть'),
+                ),
               ],
             ),
           ),
@@ -1782,7 +2153,9 @@ class _WaitlistTabState extends State<WaitlistTab> {
 
     final clientName = (w['client']?['name'] ?? '').toString().trim();
     final clientPhone = _phoneFromWaitlist(w);
-    final clientTitle = clientName.isNotEmpty ? clientName : (clientPhone.isNotEmpty ? clientPhone : 'Клиент');
+    final clientTitle = clientName.isNotEmpty
+        ? clientName
+        : (clientPhone.isNotEmpty ? clientPhone : 'Клиент');
 
     final carLine = _buildCarLineFromWaitlist(w);
 
@@ -1799,24 +2172,43 @@ class _WaitlistTabState extends State<WaitlistTab> {
           borderRadius: BorderRadius.circular(18),
           border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
           boxShadow: [
-            BoxShadow(blurRadius: 10, offset: const Offset(0, 6), color: Colors.black.withValues(alpha: 0.04)),
+            BoxShadow(
+              blurRadius: 10,
+              offset: const Offset(0, 6),
+              color: Colors.black.withValues(alpha: 0.04),
+            ),
           ],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('$time • Пост ${bay.isEmpty ? '—' : bay} • $serviceName', style: const TextStyle(fontWeight: FontWeight.w900)),
+            Text(
+              '$time • Пост ${bay.isEmpty ? '—' : bay} • $serviceName',
+              style: const TextStyle(fontWeight: FontWeight.w900),
+            ),
             const SizedBox(height: 8),
-            Text(clientTitle, style: const TextStyle(fontWeight: FontWeight.w800)),
+            Text(
+              clientTitle,
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
             if (carLine.isNotEmpty) ...[
               const SizedBox(height: 4),
               Text(
                 carLine,
-                style: TextStyle(color: cs.onSurface.withValues(alpha: 0.75), fontWeight: FontWeight.w700),
+                style: TextStyle(
+                  color: cs.onSurface.withValues(alpha: 0.75),
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ],
             const SizedBox(height: 8),
-            Text('Причина: $reason', style: TextStyle(color: cs.onSurface.withValues(alpha: 0.75), fontWeight: FontWeight.w700)),
+            Text(
+              'Причина: $reason',
+              style: TextStyle(
+                color: cs.onSurface.withValues(alpha: 0.75),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
           ],
         ),
       ),
@@ -1829,7 +2221,11 @@ class _WaitlistTabState extends State<WaitlistTab> {
       appBar: AppBar(
         title: Text(ruTitle()),
         actions: [
-          IconButton(tooltip: 'Вчера', onPressed: () => shiftDay(-1), icon: const Icon(Icons.chevron_left)),
+          IconButton(
+            tooltip: 'Вчера',
+            onPressed: () => shiftDay(-1),
+            icon: const Icon(Icons.chevron_left),
+          ),
           IconButton(
             tooltip: 'Сегодня',
             onPressed: () {
@@ -1838,7 +2234,11 @@ class _WaitlistTabState extends State<WaitlistTab> {
             },
             icon: const Icon(Icons.today),
           ),
-          IconButton(tooltip: 'Завтра', onPressed: () => shiftDay(1), icon: const Icon(Icons.chevron_right)),
+          IconButton(
+            tooltip: 'Завтра',
+            onPressed: () => shiftDay(1),
+            icon: const Icon(Icons.chevron_right),
+          ),
           IconButton(icon: const Icon(Icons.refresh), onPressed: load),
           const SizedBox(width: 8),
         ],
@@ -1846,15 +2246,21 @@ class _WaitlistTabState extends State<WaitlistTab> {
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : (error != null)
-              ? Center(child: Padding(padding: const EdgeInsets.all(16), child: Text(error!, style: const TextStyle(color: Colors.red))))
-              : waitlist.isEmpty
-                  ? const Center(child: Text('Очередь пуста'))
-                  : ListView.separated(
-                      padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-                      itemCount: waitlist.length,
-                      separatorBuilder: (_, _) => const SizedBox(height: 10),
-                      itemBuilder: (context, i) => _waitlistCard(context, waitlist[i] as Map<String, dynamic>),
-                    ),
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(error!, style: const TextStyle(color: Colors.red)),
+              ),
+            )
+          : waitlist.isEmpty
+          ? const Center(child: Text('Очередь пуста'))
+          : ListView.separated(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+              itemCount: waitlist.length,
+              separatorBuilder: (_, _) => const SizedBox(height: 10),
+              itemBuilder: (context, i) =>
+                  _waitlistCard(context, waitlist[i] as Map<String, dynamic>),
+            ),
     );
   }
 }

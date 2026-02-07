@@ -349,13 +349,14 @@ async cancelWaitlistRequest(waitlistId: string, clientId: string) {
   });
 
   if (!wl) throw new NotFoundException('Waitlist request not found');
+  if (wl.clientId !== cid) throw new ForbiddenException('Not your waitlist request');
 
-  if (wl.clientId !== cid) {
-    throw new ForbiddenException('Not your waitlist request');
-  }
-
-  // already not waiting => idempotent OK
+  // ✅ если уже не WAITING — ок, но realtime всё равно пошлём (чтобы UI у админа точно обновилась)
   if (wl.status !== WaitlistStatus.WAITING) {
+    // 🔥 WS: дергаем обе линии (самый надежный способ)
+    this.ws.emitBookingChanged(wl.locationId, 1);
+    this.ws.emitBookingChanged(wl.locationId, 2);
+
     return { ok: true, id: wl.id, status: wl.status };
   }
 
@@ -368,10 +369,9 @@ async cancelWaitlistRequest(waitlistId: string, clientId: string) {
     select: { id: true, status: true, locationId: true, desiredBayId: true },
   });
 
-  // ✅ audit without prisma enum migration: reuse existing BOOKING_DELETE
   await this.prisma.auditEvent.create({
     data: {
-      type: AuditType.BOOKING_DELETE,
+      type: AuditType.BOOKING_DELETE, // reuse enum
       locationId: wl.locationId,
       clientId: wl.clientId,
       reason: 'WAITLIST_CLIENT_CANCEL',
@@ -380,18 +380,17 @@ async cancelWaitlistRequest(waitlistId: string, clientId: string) {
         prevStatus: wl.status,
         newStatus: updated.status,
         desiredBayId: wl.desiredBayId ?? null,
-        desiredDateTime: wl.desiredDateTime?.toISOString?.() ?? null,
+        desiredDateTime: wl.desiredDateTime ? wl.desiredDateTime.toISOString() : null,
       },
     },
   });
 
-  // ✅ realtime refresh for both apps
-  const bay = wl.desiredBayId ?? 1;
-  this.ws.emitBookingChanged(wl.locationId, bay);
+  // ✅ WS: дергаем обе линии, чтобы админ ВСЕГДА обновился
+  this.ws.emitBookingChanged(wl.locationId, 1);
+  this.ws.emitBookingChanged(wl.locationId, 2);
 
   return { ok: true, id: updated.id, status: updated.status };
 }
-
 
   /* ===================== LIST BOOKINGS ===================== */
 
