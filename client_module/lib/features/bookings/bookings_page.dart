@@ -202,9 +202,8 @@ class _BookingsPageState extends State<BookingsPage> {
 
   String _serviceImage(Service? s) {
     final name = (s?.name ?? '').toLowerCase();
-    if (name.contains('комплекс')) {
+    if (name.contains('комплекс'))
       return 'assets/images/services/kompleks_512.jpg';
-    }
     if (name.contains('воск')) return 'assets/images/services/vosk_512.jpg';
     return 'assets/images/services/kuzov_512.jpg';
   }
@@ -265,8 +264,7 @@ class _BookingsPageState extends State<BookingsPage> {
     );
   }
 
-  Widget _statusBadge(Booking b) {
-    final c = _statusColor(context, b);
+  Widget _statusBadgeText(String text, Color c) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
@@ -274,10 +272,15 @@ class _BookingsPageState extends State<BookingsPage> {
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
-        _statusText(b),
+        text,
         style: TextStyle(fontSize: 12, fontWeight: FontWeight.w900, color: c),
       ),
     );
+  }
+
+  Widget _statusBadgeBooking(Booking b) {
+    final c = _statusColor(context, b);
+    return _statusBadgeText(_statusText(b), c);
   }
 
   Widget _serviceThumb(Service? s) {
@@ -346,7 +349,78 @@ class _BookingsPageState extends State<BookingsPage> {
       ],
     );
   }
-  // ---------------- card ----------------
+
+  // ---------------- unified list ----------------
+
+  DateTime _waitlistDateTime(Map<String, dynamic> w) {
+    final iso = (w['desiredDateTime'] ?? w['dateTime'] ?? '').toString().trim();
+    final dt = DateTime.tryParse(iso);
+    return (dt ?? DateTime.now()).toLocal();
+  }
+
+  int? _waitlistDesiredBay(Map<String, dynamic> w) {
+    final v = w['desiredBayId'] ?? w['bayId'];
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    final p = int.tryParse(v?.toString() ?? '');
+    return p;
+  }
+
+  String _waitlistReason(Map<String, dynamic> w) {
+    final raw = (w['reason'] ?? '').toString().trim();
+    if (raw.isEmpty) return 'Ожидание свободного поста';
+    final up = raw.toUpperCase();
+    if (up.contains('ALL_BAYS_CLOSED')) return 'Посты закрыты';
+    if (up.contains('BAY_CLOSED')) return 'Пост закрыт';
+    return raw;
+  }
+
+  String _waitlistCarLine(Map<String, dynamic> w) {
+    final make = (w['car']?['makeDisplay'] ?? '').toString().trim();
+    final model = (w['car']?['modelDisplay'] ?? '').toString().trim();
+    final plate = (w['car']?['plateDisplay'] ?? '').toString().trim();
+    final parts = <String>[];
+    final mm = ('$make $model').trim();
+    if (mm.isNotEmpty) parts.add(mm);
+    if (plate.isNotEmpty) parts.add('($plate)');
+    return parts.join(' ');
+  }
+
+  String _waitlistServiceName(Map<String, dynamic> w) {
+    final name = (w['service']?['name'] ?? '').toString().trim();
+    return name.isEmpty ? 'Услуга' : name;
+  }
+
+  String _waitlistServiceImage(Map<String, dynamic> w) {
+    final name = _waitlistServiceName(w).toLowerCase();
+    if (name.contains('комплекс'))
+      return 'assets/images/services/kompleks_512.jpg';
+    if (name.contains('воск')) return 'assets/images/services/vosk_512.jpg';
+    return 'assets/images/services/kuzov_512.jpg';
+  }
+
+  Widget _waitlistThumb(Map<String, dynamic> w) {
+    final cs = Theme.of(context).colorScheme;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: Image.asset(
+        _waitlistServiceImage(w),
+        width: 56,
+        height: 56,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => Container(
+          width: 56,
+          height: 56,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: cs.surfaceContainerHighest.withValues(alpha: 0.22),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Icon(Icons.hourglass_bottom, color: cs.onSurface),
+        ),
+      ),
+    );
+  }
 
   Widget _bookingCard({
     required Booking b,
@@ -358,7 +432,6 @@ class _BookingsPageState extends State<BookingsPage> {
     final total = _effectivePriceRub(service, b);
     final toPay = _toPayRub(service, b);
     final addonsCount = _addonsCountSafe(b);
-
     final secondary = cs.onSurface.withValues(alpha: 0.72);
 
     return InkWell(
@@ -389,7 +462,7 @@ class _BookingsPageState extends State<BookingsPage> {
                         ),
                       ),
                       const SizedBox(width: 8),
-                      _statusBadge(b),
+                      _statusBadgeBooking(b),
                     ],
                   ),
                   const SizedBox(height: 10),
@@ -437,37 +510,82 @@ class _BookingsPageState extends State<BookingsPage> {
     );
   }
 
-  Widget _waitlistTopCard(int count) {
+  Widget _waitlistCard({
+    required Map<String, dynamic> w,
+    required VoidCallback onTap,
+  }) {
     final cs = Theme.of(context).colorScheme;
 
-    return _sectionBox(
-      child: Row(
-        children: [
-          Icon(Icons.hourglass_bottom, color: cs.primary),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              'Ожидание: $count',
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                fontWeight: FontWeight.w900,
-                color: cs.onSurface.withValues(alpha: 0.95),
+    final dt = _waitlistDateTime(w);
+    final bayId = _waitlistDesiredBay(w);
+    final reason = _waitlistReason(w);
+    final carLine = _waitlistCarLine(w);
+    final serviceName = _waitlistServiceName(w);
+
+    final badge = _statusBadgeText('ОЖИДАНИЕ', Colors.orange);
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(18),
+      onTap: onTap,
+      child: _sectionBox(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _waitlistThumb(w),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          serviceName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(
+                                fontWeight: FontWeight.w900,
+                                color: cs.onSurface.withValues(alpha: 0.92),
+                              ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      badge,
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  _pill(text: _dtInline(dt), icon: Icons.schedule),
+                  const SizedBox(height: 8),
+                  if (carLine.trim().isNotEmpty)
+                    Text(
+                      carLine,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: cs.onSurface.withValues(alpha: 0.72),
+                      ),
+                    ),
+                  const SizedBox(height: 10),
+                  _pill(
+                    text: reason,
+                    icon: Icons.hourglass_bottom,
+                    borderTint: Colors.orange,
+                  ),
+                  const SizedBox(height: 12),
+                  _bayRow(bayId),
+                ],
               ),
             ),
-          ),
-          FilledButton(
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => WaitlistPage(repo: widget.repo),
-                ),
-              );
-            },
-            child: const Text('Показать'),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
+
+  // ---------------- build ----------------
 
   @override
   Widget build(BuildContext context) {
@@ -494,42 +612,38 @@ class _BookingsPageState extends State<BookingsPage> {
         final carsById = {for (final c in data.cars) c.id: c};
         final servicesById = {for (final s in data.services) s.id: s};
 
-        final bookings = [...data.bookings]
-          ..sort((a, b) => b.dateTime.compareTo(a.dateTime));
-
-        final listChildren = <Widget>[
-          const SizedBox(height: 12),
-          if (data.waitlist.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-              child: _waitlistTopCard(data.waitlist.length),
-            ),
+        // ✅ unified items
+        final items = <_UnifiedItem>[
+          for (final b in data.bookings) _UnifiedItem.booking(b),
+          for (final w in data.waitlist) _UnifiedItem.waitlist(w),
         ];
 
-        if (bookings.isEmpty) {
-          listChildren.add(
-            const Padding(
-              padding: EdgeInsets.only(top: 24),
-              child: EmptyState(
-                icon: Icons.event_busy,
-                title: 'Нет записей',
-                subtitle: 'Создай запись — она появится здесь',
-              ),
+        // sort desc by datetime
+        items.sort((a, b) => b.dateTime.compareTo(a.dateTime));
+
+        if (items.isEmpty) {
+          return const Padding(
+            padding: EdgeInsets.only(top: 24),
+            child: EmptyState(
+              icon: Icons.event_busy,
+              title: 'Нет записей',
+              subtitle: 'Создай запись — она появится здесь',
             ),
           );
-          return ListView(children: listChildren);
         }
 
+        final listChildren = <Widget>[const SizedBox(height: 12)];
+
         String? lastDay;
-        for (final b in bookings) {
-          final day = _dateKey(b.dateTime);
+        for (final it in items) {
+          final day = _dateKey(it.dateTime);
           if (day != lastDay) {
             lastDay = day;
             listChildren.add(
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
                 child: Text(
-                  _dateHeader(b.dateTime),
+                  _dateHeader(it.dateTime),
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
                     fontWeight: FontWeight.w900,
                     color: Theme.of(
@@ -544,22 +658,35 @@ class _BookingsPageState extends State<BookingsPage> {
           listChildren.add(
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-              child: _bookingCard(
-                b: b,
-                car: carsById[b.carId],
-                service: servicesById[b.serviceId],
-                onTap: () async {
-                  await Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => BookingDetailsPage(
-                        repo: widget.repo,
-                        bookingId: b.id,
-                      ),
+              child: it.isBooking
+                  ? _bookingCard(
+                      b: it.booking!,
+                      car: carsById[it.booking!.carId],
+                      service: servicesById[it.booking!.serviceId],
+                      onTap: () async {
+                        await Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => BookingDetailsPage(
+                              repo: widget.repo,
+                              bookingId: it.booking!.id,
+                            ),
+                          ),
+                        );
+                        _refresh();
+                      },
+                    )
+                  : _waitlistCard(
+                      w: it.waitlist!,
+                      onTap: () async {
+                        // simplest & safe: open WaitlistPage (там уже есть отмена ожидания)
+                        await Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => WaitlistPage(repo: widget.repo),
+                          ),
+                        );
+                        _refresh();
+                      },
                     ),
-                  );
-                  _refresh();
-                },
-              ),
             ),
           );
         }
@@ -583,4 +710,38 @@ class _BookingsBundle {
     required this.services,
     required this.waitlist,
   });
+}
+
+class _UnifiedItem {
+  final Booking? booking;
+  final Map<String, dynamic>? waitlist;
+  final DateTime dateTime;
+  final bool isBooking;
+
+  _UnifiedItem._({
+    required this.booking,
+    required this.waitlist,
+    required this.dateTime,
+    required this.isBooking,
+  });
+
+  factory _UnifiedItem.booking(Booking b) {
+    return _UnifiedItem._(
+      booking: b,
+      waitlist: null,
+      dateTime: b.dateTime.toLocal(),
+      isBooking: true,
+    );
+  }
+
+  factory _UnifiedItem.waitlist(Map<String, dynamic> w) {
+    final iso = (w['desiredDateTime'] ?? w['dateTime'] ?? '').toString().trim();
+    final dt = DateTime.tryParse(iso)?.toLocal() ?? DateTime.now();
+    return _UnifiedItem._(
+      booking: null,
+      waitlist: w,
+      dateTime: dt,
+      isBooking: false,
+    );
+  }
 }

@@ -1,10 +1,11 @@
 // C:\dev\carwash\client_module\lib\features\bookings\create_booking_page.dart
-// (ФАЙЛ ЦЕЛИКОМ — твой, + ДОБАВЛЕНО: защита от мульти-бронирований по клиенту)
+// (FULL FILE — anti spam: multi-booking + waitlist lock + yandex-ish bottom CTA + reliable waitlist detection via ApiException.raw)
 
 import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import '../../core/api/api_client.dart'; // ✅ ApiException (for raw/details)
 import '../../core/data/app_repository.dart';
 import '../../core/models/booking.dart';
 import '../../core/models/car.dart';
@@ -13,7 +14,6 @@ import '../../core/realtime/realtime_client.dart';
 import 'payment_page.dart';
 
 enum _BayMode { any, bay1, bay2 }
-
 enum _DayPart { morning, day, evening }
 
 class CreateBookingPage extends StatefulWidget {
@@ -75,8 +75,14 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
   final Set<String> _selectedAddonServiceIds = <String>{};
 
-  // ✅ для “как у Яндекса”: свайп машин
+  // ✅ “Яндекс”: свайп машин
   final PageController _carsPage = PageController(viewportFraction: 1.0);
+
+  // ✅ анти-спам waitlist: если уже поставили в ожидание — блокируем UI и кнопку
+  bool _waitlistLocked = false;
+  String? _waitlistLockedReason; // текст для UI
+
+  bool get _uiLocked => _saving || _waitlistLocked;
 
   @override
   void initState() {
@@ -91,11 +97,12 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
       if (!mounted) return;
       if (ev.type != 'booking.changed') return;
 
+      // если мы в waitlist lock — всё равно обновим busy, но не дергаем выбор
       await _refreshBusy(force: true);
       if (!mounted) return;
 
       final cur = _selectedSlotStart;
-      if (cur != null && _isBusySlot(cur)) {
+      if (!_uiLocked && cur != null && _isBusySlot(cur)) {
         setState(() {
           _selectedSlotStart = null;
           _pickedBayIdForAny = null;
@@ -203,12 +210,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     return _ceilToStep(lead, _slotStepMin);
   }
 
-  bool _overlaps(
-    DateTime aStart,
-    DateTime aEnd,
-    DateTime bStart,
-    DateTime bEnd,
-  ) {
+  bool _overlaps(DateTime aStart, DateTime aEnd, DateTime bStart, DateTime bEnd) {
     return aStart.isBefore(bEnd) && bStart.isBefore(aEnd);
   }
 
@@ -223,7 +225,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     }
   }
 
-  /// ✅ what client *requested*
+  /// what client *requested*
   /// - any => null
   /// - bay1 => 1
   /// - bay2 => 2
@@ -260,13 +262,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
   bool _endsBeforeClose(DateTime slotStart) {
     final blockMin = _effectiveBlockMinForSelectedService();
     final end = slotStart.add(Duration(minutes: blockMin));
-    final close = DateTime(
-      slotStart.year,
-      slotStart.month,
-      slotStart.day,
-      _closeHour,
-      0,
-    );
+    final close = DateTime(slotStart.year, slotStart.month, slotStart.day, _closeHour, 0);
     return !end.isAfter(close);
   }
 
@@ -304,10 +300,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     return null;
   }
 
-  Color _hexToColorSafe(
-    String hex, {
-    Color fallback = const Color(0xFF2D9CDB),
-  }) {
+  Color _hexToColorSafe(String hex, {Color fallback = const Color(0xFF2D9CDB)}) {
     final s = hex.trim();
     if (s.isEmpty) return fallback;
     var h = s;
@@ -318,10 +311,45 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     return Color(v);
   }
 
+  void _lockWaitlistUi(String reason) {
+    if (!mounted) return;
+    setState(() {
+      _waitlistLocked = true;
+      _waitlistLockedReason = reason.trim().isEmpty ? null : reason.trim();
+    });
+  }
+
+  // ✅ RELIABLE WAITLIST DETECTION (ApiClient humanizes message, so we check raw/details)
+  bool _isWaitlistedException(Object e) {
+    try {
+      if (e is ApiException) {
+        final raw = (e.raw ?? '').toString().toUpperCase();
+        if (raw.contains('ALL_BAYS_CLOSED_WAITLISTED')) return true;
+        if (raw.contains('BAY_CLOSED_WAITLISTED')) return true;
+
+        final details = e.details;
+        if (details is Map) {
+          final msg = (details['message'] ?? '').toString().toUpperCase();
+          if (msg.contains('ALL_BAYS_CLOSED_WAITLISTED')) return true;
+          if (msg.contains('BAY_CLOSED_WAITLISTED')) return true;
+        }
+
+        // sometimes ApiException.message itself might still contain marker
+        final m = e.message.toUpperCase();
+        if (m.contains('ALL_BAYS_CLOSED_WAITLISTED')) return true;
+        if (m.contains('BAY_CLOSED_WAITLISTED')) return true;
+      }
+
+      final s = e.toString().toUpperCase();
+      if (s.contains('ALL_BAYS_CLOSED_WAITLISTED')) return true;
+      if (s.contains('BAY_CLOSED_WAITLISTED')) return true;
+    } catch (_) {}
+
+    return false;
+  }
   // ---------------- MULTI-BOOKING GUARD (client-side) ----------------
 
   int _addonsDurationFromBookingSafe(Booking b) {
-    // booking may contain addons from backend as List<Map> or List<objects>
     try {
       final dyn = b as dynamic;
       final addons = dyn.addons;
@@ -370,7 +398,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
   }
 
   bool _isBookingStillBlocking(Booking b) {
-    // active always blocks; pending_payment blocks only while dueAt in future (or missing dueAt)
     if (b.status == BookingStatus.active) return true;
     if (b.status == BookingStatus.pendingPayment) {
       final due = b.paymentDueAt;
@@ -384,7 +411,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     final blockMin = _effectiveBlockMinForSelectedService();
     final slotEnd = slotStart.add(Duration(minutes: blockMin));
 
-    // We check client bookings irrespective of car: "one person can't hold multiple slots at same time"
     final list = await widget.repo.getBookings(
       includeCanceled: true,
       forceRefresh: true,
@@ -392,16 +418,10 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
     for (final b in list) {
       if (!_isBookingStillBlocking(b)) continue;
-
-      // ignore canceled/completed explicitly (defensive)
-      if (b.status == BookingStatus.canceled ||
-          b.status == BookingStatus.completed)
-        continue;
+      if (b.status == BookingStatus.canceled || b.status == BookingStatus.completed) continue;
 
       final bStart = b.dateTime.toLocal();
-      final bEnd = bStart.add(
-        Duration(minutes: _blockMinForExistingBooking(b)),
-      );
+      final bEnd = bStart.add(Duration(minutes: _blockMinForExistingBooking(b)));
 
       if (_overlaps(slotStart, slotEnd, bStart, bEnd)) {
         return true;
@@ -411,11 +431,44 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     return false;
   }
 
+  // ✅ if client already has WAITING waitlist overlapping => block spam
+  Future<bool> _hasClientWaitlistOverlapForSelectedSlot(DateTime slotStart) async {
+    final cid = widget.repo.currentClient?.id.trim() ?? '';
+    if (cid.isEmpty) return false;
+
+    final blockMin = _effectiveBlockMinForSelectedService();
+    final slotEnd = slotStart.add(Duration(minutes: blockMin));
+
+    try {
+      final list = await widget.repo.getWaitlist(
+        clientId: cid,
+        includeAll: false,
+      );
+
+      for (final w in list) {
+        final iso = (w['desiredDateTime'] ?? w['dateTime'] ?? '').toString().trim();
+        final dt = DateTime.tryParse(iso)?.toLocal();
+        if (dt == null) continue;
+
+        // duration for waitlist: service.duration + buffer(15) rounded to 30
+        final dur = (w['service']?['durationMin'] as num?)?.toInt() ?? 30;
+        final wlBlock = _roundUpToStepMin(dur + _bufferMin, _slotStepMin);
+        final wlEnd = dt.add(Duration(minutes: wlBlock));
+
+        if (_overlaps(slotStart, slotEnd, dt, wlEnd)) {
+          return true;
+        }
+      }
+    } catch (_) {
+      // ignore
+    }
+
+    return false;
+  }
+
   // ---------------- auto-pick slot logic ----------------
 
-  Future<void> _autoPickBestSlotForCurrentState({
-    required bool forceBusyRefresh,
-  }) async {
+  Future<void> _autoPickBestSlotForCurrentState({required bool forceBusyRefresh}) async {
     if (_location == null) return;
 
     if (forceBusyRefresh) {
@@ -490,6 +543,8 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     setState(() {
       _loading = true;
       _error = null;
+      _waitlistLocked = false;
+      _waitlistLockedReason = null;
     });
 
     try {
@@ -521,8 +576,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
       final String? selectedCarId = cars.isNotEmpty ? cars.first.id : null;
 
       String? selectedServiceId =
-          widget.preselectedServiceId ??
-          (services.isNotEmpty ? services.first.id : null);
+          widget.preselectedServiceId ?? (services.isNotEmpty ? services.first.id : null);
       if (widget.preselectedServiceId != null &&
           !services.any((s) => s.id == widget.preselectedServiceId)) {
         selectedServiceId = services.isNotEmpty ? services.first.id : null;
@@ -555,8 +609,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
         _didInitialAutoPick = true;
         await _autoPickBestSlotForCurrentState(forceBusyRefresh: false);
       }
-
-      if (!mounted) return;
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -567,6 +619,8 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
   }
 
   Future<void> _selectDate(DateTime d) async {
+    if (_uiLocked) return;
+
     setState(() {
       _selectedDate = _dateOnly(d);
       _selectedSlotStart = null;
@@ -601,7 +655,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     }
     return '';
   }
-
   // ---------------- UI: cars (FULL WIDTH, swipe like Yandex) ----------------
 
   String _carIconAsset(Car c) {
@@ -635,7 +688,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
     return InkWell(
       borderRadius: BorderRadius.circular(22),
-      onTap: _saving ? null : () => setState(() => carId = c.id),
+      onTap: _uiLocked ? null : () => setState(() => carId = c.id),
       child: Container(
         width: double.infinity,
         decoration: BoxDecoration(
@@ -682,16 +735,11 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                   ),
                   const SizedBox(width: 10),
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
-                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     decoration: BoxDecoration(
                       color: cs.surfaceContainerHighest.withValues(alpha: 0.18),
                       borderRadius: BorderRadius.circular(999),
-                      border: Border.all(
-                        color: cs.outlineVariant.withValues(alpha: 0.6),
-                      ),
+                      border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
                     ),
                     child: Text(
                       c.plateDisplay,
@@ -748,16 +796,14 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
         controller: _carsPage,
         itemCount: _cars.length,
         onPageChanged: (i) {
+          if (_uiLocked) return;
           if (i >= 0 && i < _cars.length) {
             setState(() => carId = _cars[i].id);
           }
         },
         itemBuilder: (_, i) {
           final c = _cars[i];
-          return Padding(
-            padding: const EdgeInsets.only(right: 0),
-            child: _carTile(c, selected: c.id == (carId ?? _cars.first.id)),
-          );
+          return _carTile(c, selected: c.id == (carId ?? _cars.first.id));
         },
       ),
     );
@@ -782,7 +828,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
     return InkWell(
       borderRadius: BorderRadius.circular(16),
-      onTap: _saving ? null : () => _selectDate(dd),
+      onTap: _uiLocked ? null : () => _selectDate(dd),
       child: Container(
         width: 56,
         padding: const EdgeInsets.symmetric(vertical: 10),
@@ -817,6 +863,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
   // ---------------- UI: bay selector row ----------------
 
   Future<void> _selectBay(_BayMode mode) async {
+    if (_uiLocked) return;
     setState(() {
       _bayMode = mode;
       _pickedBayIdForAny = null;
@@ -886,7 +933,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
         flex: flex,
         child: InkWell(
           borderRadius: BorderRadius.circular(16),
-          onTap: _saving ? null : () => _selectBay(mode),
+          onTap: _uiLocked ? null : () => _selectBay(mode),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
             decoration: BoxDecoration(
@@ -950,9 +997,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
   List<Service> _addonCandidates() {
     final sid = serviceId;
-    final list = _services
-        .where((s) => sid == null ? true : s.id != sid)
-        .toList();
+    final list = _services.where((s) => sid == null ? true : s.id != sid).toList();
     list.sort((a, b) => a.priceRub.compareTo(b.priceRub));
     return list;
   }
@@ -966,6 +1011,8 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
   }
 
   Future<void> _toggleAddon(Service s, bool value) async {
+    if (_uiLocked) return;
+
     setState(() {
       if (value) {
         _selectedAddonServiceIds.add(s.id);
@@ -1041,7 +1088,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
           const SizedBox(width: 10),
           Switch(
             value: selected,
-            onChanged: _saving ? null : (v) => _toggleAddon(s, v),
+            onChanged: _uiLocked ? null : (v) => _toggleAddon(s, v),
           ),
         ],
       ),
@@ -1068,8 +1115,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                     Expanded(
                       child: Text(
                         'Дополнительные услуги',
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.w900),
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w900,
+                            ),
                       ),
                     ),
                   ],
@@ -1134,7 +1182,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
           if (list.length > 2)
             Center(
               child: TextButton(
-                onPressed: _saving ? null : _openAllAddonsSheet,
+                onPressed: _uiLocked ? null : _openAllAddonsSheet,
                 child: const Text('Посмотреть все'),
               ),
             ),
@@ -1152,7 +1200,6 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
       ),
     );
   }
-
   // ---------------- UI: time ----------------
 
   List<DateTime> _visibleSlotsForCurrentMode() {
@@ -1169,14 +1216,8 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     return visible;
   }
 
-  List<DateTime> _filterByHourRange(
-    List<DateTime> slots,
-    int fromHour,
-    int toHourExclusive,
-  ) {
-    return slots
-        .where((d) => d.hour >= fromHour && d.hour < toHourExclusive)
-        .toList();
+  List<DateTime> _filterByHourRange(List<DateTime> slots, int fromHour, int toHourExclusive) {
+    return slots.where((d) => d.hour >= fromHour && d.hour < toHourExclusive).toList();
   }
 
   ButtonStyle _slotStyleOutlined() {
@@ -1206,6 +1247,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     final label = _fmtTime(s);
 
     Future<void> select() async {
+      if (_uiLocked) return;
       setState(() {
         _selectedSlotStart = s;
         _pickedBayIdForAny = null;
@@ -1221,19 +1263,13 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     return selected
         ? FilledButton(
             style: _slotStyleFilled(),
-            onPressed: _saving ? null : select,
-            child: Text(
-              label,
-              style: const TextStyle(fontWeight: FontWeight.w900),
-            ),
+            onPressed: _uiLocked ? null : select,
+            child: Text(label, style: const TextStyle(fontWeight: FontWeight.w900)),
           )
         : OutlinedButton(
             style: _slotStyleOutlined(),
-            onPressed: _saving ? null : select,
-            child: Text(
-              label,
-              style: const TextStyle(fontWeight: FontWeight.w900),
-            ),
+            onPressed: _uiLocked ? null : select,
+            child: Text(label, style: const TextStyle(fontWeight: FontWeight.w900)),
           );
   }
 
@@ -1258,10 +1294,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
           initiallyExpanded: initiallyExpanded,
           tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
           childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
-          title: Text(
-            title.toUpperCase(),
-            style: const TextStyle(fontWeight: FontWeight.w900),
-          ),
+          title: Text(title.toUpperCase(), style: const TextStyle(fontWeight: FontWeight.w900)),
           children: [
             Wrap(
               spacing: 10,
@@ -1281,7 +1314,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Посты закрыты'),
+        title: const Text('Посты сейчас закрыты'),
         content: const Text(
           'Мы добавили вас в очередь ожидания.\nКак только появится возможность — свяжемся с вами.',
         ),
@@ -1294,41 +1327,31 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
       ),
     );
     if (!mounted) return;
-
-    // ✅ caller should switch user to Bookings tab
-    Navigator.of(context).pop('waitlisted');
+    Navigator.of(context).pop('waitlisted'); // parent should switch to Bookings tab
   }
 
   // ---------------- SAVE ----------------
 
   Future<void> _save() async {
-    if (_saving) return;
+    if (_uiLocked) return;
     if (_location == null) return;
 
     if (_cars.isEmpty) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Сначала добавь авто.')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Сначала добавь авто.')));
       return;
     }
     if (carId == null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Выбери авто.')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Выбери авто.')));
       return;
     }
     if (serviceId == null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Выбери услугу.')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Выбери услугу.')));
       return;
     }
 
     final slot = _selectedSlotStart;
     if (slot == null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Выбери время.')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Выбери время.')));
       return;
     }
 
@@ -1337,45 +1360,52 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     if (isToday && slot.isBefore(minNow)) return;
     if (_isBusySlot(slot)) return;
 
-    // ✅ NEW: client-level overlap guard (prevents “кучу бронирований на одно и то же время”)
+    // ✅ (1) client-level overlap guard (bookings)
     try {
       final hasOverlap = await _hasClientOverlapForSelectedSlot(slot);
       if (!mounted) return;
       if (hasOverlap) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text(
-              'У вас уже есть запись на это время. Выберите другое время или отмените текущую запись.',
-            ),
+            content: Text('У вас уже есть запись на это время. Выберите другое время или отмените текущую запись.'),
             behavior: SnackBarBehavior.floating,
           ),
         );
         return;
       }
-    } catch (_) {
-      // ignore: server will still protect, and UI won't block if repo fails
-    }
+    } catch (_) {}
+
+    // ✅ (2) waitlist overlap guard (WAITING)
+    try {
+      final hasWait = await _hasClientWaitlistOverlapForSelectedSlot(slot);
+      if (!mounted) return;
+      if (hasWait) {
+        _lockWaitlistUi('У вас уже есть заявка в ожидании на это время.');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('У вас уже есть заявка в ожидании. Перейдите в “Записи”.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        return;
+      }
+    } catch (_) {}
 
     int? bayIdToSend = _currentBayIdOrNull();
     if (bayIdToSend == null) {
       bayIdToSend = _pickedBayIdForAny;
       bayIdToSend ??= await _pickBayForSlotAny(slot);
-
       if (!mounted) return;
 
       if (bayIdToSend == null) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Нет доступной линии на это время. Выбери другое.'),
-          ),
+          const SnackBar(content: Text('Нет доступной линии на это время. Выбери другое.')),
         );
         return;
       }
     }
 
-    // ✅ IMPORTANT: preserve what client requested
     final requestedBayId = _requestedBayIdOrNull(); // null means ANY
-
     setState(() => _saving = true);
 
     try {
@@ -1387,12 +1417,10 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
         serviceId: serviceId!,
         dateTime: slot,
         bayId: bayIdToSend,
-        requestedBayId: requestedBayId, // ✅ NEW
+        requestedBayId: requestedBayId,
         depositRub: _depositRub,
         bufferMin: _bufferMin,
-        comment: _commentCtrl.text.trim().isEmpty
-            ? null
-            : _commentCtrl.text.trim(),
+        comment: _commentCtrl.text.trim().isEmpty ? null : _commentCtrl.text.trim(),
         addons: addonsPayload.isEmpty ? null : addonsPayload,
       );
 
@@ -1422,24 +1450,24 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
       }
     } catch (e) {
       if (!mounted) return;
-      final lower = e.toString().toLowerCase();
 
-      if (lower.contains('all_bays_closed_waitlisted') ||
-          lower.contains('bay_closed_waitlisted')) {
+      // ✅ reliable waitlist recognition
+      if (_isWaitlistedException(e)) {
+        _lockWaitlistUi('Посты сейчас закрыты. Вы добавлены в очередь ожидания.');
         await _showWaitlistDialogAndGoToBookings();
         return;
       }
 
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Ошибка: $e'), behavior: SnackBarBehavior.floating),
+      );
     } finally {
       if (mounted) setState(() => _saving = false);
     }
   }
 
   bool _canProceed() {
-    if (_saving) return false;
+    if (_uiLocked) return false;
     if (_location == null) return false;
     if (_cars.isEmpty || _services.isEmpty) return false;
     if (carId == null || serviceId == null) return false;
@@ -1455,7 +1483,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     return true;
   }
 
-  // ---------------- UI ----------------
+  // ---------------- UI blocks ----------------
 
   Widget _sectionCard({required Widget child}) {
     final cs = Theme.of(context).colorScheme;
@@ -1477,9 +1505,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
       child: Text(
         t,
         style: Theme.of(context).textTheme.labelLarge?.copyWith(
-          fontWeight: FontWeight.w900,
-          color: cs.onSurface.withValues(alpha: 0.90),
-        ),
+              fontWeight: FontWeight.w900,
+              color: cs.onSurface.withValues(alpha: 0.90),
+            ),
       ),
     );
   }
@@ -1495,8 +1523,87 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
       child: Text(
         text,
         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-          fontWeight: FontWeight.w900,
-          color: cs.onSurface.withValues(alpha: 0.92),
+              fontWeight: FontWeight.w900,
+              color: cs.onSurface.withValues(alpha: 0.92),
+            ),
+      ),
+    );
+  }
+
+  Widget _waitlistLockedBanner() {
+    final cs = Theme.of(context).colorScheme;
+    final t = _waitlistLockedReason ?? 'Вы уже в очереди ожидания.';
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: cs.primary.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: cs.primary.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.hourglass_bottom, color: cs.primary),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              t,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: cs.onSurface.withValues(alpha: 0.90),
+                  ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _bottomCtaBar({required bool canProceed, required int remainingRub}) {
+    // ✅ if waitlisted => show “go to bookings”
+    if (_waitlistLocked) {
+      return SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _waitlistLockedBanner(),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: () => Navigator.of(context).pop('waitlisted'),
+                  icon: const Icon(Icons.event_note),
+                  label: const Text('Перейти к записям'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+        child: SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            onPressed: canProceed ? _save : null,
+            icon: _saving
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.credit_card),
+            label: Text(
+              _saving ? 'Сохраняю...' : 'Продолжить к оплате • $remainingRub ₽',
+            ),
+          ),
         ),
       ),
     );
@@ -1524,10 +1631,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
               children: [
                 Text('Ошибка: $_error', textAlign: TextAlign.center),
                 const SizedBox(height: 12),
-                FilledButton(
-                  onPressed: _bootstrap,
-                  child: const Text('Повторить'),
-                ),
+                FilledButton(onPressed: _bootstrap, child: const Text('Повторить')),
               ],
             ),
           ),
@@ -1536,9 +1640,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     }
 
     final serviceIds = _services.map((s) => s.id).toSet();
-    final safeServiceId = (serviceId != null && serviceIds.contains(serviceId))
-        ? serviceId
-        : null;
+    final safeServiceId = (serviceId != null && serviceIds.contains(serviceId)) ? serviceId : null;
 
     final dates = _quickDates();
 
@@ -1554,14 +1656,11 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     final eveningSlots = _filterByHourRange(visibleSlots, 17, _closeHour);
 
     final canProceed = _canProceed();
-
     final nowPart = _currentDayPart();
 
     String pickedLineText;
     if (_bayMode == _BayMode.any && _pickedBayIdForAny != null) {
-      pickedLineText = _pickedBayIdForAny == 1
-          ? 'Зелёная линия'
-          : 'Синяя линия';
+      pickedLineText = _pickedBayIdForAny == 1 ? 'Зелёная линия' : 'Синяя линия';
     } else {
       pickedLineText = _bayMode == _BayMode.any
           ? 'Любая линия'
@@ -1575,12 +1674,13 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Записаться на мойку')),
+      bottomNavigationBar: _bottomCtaBar(canProceed: canProceed, remainingRub: remaining),
       body: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
         child: ListView(
           children: [
             if (_locations.isNotEmpty) ...[
-              _sectionTitle('Мойка по адресу:'),
+              _sectionTitle('Мойка по адресу'),
               _sectionCard(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1618,23 +1718,23 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                           ),
                         );
                       }).toList(),
-                      onChanged: (id) async {
-                        if (id == null) return;
-                        final picked = _locations.firstWhere((x) => x.id == id);
-                        await widget.repo.setCurrentLocation(picked);
-                        if (!mounted) return;
+                      onChanged: _uiLocked
+                          ? null
+                          : (id) async {
+                              if (id == null) return;
+                              final picked = _locations.firstWhere((x) => x.id == id);
+                              await widget.repo.setCurrentLocation(picked);
+                              if (!mounted) return;
 
-                        setState(() {
-                          _location = picked;
-                          _selectedSlotStart = null;
-                          _pickedBayIdForAny = null;
-                        });
+                              setState(() {
+                                _location = picked;
+                                _selectedSlotStart = null;
+                                _pickedBayIdForAny = null;
+                              });
 
-                        await _refreshBusy(force: true);
-                        await _autoPickBestSlotForCurrentState(
-                          forceBusyRefresh: false,
-                        );
-                      },
+                              await _refreshBusy(force: true);
+                              await _autoPickBestSlotForCurrentState(forceBusyRefresh: false);
+                            },
                     ),
                     const SizedBox(height: 10),
                     Row(
@@ -1650,9 +1750,8 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            'Проверь, что выбрана правильный адрес мойки.',
-                            style: Theme.of(context).textTheme.bodySmall
-                                ?.copyWith(
+                            'Проверь, что выбран правильный адрес мойки.',
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                   color: cs.onSurface.withValues(alpha: 0.70),
                                   fontWeight: FontWeight.w700,
                                 ),
@@ -1665,9 +1764,11 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
               ),
               const SizedBox(height: 12),
             ],
+
             _sectionTitle('Авто'),
             _sectionCard(child: _carsSelector()),
             const SizedBox(height: 12),
+
             _sectionTitle('Услуга'),
             _sectionCard(
               child: DropdownButtonFormField<String>(
@@ -1681,32 +1782,33 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                     .map(
                       (s) => DropdownMenuItem<String>(
                         value: s.id,
-                        child: Text(
-                          '${s.name} (${s.priceRub} ₽) • ${s.durationMin ?? 30} мин',
-                        ),
+                        child: Text('${s.name} (${s.priceRub} ₽) • ${s.durationMin ?? 30} мин'),
                       ),
                     )
                     .toList(),
-                onChanged: (v) async {
-                  setState(() {
-                    serviceId = v;
-                    _selectedSlotStart = null;
-                    _pickedBayIdForAny = null;
-                    _selectedAddonServiceIds.clear();
-                  });
-                  await _refreshBusy(force: true);
-                  await _autoPickBestSlotForCurrentState(
-                    forceBusyRefresh: false,
-                  );
-                },
+                onChanged: _uiLocked
+                    ? null
+                    : (v) async {
+                        setState(() {
+                          serviceId = v;
+                          _selectedSlotStart = null;
+                          _pickedBayIdForAny = null;
+                          _selectedAddonServiceIds.clear();
+                        });
+                        await _refreshBusy(force: true);
+                        await _autoPickBestSlotForCurrentState(forceBusyRefresh: false);
+                      },
               ),
             ),
+
             const SizedBox(height: 12),
             _addonsSection(),
             const SizedBox(height: 12),
+
             _sectionTitle('Линия'),
             _sectionCard(child: _lineSelectorRow()),
             const SizedBox(height: 12),
+
             _sectionTitle('Дата'),
             _sectionCard(
               child: SizedBox(
@@ -1719,6 +1821,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                 ),
               ),
             ),
+
             const SizedBox(height: 12),
             _sectionTitle('Время'),
             _sectionCard(
@@ -1728,8 +1831,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                       child: Center(
                         child: Text(
                           'В этот день нет свободного времени',
-                          style: Theme.of(context).textTheme.bodyMedium
-                              ?.copyWith(
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                                 color: cs.onSurface.withValues(alpha: 0.80),
                                 fontWeight: FontWeight.w700,
                               ),
@@ -1756,21 +1858,23 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                       ],
                     ),
             ),
+
             const SizedBox(height: 12),
             _sectionTitle('Комментарий'),
             _sectionCard(
               child: TextFormField(
                 controller: _commentCtrl,
+                enabled: !_uiLocked,
                 minLines: 1,
                 maxLines: 3,
                 decoration: const InputDecoration(
                   labelText: 'Комментарий (по желанию)',
-                  hintText:
-                      'Например: машина в плёнке, арки под давлением не мыть…',
+                  hintText: 'Например: машина в плёнке, арки под давлением не мыть…',
                   border: OutlineInputBorder(),
                 ),
               ),
             ),
+
             const SizedBox(height: 12),
             _sectionTitle('Итого'),
             _sectionCard(
@@ -1780,9 +1884,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                   Text(
                     'Расчётное время на мойке ~${_washTimeMinApprox()} мин',
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      fontWeight: FontWeight.w900,
-                      color: cs.onSurface.withValues(alpha: 0.92),
-                    ),
+                          fontWeight: FontWeight.w900,
+                          color: cs.onSurface.withValues(alpha: 0.92),
+                        ),
                   ),
                   const SizedBox(height: 10),
                   Wrap(
@@ -1810,8 +1914,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                           pickedLineText,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                 fontWeight: FontWeight.w800,
                                 color: cs.onSurface.withValues(alpha: 0.78),
                               ),
@@ -1823,30 +1926,48 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                   Text(
                     'Длительность слота: ${_effectiveBlockMinForSelectedService()} мин (с запасом $_bufferMin минут)',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: cs.onSurface.withValues(alpha: 0.70),
-                      fontWeight: FontWeight.w700,
-                    ),
+                          color: cs.onSurface.withValues(alpha: 0.70),
+                          fontWeight: FontWeight.w700,
+                        ),
                   ),
                   const SizedBox(height: 6),
                   Text(
                     'Стоимость: $totalPriceRub ₽',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: cs.onSurface.withValues(alpha: 0.70),
-                      fontWeight: FontWeight.w700,
-                    ),
+                          color: cs.onSurface.withValues(alpha: 0.70),
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                          color: locColor,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Выбранная мойка: ${loc?.name ?? '—'}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                fontWeight: FontWeight.w800,
+                                color: cs.onSurface.withValues(alpha: 0.78),
+                              ),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: canProceed ? _save : null,
-                icon: const Icon(Icons.credit_card),
-                label: Text(_saving ? 'Сохраняю...' : 'Продолжить к оплате'),
-              ),
-            ),
+
+            const SizedBox(height: 80), // место под bottom bar
           ],
         ),
       ),
