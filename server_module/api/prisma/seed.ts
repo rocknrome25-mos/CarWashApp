@@ -1,4 +1,4 @@
-import { PrismaClient, UserRole } from '@prisma/client';
+import { PrismaClient, ServiceKind, UserRole } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
@@ -6,6 +6,9 @@ type ServiceSeed = {
   name: string;
   priceRub: number;
   durationMin: number;
+  kind: ServiceKind; // BASE | ADDON
+  isActive?: boolean;
+  sortOrder?: number;
 };
 
 type LocationSeed = {
@@ -18,7 +21,6 @@ type LocationSeed = {
 const TENANT_ID = 'demo-tenant';
 
 async function ensureTenantAndFeatures() {
-  // Tenant.id теперь фиксированный (без cuid), поэтому создаём/обновляем по id
   const tenant = await prisma.tenant.upsert({
     where: { id: TENANT_ID },
     update: { name: 'Demo Tenant', isActive: true },
@@ -46,7 +48,7 @@ async function ensureTenantAndFeatures() {
 
 async function upsertLocation(tenantId: string, loc: LocationSeed) {
   return prisma.location.upsert({
-    where: { name: loc.name }, // name unique
+    where: { name: loc.name }, // name is unique for Location
     update: {
       tenantId,
       address: loc.address,
@@ -68,20 +70,39 @@ async function ensureBaysForLocation(locationId: string, baysCount: number) {
     await prisma.bay.upsert({
       where: { locationId_number: { locationId, number } },
       update: { isActive: true },
-      create: {
-        locationId,
-        number,
-        isActive: true,
-      },
+      create: { locationId, number, isActive: true },
     });
   }
 }
 
-async function upsertService(s: ServiceSeed) {
+async function upsertService(locationId: string, s: ServiceSeed) {
+  const isActive = s.isActive ?? true;
+  const sortOrder = s.sortOrder ?? 100;
+
+  // ✅ Service unique is now: @@unique([locationId, name])
   return prisma.service.upsert({
-    where: { name: s.name }, // name unique
-    update: { priceRub: s.priceRub, durationMin: s.durationMin },
-    create: s,
+    where: {
+      locationId_name: {
+        locationId,
+        name: s.name,
+      },
+    },
+    update: {
+      priceRub: s.priceRub,
+      durationMin: s.durationMin,
+      kind: s.kind,
+      isActive,
+      sortOrder,
+    },
+    create: {
+      locationId,
+      name: s.name,
+      priceRub: s.priceRub,
+      durationMin: s.durationMin,
+      kind: s.kind,
+      isActive,
+      sortOrder,
+    },
   });
 }
 
@@ -132,19 +153,40 @@ async function main() {
   const loc1 = await upsertLocation(tenant.id, locations[0]);
   const loc2 = await upsertLocation(tenant.id, locations[1]);
 
-  // 2) Bays (по 2 поста на локацию)
+  // 2) Bays
   await ensureBaysForLocation(loc1.id, loc1.baysCount);
   await ensureBaysForLocation(loc2.id, loc2.baysCount);
 
-  // 3) Services
-  const services: ServiceSeed[] = [
-    { name: 'Мойка кузова', priceRub: 1200, durationMin: 30 },
-    { name: 'Комплекс', priceRub: 2500, durationMin: 60 },
-    { name: 'Воск', priceRub: 800, durationMin: 15 },
+  // 3) Services — ✅ different catalogs per location
+  // Мойка #1: базовые + больше допов
+  const servicesLoc1: ServiceSeed[] = [
+    // BASE
+    { name: 'Мойка кузова', priceRub: 1200, durationMin: 30, kind: ServiceKind.BASE, sortOrder: 10 },
+    { name: 'Комплекс', priceRub: 2500, durationMin: 60, kind: ServiceKind.BASE, sortOrder: 20 },
+
+    // ADDON
+    { name: 'Воск', priceRub: 800, durationMin: 15, kind: ServiceKind.ADDON, sortOrder: 110 },
+    { name: 'Коврики', priceRub: 300, durationMin: 10, kind: ServiceKind.ADDON, sortOrder: 120 },
+    { name: 'Чернение резины', priceRub: 400, durationMin: 10, kind: ServiceKind.ADDON, sortOrder: 130 },
   ];
 
-  for (const s of services) {
-    await upsertService(s);
+  // Мойка #2: другой набор
+  const servicesLoc2: ServiceSeed[] = [
+    // BASE
+    { name: 'Мойка кузова', priceRub: 1000, durationMin: 30, kind: ServiceKind.BASE, sortOrder: 10 },
+    { name: 'Комплекс', priceRub: 2300, durationMin: 60, kind: ServiceKind.BASE, sortOrder: 20 },
+    { name: 'Салон', priceRub: 1500, durationMin: 30, kind: ServiceKind.BASE, sortOrder: 30 },
+
+    // ADDON
+    { name: 'Воск', priceRub: 700, durationMin: 15, kind: ServiceKind.ADDON, sortOrder: 110 },
+    { name: 'Полировка', priceRub: 2000, durationMin: 30, kind: ServiceKind.ADDON, sortOrder: 120 },
+  ];
+
+  for (const s of servicesLoc1) {
+    await upsertService(loc1.id, s);
+  }
+  for (const s of servicesLoc2) {
+    await upsertService(loc2.id, s);
   }
 
   // 4) Demo users
@@ -169,7 +211,9 @@ async function main() {
     locationId: loc2.id,
   });
 
-  console.log('✅ Seed done: tenant + features + locations + bays + services + users');
+  console.log(
+    '✅ Seed done: tenant + features + locations + bays + services(BASE/ADDON per location) + users',
+  );
 }
 
 main()

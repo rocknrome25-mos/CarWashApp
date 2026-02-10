@@ -62,10 +62,8 @@ enum AuditType {
   CLIENT_BLOCK
   CLIENT_UNBLOCK
 
-  // ✅ suspicious admin action (waitlist removed by admin)
   WAITLIST_DELETE
 }
-
 
 enum ShiftCashEventType {
   OPEN_FLOAT
@@ -76,15 +74,19 @@ enum ShiftCashEventType {
   KEEP_IN_DRAWER
 }
 
-/**
- * ===================== ADDONS + PHOTOS =====================
- */
-
 enum BookingPhotoKind {
   BEFORE
   AFTER
   DAMAGE
   OTHER
+}
+
+/**
+ * SERVICES
+ */
+enum ServiceKind {
+  BASE
+  ADDON
 }
 
 model Tenant {
@@ -139,6 +141,9 @@ model Location {
   users       User[]
   shifts      Shift[]
   clientLinks ClientLocation[]
+
+  // ✅ services per location
+  services Service[]
 
   cashEvents       ShiftCashEvent[]
   waitlistRequests WaitlistRequest[]
@@ -249,16 +254,28 @@ model Service {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  name        String @unique
+  // ✅ REQUIRED now
+  locationId String
+  location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  kind      ServiceKind @default(BASE)
+  isActive  Boolean     @default(true)
+  sortOrder Int         @default(100)
+
+  name        String
   priceRub    Int
-  durationMin Int    @default(30)
+  durationMin Int @default(30)
 
   bookings         Booking[]
   waitlistRequests WaitlistRequest[]
+  bookingAddons    BookingAddon[]
 
-  bookingAddons BookingAddon[]
-
+  @@unique([locationId, name])
   @@index([createdAt])
+  @@index([locationId])
+  @@index([locationId, kind])
+  @@index([locationId, isActive])
+  @@index([locationId, sortOrder])
 }
 
 model Booking {
@@ -270,19 +287,17 @@ model Booking {
   location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
 
   shiftId String?
-  shift   Shift?  @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+  shift   Shift? @relation(fields: [shiftId], references: [id], onDelete: SetNull)
 
   dateTime DateTime
-  bayId    Int      @default(1)
+  bayId    Int @default(1)
 
-  /// ✅ NEW: what client requested
-  /// null => ANY line, 1 => green, 2 => blue (or N for future)
   requestedBayId Int?
 
   bufferMin  Int @default(0)
   depositRub Int @default(0)
 
-  discountRub  Int     @default(0)
+  discountRub  Int @default(0)
   discountNote String?
 
   comment   String?
@@ -307,11 +322,9 @@ model Booking {
   service Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
 
   payments Payment[]
+  addons   BookingAddon[]
+  photos   BookingPhoto[]
 
-  addons BookingAddon[]
-  photos BookingPhoto[]
-
-  // waitlist conversion back relation
   convertedFromWaitlists WaitlistRequest[] @relation("WaitlistConvertedBooking")
 
   @@index([locationId])
@@ -341,7 +354,6 @@ model BookingAddon {
 
   qty Int @default(1)
 
-  // snapshot to keep historical values
   priceRubSnapshot    Int
   durationMinSnapshot Int
 
@@ -364,7 +376,7 @@ model BookingPhoto {
   note String?
 
   uploadedByUserId String?
-  uploadedByUser   User?   @relation("UserToBookingPhoto", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
+  uploadedByUser   User? @relation("UserToBookingPhoto", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
 
   @@index([bookingId, createdAt])
   @@index([uploadedByUserId])
@@ -396,10 +408,10 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  phone    String   @unique
+  phone    String  @unique
   name     String?
   role     UserRole
-  isActive Boolean  @default(true)
+  isActive Boolean @default(true)
 
   locationId String
   location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
@@ -411,7 +423,6 @@ model User {
   audits     AuditEvent[]
   cashEvents ShiftCashEvent[]
 
-  // IMPORTANT: exactly one opposite field for BookingPhoto.uploadedByUser
   bookingPhotos BookingPhoto[] @relation("UserToBookingPhoto")
 
   @@index([role])
@@ -489,10 +500,6 @@ model AuditEvent {
   @@index([clientId])
 }
 
-/**
- * ===================== WAITLIST =====================
- */
-
 enum WaitlistStatus {
   WAITING
   INVITED
@@ -518,7 +525,7 @@ model WaitlistRequest {
   client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
 
   carId String
-  car   Car    @relation(fields: [carId], references: [id], onDelete: Cascade)
+  car   Car @relation(fields: [carId], references: [id], onDelete: Cascade)
 
   serviceId String
   service   Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
@@ -528,7 +535,6 @@ model WaitlistRequest {
 
   invitedAt DateTime?
 
-  // conversion link to booking
   convertedBookingId String?
   convertedBooking   Booking? @relation("WaitlistConvertedBooking", fields: [convertedBookingId], references: [id], onDelete: SetNull)
 

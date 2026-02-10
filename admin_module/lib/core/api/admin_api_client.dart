@@ -1,4 +1,3 @@
-// C:\dev\carwash\admin_module\lib\core\api\admin_api_client.dart
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
@@ -140,8 +139,6 @@ class AdminApiClient {
     return _decodeMap(res, 'waitlist convert');
   }
 
-  /// ✅ NEW: delete waitlist request (soft delete on backend as CANCELED)
-  /// DELETE /admin/waitlist/:id  body: { reason: string }
   Future<Map<String, dynamic>> deleteWaitlist(
     String userId,
     String shiftId,
@@ -155,7 +152,6 @@ class AdminApiClient {
       if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
     };
 
-    // http.delete with body is not always reliable => use Request
     final req = http.Request('DELETE', _u('/admin/waitlist/$wid'));
     req.headers.addAll(_jsonHeaders(userId: userId, shiftId: shiftId));
     req.body = jsonEncode(payload);
@@ -167,8 +163,6 @@ class AdminApiClient {
   }
 
   // ===== PUBLIC BUSY SLOTS (NO ADMIN HEADERS) =====
-  // GET /bookings/busy?locationId=...&bayId=1&from=...&to=...
-  // response: [{ start: ISO, end: ISO }, ...]
   Future<List<dynamic>> publicBusySlots({
     required String locationId,
     required int bayId,
@@ -183,11 +177,32 @@ class AdminApiClient {
             'from': fromIsoUtc,
             'to': toIsoUtc,
           }),
-          headers: _jsonHeaders(), // no x-user-id / x-shift-id
+          headers: _jsonHeaders(),
         )
         .timeout(_timeout);
 
     return _decodeList(res, 'busy slots');
+  }
+
+  // ===== SERVICES (single source of truth) =====
+  // GET /services?locationId=...&kind=BASE|ADDON
+  Future<List<dynamic>> services({
+    required String locationId,
+    String? kind, // 'BASE' | 'ADDON'
+    bool includeInactive = false,
+  }) async {
+    final loc = locationId.trim();
+    if (loc.isEmpty) throw Exception('locationId is required');
+
+    final q = <String, String>{'locationId': loc};
+    final k = (kind ?? '').trim().toUpperCase();
+    if (k == 'BASE' || k == 'ADDON') q['kind'] = k;
+    if (includeInactive) q['includeInactive'] = 'true';
+
+    final res = await http
+        .get(_u('/services', q), headers: _jsonHeaders())
+        .timeout(_timeout);
+    return _decodeList(res, 'services');
   }
 
   // ===== BAYS =====
@@ -202,9 +217,6 @@ class AdminApiClient {
     return _decodeList(res, 'list bays');
   }
 
-  /// ✅ IMPORTANT:
-  /// - OPEN: reason НЕ отправляем
-  /// - CLOSE: reason ОБЯЗАТЕЛЕН
   Future<Map<String, dynamic>> setBayActive(
     String userId,
     String shiftId, {
@@ -212,18 +224,17 @@ class AdminApiClient {
     required bool isActive,
     String? reason,
   }) async {
-    final path =
-        isActive ? '/admin/bays/$bayNumber/open' : '/admin/bays/$bayNumber/close';
+    final path = isActive
+        ? '/admin/bays/$bayNumber/open'
+        : '/admin/bays/$bayNumber/close';
 
     String? body;
     if (!isActive) {
       final r = (reason ?? '').trim();
-      if (r.isEmpty) {
-        throw Exception('Причина закрытия обязательна');
-      }
+      if (r.isEmpty) throw Exception('Причина закрытия обязательна');
       body = jsonEncode({'reason': r});
     } else {
-      body = null; // OPEN: без body
+      body = null;
     }
 
     final res = await http
@@ -295,7 +306,8 @@ class AdminApiClient {
     return _decodeMap(res, 'move');
   }
 
-  // ===== ADMIN PAY =====
+  // ===== ADMIN PAY / DISCOUNT / ADDONS / PHOTOS / CASH =====
+  // (оставлено как у тебя — без изменений)
 
   Future<Map<String, dynamic>> adminPayBooking(
     String userId,
@@ -327,8 +339,6 @@ class AdminApiClient {
     return _decodeMap(res, 'admin pay');
   }
 
-  // ===== ADMIN DISCOUNT =====
-
   Future<Map<String, dynamic>> adminApplyDiscount(
     String userId,
     String shiftId,
@@ -351,8 +361,6 @@ class AdminApiClient {
 
     return _decodeMap(res, 'admin discount');
   }
-
-  // ===== UPSALE (ADDONS) =====
 
   Future<List<dynamic>> listBookingAddons(
     String userId,
@@ -407,8 +415,6 @@ class AdminApiClient {
     return _decodeMap(res, 'remove addon');
   }
 
-  // ===== PHOTOS =====
-
   Future<List<dynamic>> listBookingPhotos(
     String userId,
     String shiftId,
@@ -427,7 +433,7 @@ class AdminApiClient {
     String userId,
     String shiftId,
     String bookingId, {
-    required String kind, // BEFORE/AFTER/DAMAGE/OTHER
+    required String kind,
     required String url,
     String? note,
   }) async {
@@ -447,8 +453,6 @@ class AdminApiClient {
 
     return _decodeMap(res, 'add photo');
   }
-
-  // ===== CASH =====
 
   Future<void> cashOpenFloat(
     String userId,
@@ -513,5 +517,52 @@ class AdminApiClient {
     if (res.statusCode >= 400) {
       throw Exception('cash close failed: ${res.statusCode} ${res.body}');
     }
+  }
+
+  // ===== ADMIN MANUAL BOOKING =====
+  Future<Map<String, dynamic>> createAdminBooking(
+    String userId,
+    String shiftId, {
+    required String locationId,
+    required int bayId,
+    required String dateTimeIsoUtc,
+    required String clientName,
+    required String clientPhone,
+    required String carPlate,
+    String? bodyType,
+    required String serviceId,
+    List<Map<String, dynamic>>? addons, // [{serviceId, qty}]
+    String? note,
+  }) async {
+    final payload = <String, dynamic>{
+      'locationId': locationId.trim(),
+      'bayId': bayId,
+      'dateTime': dateTimeIsoUtc.trim(),
+      'source': 'ADMIN_PHONE',
+      'createdBy': 'ADMIN',
+
+      'client': {'name': clientName.trim(), 'phone': clientPhone.trim()},
+      'car': {
+        'plate': carPlate.trim(),
+        if (bodyType != null && bodyType.trim().isNotEmpty)
+          'bodyType': bodyType.trim(),
+      },
+
+      // ✅ canonical: base service + addons
+      'serviceId': serviceId.trim(),
+      if (addons != null && addons.isNotEmpty) 'addons': addons,
+
+      if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
+    };
+
+    final res = await http
+        .post(
+          _u('/admin/bookings/manual'),
+          headers: _jsonHeaders(userId: userId, shiftId: shiftId),
+          body: jsonEncode(payload),
+        )
+        .timeout(_timeout);
+
+    return _decodeMap(res, 'admin create booking');
   }
 }

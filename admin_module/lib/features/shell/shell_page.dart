@@ -1,4 +1,4 @@
-// C:\dev\carwash\admin_module\lib\features\shell\shell_page.dart
+// ======================= shell_page.dart — PART 1/2 =======================
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -32,11 +32,9 @@ class ShellPage extends StatefulWidget {
 class _ShellPageState extends State<ShellPage> {
   int idx = 0;
 
-  // ✅ waitlist badge count
   int waitlistCount = 0;
   bool _loadingWaitlistCount = false;
 
-  // ✅ realtime for badge
   late final RealtimeClient _rt;
   StreamSubscription<BookingRealtimeEvent>? _rtSub;
   Timer? _rtDebounce;
@@ -81,7 +79,6 @@ class _ShellPageState extends State<ShellPage> {
 
   Future<void> _loadWaitlistCount() async {
     if (_loadingWaitlistCount) return;
-
     setState(() => _loadingWaitlistCount = true);
 
     try {
@@ -140,45 +137,771 @@ class _ShellPageState extends State<ShellPage> {
       body: IndexedStack(
         index: idx,
         children: [
-          ShiftTab(
-            api: widget.api,
-            store: widget.store,
-            session: widget.session,
-          ),
-          BaysTab(
-            api: widget.api,
-            store: widget.store,
-            session: widget.session,
-          ),
-          WaitlistTab(
-            api: widget.api,
-            store: widget.store,
-            session: widget.session,
-          ),
+          ShiftTab(api: widget.api, store: widget.store, session: widget.session),
+          BaysTab(api: widget.api, store: widget.store, session: widget.session),
+          WaitlistTab(api: widget.api, store: widget.store, session: widget.session),
+          RecordTab(api: widget.api, store: widget.store, session: widget.session),
         ],
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: idx,
         onDestinationSelected: (v) {
           setState(() => idx = v);
-          if (v == 2)
-            _loadWaitlistCount(); // refresh badge when entering waitlist
+          if (v == 2) _loadWaitlistCount();
         },
         destinations: [
-          const NavigationDestination(
-            icon: Icon(Icons.event_note),
-            label: 'Смена',
-          ),
-          const NavigationDestination(
-            icon: Icon(Icons.car_repair),
-            label: 'Посты',
-          ),
+          const NavigationDestination(icon: Icon(Icons.event_note), label: 'Смена'),
+          const NavigationDestination(icon: Icon(Icons.car_repair), label: 'Посты'),
           NavigationDestination(icon: _queueIconWithBadge(), label: 'Ожидание'),
+          const NavigationDestination(icon: Icon(Icons.add_box_outlined), label: 'Записать'),
         ],
       ),
     );
   }
 }
+
+/* ========================= TAB 4: ЗАПИСАТЬ ========================= */
+
+class RecordTab extends StatefulWidget {
+  final AdminApiClient api;
+  final SessionStore store;
+  final AdminSession session;
+
+  const RecordTab({
+    super.key,
+    required this.api,
+    required this.store,
+    required this.session,
+  });
+
+  @override
+  State<RecordTab> createState() => _RecordTabState();
+}
+
+class _RecordTabState extends State<RecordTab> {
+  bool loading = true;
+  bool submitting = false;
+  String? error;
+
+  static const int _slotStepMin = 30;
+  static const int _bufferMin = 15;
+  static const int _openHour = 8;
+  static const int _closeHour = 22;
+
+  DateTime selectedDay = DateTime.now();
+  int selectedBay = 1;
+
+  // services from backend
+  List<Map<String, dynamic>> baseServices = [];
+  List<Map<String, dynamic>> addonServices = [];
+
+  String? selectedServiceId;
+  String? selectedServiceName;
+  int baseMin = 60;
+
+  final Set<String> selectedAddonIds = {};
+
+  final nameCtrl = TextEditingController();
+  final phoneCtrl = TextEditingController();
+  final plateCtrl = TextEditingController();
+  String bodyType = 'SEDAN';
+
+  List<int> activeBays = const [1, 2];
+  List<DateTimeRange> busy = const [];
+  DateTime? selectedSlot;
+
+  String get _locId => widget.session.locationId.trim();
+
+  int _durationOf(Map<String, dynamic> s) {
+    final v = s['durationMin'];
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    return int.tryParse('${s['durationMin']}') ?? 30;
+  }
+
+  String _addonNameById(String id) {
+    final s = addonServices.firstWhere(
+      (x) => (x['id'] ?? '').toString() == id,
+      orElse: () => const {},
+    );
+    final name = (s['name'] ?? '').toString().trim();
+    return name.isEmpty ? id : name;
+  }
+
+  List<String> get _selectedAddonNames {
+    if (selectedAddonIds.isEmpty) return const [];
+    final names = selectedAddonIds.map(_addonNameById).toList();
+    names.sort();
+    return names;
+  }
+
+  int get extraMin {
+    var sum = 0;
+    for (final id in selectedAddonIds) {
+      final s = addonServices.firstWhere(
+        (x) => (x['id'] ?? '').toString() == id,
+        orElse: () => const {},
+      );
+      if (s.isNotEmpty) sum += _durationOf(s);
+    }
+    return sum;
+  }
+
+  int _roundUpToStepMin(int totalMin, int stepMin) {
+    if (totalMin <= 0) return 0;
+    final q = (totalMin + stepMin - 1) ~/ stepMin;
+    return q * stepMin;
+  }
+
+  int get blockMin =>
+      _roundUpToStepMin(baseMin + extraMin + _bufferMin, _slotStepMin);
+
+  DateTime _dateOnly(DateTime dt) => DateTime(dt.year, dt.month, dt.day);
+
+  @override
+  void initState() {
+    super.initState();
+    _init();
+  }
+
+  @override
+  void dispose() {
+    nameCtrl.dispose();
+    phoneCtrl.dispose();
+    plateCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _init() async {
+    setState(() {
+      loading = true;
+      error = null;
+    });
+
+    try {
+      final sid = widget.session.activeShiftId ?? '';
+      if (sid.isEmpty) throw Exception('Нет активной смены. Перезайди.');
+      final loc = _locId;
+      if (loc.isEmpty) throw Exception('Нет locationId в сессии. Перезайди.');
+
+      // active bays
+      final bays = await widget.api.listBays(widget.session.userId, sid);
+      final act = <int>[];
+      for (final x in bays) {
+        if (x is Map<String, dynamic>) {
+          final n = (x['number'] as num?)?.toInt();
+          final a = x['isActive'] == true;
+          if (n != null && a && (n == 1 || n == 2)) act.add(n);
+        }
+      }
+      if (act.isNotEmpty) {
+        activeBays = act;
+        if (!activeBays.contains(selectedBay)) selectedBay = activeBays.first;
+      }
+
+      // load services catalog (single source of truth)
+      final base = await widget.api.services(locationId: loc, kind: 'BASE');
+      final add = await widget.api.services(locationId: loc, kind: 'ADDON');
+
+      baseServices = base
+          .whereType<Map>()
+          .map((e) => e.cast<String, dynamic>())
+          .toList();
+      addonServices = add
+          .whereType<Map>()
+          .map((e) => e.cast<String, dynamic>())
+          .toList();
+
+      if (baseServices.isNotEmpty) {
+        final first = baseServices.first;
+        selectedServiceId = (first['id'] ?? '').toString();
+        selectedServiceName = (first['name'] ?? '').toString();
+        baseMin = _durationOf(first);
+      }
+
+      await _loadBusy();
+    } catch (e) {
+      error = e.toString();
+    } finally {
+      if (mounted) setState(() => loading = false);
+    }
+  }
+
+  List<DateTime> _buildSlotsForDay(DateTime day) {
+    final now = DateTime.now();
+    var start = DateTime(day.year, day.month, day.day, _openHour, 0);
+    final end = DateTime(day.year, day.month, day.day, _closeHour, 0);
+
+    final isToday =
+        day.year == now.year && day.month == now.month && day.day == now.day;
+    if (isToday) {
+      final min = now.add(const Duration(minutes: 5));
+      final mod = min.minute % _slotStepMin;
+      final add = mod == 0 ? 0 : (_slotStepMin - mod);
+      final rounded = DateTime(
+        min.year,
+        min.month,
+        min.day,
+        min.hour,
+        min.minute,
+      ).add(Duration(minutes: add));
+      if (rounded.isAfter(start)) start = rounded;
+    }
+
+    if (!start.isBefore(end)) return const [];
+    final out = <DateTime>[];
+    var cur = start;
+    while (cur.isBefore(end)) {
+      out.add(cur);
+      cur = cur.add(const Duration(minutes: _slotStepMin));
+    }
+    return out;
+  }
+
+  bool _overlaps(
+    DateTime aStart,
+    DateTime aEnd,
+    DateTime bStart,
+    DateTime bEnd,
+  ) {
+    return aStart.isBefore(bEnd) && bStart.isBefore(aEnd);
+  }
+
+  List<DateTimeRange> _parseBusyRanges(List<dynamic> rows) {
+    final out = <DateTimeRange>[];
+    for (final x in rows) {
+      if (x is Map) {
+        final s = x['start']?.toString() ?? '';
+        final e = x['end']?.toString() ?? '';
+        final ds = DateTime.tryParse(s);
+        final de = DateTime.tryParse(e);
+        if (ds != null && de != null) {
+          out.add(DateTimeRange(start: ds.toLocal(), end: de.toLocal()));
+        }
+      }
+    }
+    return out;
+  }
+
+  Future<void> _loadBusy() async {
+    final loc = _locId;
+    final day = _dateOnly(selectedDay);
+    final from = DateTime(day.year, day.month, day.day, _openHour, 0);
+    final to = DateTime(day.year, day.month, day.day, _closeHour, 0);
+
+    final rows = await widget.api.publicBusySlots(
+      locationId: loc,
+      bayId: selectedBay,
+      fromIsoUtc: from.toUtc().toIso8601String(),
+      toIsoUtc: to.toUtc().toIso8601String(),
+    );
+
+    busy = _parseBusyRanges(rows);
+
+    if (selectedSlot != null && !_isFree(selectedSlot!)) {
+      selectedSlot = null;
+    }
+  }
+
+  bool _isFree(DateTime start) {
+    final end = start.add(Duration(minutes: blockMin));
+    for (final r in busy) {
+      if (_overlaps(start, end, r.start, r.end)) return false;
+    }
+    return true;
+  }
+
+  List<DateTime> _freeSlots() {
+    final all = _buildSlotsForDay(_dateOnly(selectedDay));
+    return all.where(_isFree).toList();
+  }
+
+  Widget _sectionBox(
+    BuildContext ctx, {
+    required String title,
+    required Widget child,
+  }) {
+    final cs = Theme.of(ctx).colorScheme;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: TextStyle(
+              fontWeight: FontWeight.w900,
+              color: cs.onSurface.withValues(alpha: 0.9),
+            ),
+          ),
+          const SizedBox(height: 10),
+          child,
+        ],
+      ),
+    );
+  }
+
+  bool get _canSubmit {
+    final nameOk = nameCtrl.text.trim().isNotEmpty;
+    final phoneOk = phoneCtrl.text.trim().isNotEmpty;
+    final plateOk = plateCtrl.text.trim().isNotEmpty;
+    return nameOk &&
+        phoneOk &&
+        plateOk &&
+        selectedSlot != null &&
+        (selectedServiceId ?? '').isNotEmpty;
+  }
+
+  Future<void> _refresh() async {
+    setState(() {
+      loading = true;
+      error = null;
+    });
+    try {
+      await _loadBusy();
+    } catch (e) {
+      error = e.toString();
+    } finally {
+      if (mounted) setState(() => loading = false);
+    }
+  }
+
+  Future<void> _submit() async {
+    if (!_canSubmit || submitting) return;
+
+    final userId = widget.session.userId;
+    final shiftId = widget.session.activeShiftId ?? '';
+    final locId = _locId;
+
+    setState(() => submitting = true);
+
+    try {
+      final dtUtc = selectedSlot!.toUtc().toIso8601String();
+
+      final addons = selectedAddonIds
+          .map((id) => {'serviceId': id, 'qty': 1})
+          .toList();
+
+      await widget.api.createAdminBooking(
+        userId,
+        shiftId,
+        locationId: locId,
+        bayId: selectedBay,
+        dateTimeIsoUtc: dtUtc,
+        clientName: nameCtrl.text.trim(),
+        clientPhone: phoneCtrl.text.trim(),
+        carPlate: plateCtrl.text.trim(),
+        bodyType: bodyType,
+        serviceId: selectedServiceId!,
+        addons: addons,
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        selectedAddonIds.clear();
+        selectedSlot = null;
+      });
+      nameCtrl.clear();
+      phoneCtrl.clear();
+      plateCtrl.clear();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Запись создана'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+
+      await _refresh();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Ошибка: $e'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      await _refresh();
+    } finally {
+      if (mounted) setState(() => submitting = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    final days = List.generate(
+      7,
+      (i) => _dateOnly(DateTime.now().add(Duration(days: i))),
+    );
+    final slots = _freeSlots();
+
+    // ✅ Итоговая строка (после доп. услуг)
+    final addonNames = _selectedAddonNames;
+    final addonLine = addonNames.isEmpty ? 'Доп. услуги: —' : 'Доп. услуги: ${addonNames.join(', ')}';
+    final totalLine = 'Основная: ${selectedServiceName ?? '—'} • $addonLine';
+    final calcLine = 'Итого: ${baseMin + extraMin} мин + буфер $_bufferMin = блок $blockMin мин';
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Записать'),
+        actions: [
+          IconButton(
+            tooltip: 'Обновить',
+            onPressed: loading ? null : _refresh,
+            icon: const Icon(Icons.refresh),
+          ),
+          const SizedBox(width: 6),
+        ],
+      ),
+      body: loading
+          ? const Center(child: CircularProgressIndicator())
+          : (error != null)
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Text(error!, style: const TextStyle(color: Colors.red)),
+                  ),
+                )
+              : ListView(
+                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
+                  children: [
+                    _sectionBox(
+                      context,
+                      title: 'Пост и услуга',
+                      child: Column(
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: DropdownButtonFormField<int>(
+                                  value: selectedBay,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Пост',
+                                  ),
+                                  items: [
+                                    for (final b in activeBays)
+                                      DropdownMenuItem(
+                                        value: b,
+                                        child: Text('Пост $b'),
+                                      ),
+                                  ],
+                                  onChanged: (v) async {
+                                    final next = v ?? activeBays.first;
+                                    if (next == selectedBay) return;
+                                    setState(() {
+                                      selectedBay = next;
+                                      selectedSlot = null;
+                                    });
+                                    await _refresh();
+                                  },
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: DropdownButtonFormField<String>(
+                                  value: selectedServiceId,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Основная услуга',
+                                  ),
+                                  items: [
+                                    for (final s in baseServices)
+                                      DropdownMenuItem(
+                                        value: (s['id'] ?? '').toString(),
+                                        child: Text(
+                                          '${(s['name'] ?? '').toString()} (${_durationOf(s)} мин)',
+                                        ),
+                                      ),
+                                  ],
+                                  onChanged: (v) {
+                                    final id = (v ?? '').toString();
+                                    if (id.isEmpty) return;
+                                    final sel = baseServices.firstWhere(
+                                      (x) => (x['id'] ?? '').toString() == id,
+                                      orElse: () => baseServices.first,
+                                    );
+                                    setState(() {
+                                      selectedServiceId = id;
+                                      selectedServiceName = (sel['name'] ?? '')
+                                          .toString();
+                                      baseMin = _durationOf(sel);
+                                      if (selectedSlot != null &&
+                                          !_isFree(selectedSlot!)) {
+                                        selectedSlot = null;
+                                      }
+                                    });
+                                  },
+                                ),
+                              ),
+                            ],
+                          ),
+                          // ❌ Раньше тут была строка калькуляции — убрали по твоей просьбе
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    _sectionBox(
+                      context,
+                      title: 'Доп. услуги',
+                      child: addonServices.isEmpty
+                          ? Text(
+                              'Доп. услуги не настроены',
+                              style: TextStyle(
+                                color: cs.onSurface.withValues(alpha: 0.7),
+                                fontWeight: FontWeight.w700,
+                              ),
+                            )
+                          : Wrap(
+                              spacing: 10,
+                              runSpacing: 10,
+                              children: [
+                                for (final s in addonServices)
+                                  FilterChip(
+                                    label: Text(
+                                      '${(s['name'] ?? '').toString()} (+${_durationOf(s)} мин)',
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w900,
+                                      ),
+                                    ),
+                                    selected: selectedAddonIds.contains(
+                                      (s['id'] ?? '').toString(),
+                                    ),
+                                    onSelected: (v) {
+                                      final id = (s['id'] ?? '').toString();
+                                      setState(() {
+                                        if (v) {
+                                          selectedAddonIds.add(id);
+                                        } else {
+                                          selectedAddonIds.remove(id);
+                                        }
+                                        if (selectedSlot != null &&
+                                            !_isFree(selectedSlot!)) {
+                                          selectedSlot = null;
+                                        }
+                                      });
+                                    },
+                                  ),
+                              ],
+                            ),
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    // ✅ НОВОЕ: Итоговая секция сразу после доп. услуг
+                    _sectionBox(
+                      context,
+                      title: 'Итог',
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: cs.outlineVariant.withValues(alpha: 0.6),
+                          ),
+                          color: cs.surfaceContainerHighest.withValues(alpha: 0.14),
+                        ),
+                        child: Text(
+                          '$totalLine\n$calcLine',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w900,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    _sectionBox(
+                      context,
+                      title: 'Дата',
+                      child: SizedBox(
+                        height: 44,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: days.length,
+                          separatorBuilder: (_, _) => const SizedBox(width: 10),
+                          itemBuilder: (_, i) {
+                            final d = days[i];
+                            final selected = _dateOnly(d) == _dateOnly(selectedDay);
+                            return InkWell(
+                              borderRadius: BorderRadius.circular(999),
+                              onTap: () async {
+                                setState(() {
+                                  selectedDay = d;
+                                  selectedSlot = null;
+                                });
+                                await _refresh();
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 10,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: selected
+                                      ? cs.primary.withValues(alpha: 0.18)
+                                      : cs.surfaceContainerHighest.withValues(
+                                          alpha: 0.18,
+                                        ),
+                                  borderRadius: BorderRadius.circular(999),
+                                  border: Border.all(
+                                    color: selected
+                                        ? cs.primary.withValues(alpha: 0.65)
+                                        : cs.outlineVariant.withValues(alpha: 0.55),
+                                  ),
+                                ),
+                                child: Text(
+                                  '${['ВС', 'ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ'][d.weekday % 7]} ${d.day}',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w900,
+                                    color: cs.onSurface.withValues(alpha: 0.92),
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    _sectionBox(
+                      context,
+                      title: 'Время (только свободные)',
+                      child: slots.isEmpty
+                          ? Text(
+                              'Нет доступных слотов на выбранный день.',
+                              style: TextStyle(
+                                color: cs.onSurface.withValues(alpha: 0.75),
+                                fontWeight: FontWeight.w700,
+                              ),
+                            )
+                          : Wrap(
+                              spacing: 10,
+                              runSpacing: 10,
+                              children: [
+                                for (final s in slots)
+                                  (selectedSlot == s)
+                                      ? FilledButton(
+                                          onPressed: () =>
+                                              setState(() => selectedSlot = s),
+                                          child: Text(
+                                            DateFormat('HH:mm').format(s),
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w900,
+                                            ),
+                                          ),
+                                        )
+                                      : OutlinedButton(
+                                          onPressed: () =>
+                                              setState(() => selectedSlot = s),
+                                          child: Text(
+                                            DateFormat('HH:mm').format(s),
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w900,
+                                            ),
+                                          ),
+                                        ),
+                              ],
+                            ),
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    _sectionBox(
+                      context,
+                      title: 'Клиент (по звонку)',
+                      child: Column(
+                        children: [
+                          TextField(
+                            controller: nameCtrl,
+                            decoration: const InputDecoration(labelText: 'Имя'),
+                          ),
+                          const SizedBox(height: 10),
+                          TextField(
+                            controller: phoneCtrl,
+                            keyboardType: TextInputType.phone,
+                            decoration: const InputDecoration(labelText: 'Телефон'),
+                          ),
+                          const SizedBox(height: 10),
+                          TextField(
+                            controller: plateCtrl,
+                            textCapitalization: TextCapitalization.characters,
+                            decoration: const InputDecoration(
+                              labelText: 'Номер авто',
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          DropdownButtonFormField<String>(
+                            value: bodyType,
+                            decoration: const InputDecoration(
+                              labelText: 'Тип кузова',
+                            ),
+                            items: const [
+                              DropdownMenuItem(
+                                value: 'SEDAN',
+                                child: Text('Седан'),
+                              ),
+                              DropdownMenuItem(value: 'SUV', child: Text('SUV')),
+                              DropdownMenuItem(
+                                value: 'HATCH',
+                                child: Text('Хэтчбек'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'WAGON',
+                                child: Text('Универсал'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'MINIVAN',
+                                child: Text('Минивэн'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'OTHER',
+                                child: Text('Другое'),
+                              ),
+                            ],
+                            onChanged: (v) =>
+                                setState(() => bodyType = v ?? 'SEDAN'),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 14),
+
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: submitting ? null : (_canSubmit ? _submit : null),
+                        icon: submitting
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.done),
+                        label: Text(submitting ? 'Создаю...' : 'Создать запись'),
+                      ),
+                    ),
+                  ],
+                ),
+    );
+  }
+}
+
 
 /* ========================= TAB 1: СМЕНА ========================= */
 
@@ -441,7 +1164,6 @@ class _ShiftTabState extends State<ShiftTab> {
                         ],
                       ),
                       const SizedBox(height: 12),
-
                       TextField(
                         controller: countedCtrl,
                         keyboardType: TextInputType.number,
@@ -457,9 +1179,7 @@ class _ShiftTabState extends State<ShiftTab> {
                           setStateDialog(() {});
                         },
                       ),
-
                       const SizedBox(height: 10),
-
                       TextField(
                         controller: keepCtrl,
                         keyboardType: TextInputType.number,
@@ -472,7 +1192,6 @@ class _ShiftTabState extends State<ShiftTab> {
                           setStateDialog(() {});
                         },
                       ),
-
                       TextField(
                         controller: handoverCtrl,
                         keyboardType: TextInputType.number,
@@ -485,7 +1204,6 @@ class _ShiftTabState extends State<ShiftTab> {
                           setStateDialog(() {});
                         },
                       ),
-
                       TextField(
                         controller: noteCtrl,
                         decoration: const InputDecoration(
@@ -927,7 +1645,9 @@ class _ShiftTabState extends State<ShiftTab> {
     );
   }
 }
+
 /* ========================= TAB 2: ПОСТЫ ========================= */
+/* Ниже — твой код BaysTab без изменений (как у тебя) */
 
 class BaysTab extends StatefulWidget {
   final AdminApiClient api;
@@ -1151,6 +1871,8 @@ class _BaysTabState extends State<BaysTab> {
     );
   }
 }
+
+// ======================= SHELL_PAGE.dart — PART B (2/2) =======================
 
 /* ========================= TAB 3: ОЖИДАНИЕ ========================= */
 
@@ -1567,10 +2289,7 @@ class _WaitlistTabState extends State<WaitlistTab> {
 
       if (!mounted) return;
 
-      // закрываем sheet
       Navigator.of(sheetCtx).pop();
-
-      // обновляем список
       await load();
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1591,6 +2310,8 @@ class _WaitlistTabState extends State<WaitlistTab> {
       if (mounted) setState(() => loading = false);
     }
   }
+
+  // ====== CONTINUATION: WaitlistTab (from _openConvertToQueueSheet to end) ======
 
   Future<void> _openConvertToQueueSheet(Map<String, dynamic> w) async {
     final sid = widget.session.activeShiftId ?? '';
@@ -1773,7 +2494,6 @@ class _WaitlistTabState extends State<WaitlistTab> {
                       ],
                     ),
                     const SizedBox(height: 10),
-
                     Row(
                       children: [
                         Expanded(
@@ -1823,9 +2543,7 @@ class _WaitlistTabState extends State<WaitlistTab> {
                         ),
                       ],
                     ),
-
                     const SizedBox(height: 12),
-
                     _sectionBox(
                       ctx,
                       title: 'Дата',
@@ -1854,9 +2572,7 @@ class _WaitlistTabState extends State<WaitlistTab> {
                         ),
                       ),
                     ),
-
                     const SizedBox(height: 12),
-
                     _sectionBox(
                       ctx,
                       title: 'Время',
@@ -1899,9 +2615,7 @@ class _WaitlistTabState extends State<WaitlistTab> {
                         );
                       }(),
                     ),
-
                     const SizedBox(height: 12),
-
                     SizedBox(
                       width: double.infinity,
                       child: FilledButton.icon(
@@ -1980,7 +2694,6 @@ class _WaitlistTabState extends State<WaitlistTab> {
                   ],
                 ),
                 const SizedBox(height: 10),
-
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(14),
@@ -2024,9 +2737,7 @@ class _WaitlistTabState extends State<WaitlistTab> {
                     ],
                   ),
                 ),
-
                 const SizedBox(height: 12),
-
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(14),
@@ -2094,10 +2805,7 @@ class _WaitlistTabState extends State<WaitlistTab> {
                     ],
                   ),
                 ),
-
                 const SizedBox(height: 12),
-
-                // ✅ ACTIONS: "В очередь" + "Удалить"
                 Row(
                   children: [
                     Expanded(
@@ -2128,7 +2836,6 @@ class _WaitlistTabState extends State<WaitlistTab> {
                     ),
                   ],
                 ),
-
                 const SizedBox(height: 8),
                 TextButton(
                   onPressed: () => Navigator.of(sheetCtx).pop(),
