@@ -1,3 +1,4 @@
+// C:\dev\carwash\server_module\api\src\app.module.ts
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 
@@ -13,6 +14,9 @@ import { ServicesModule } from './services/services.module';
 import { ConfigModule } from './config/config.module';
 import { CronHousekeeperService } from '../src/cron/cron-housekeeper.service';
 
+// ✅ NEW
+import { WasherModule } from './washer/washer.module';
+
 @Module({
   imports: [
     // ⬇️ scheduler для крон-задач
@@ -26,6 +30,9 @@ import { CronHousekeeperService } from '../src/cron/cron-housekeeper.service';
     LocationsModule,
     AdminModule,
     ConfigModule,
+
+    // ✅ NEW
+    WasherModule,
   ],
   controllers: [AppController],
   providers: [

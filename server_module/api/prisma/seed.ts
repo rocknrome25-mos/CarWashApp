@@ -1,4 +1,10 @@
-import { PrismaClient, ServiceKind, UserRole } from '@prisma/client';
+// C:\dev\carwash\server_module\api\prisma\seed.ts
+import {
+  PrismaClient,
+  ServiceKind,
+  UserRole,
+  ServiceLaborCategory,
+} from '@prisma/client';
 
 const prisma = new PrismaClient();
 
@@ -7,6 +13,7 @@ type ServiceSeed = {
   priceRub: number;
   durationMin: number;
   kind: ServiceKind; // BASE | ADDON
+  laborCategory?: ServiceLaborCategory; // WASH | CHEM
   isActive?: boolean;
   sortOrder?: number;
 };
@@ -79,7 +86,10 @@ async function upsertService(locationId: string, s: ServiceSeed) {
   const isActive = s.isActive ?? true;
   const sortOrder = s.sortOrder ?? 100;
 
-  // ✅ Service unique is now: @@unique([locationId, name])
+  // default category: WASH
+  const laborCategory = s.laborCategory ?? ServiceLaborCategory.WASH;
+
+  // ✅ Service unique is: @@unique([locationId, name])
   return prisma.service.upsert({
     where: {
       locationId_name: {
@@ -93,6 +103,7 @@ async function upsertService(locationId: string, s: ServiceSeed) {
       kind: s.kind,
       isActive,
       sortOrder,
+      laborCategory,
     },
     create: {
       locationId,
@@ -102,6 +113,7 @@ async function upsertService(locationId: string, s: ServiceSeed) {
       kind: s.kind,
       isActive,
       sortOrder,
+      laborCategory,
     },
   });
 }
@@ -125,6 +137,32 @@ async function upsertUser(args: {
       name: args.name,
       role: args.role,
       locationId: args.locationId,
+      isActive: true,
+    },
+  });
+}
+
+async function ensureWasherPayRules(locationId: string) {
+  // WASH = 30%
+  await prisma.washerPayRule.upsert({
+    where: { locationId_category: { locationId, category: ServiceLaborCategory.WASH } },
+    update: { percent: 30, isActive: true },
+    create: {
+      locationId,
+      category: ServiceLaborCategory.WASH,
+      percent: 30,
+      isActive: true,
+    },
+  });
+
+  // CHEM = 40%
+  await prisma.washerPayRule.upsert({
+    where: { locationId_category: { locationId, category: ServiceLaborCategory.CHEM } },
+    update: { percent: 40, isActive: true },
+    create: {
+      locationId,
+      category: ServiceLaborCategory.CHEM,
+      percent: 40,
       isActive: true,
     },
   });
@@ -157,39 +195,107 @@ async function main() {
   await ensureBaysForLocation(loc1.id, loc1.baysCount);
   await ensureBaysForLocation(loc2.id, loc2.baysCount);
 
-  // 3) Services — ✅ different catalogs per location
-  // Мойка #1: базовые + больше допов
+  // 3) Services — catalogs per location
   const servicesLoc1: ServiceSeed[] = [
-    // BASE
-    { name: 'Мойка кузова', priceRub: 1200, durationMin: 30, kind: ServiceKind.BASE, sortOrder: 10 },
-    { name: 'Комплекс', priceRub: 2500, durationMin: 60, kind: ServiceKind.BASE, sortOrder: 20 },
+    // BASE (мойка)
+    {
+      name: 'Мойка кузова',
+      priceRub: 1200,
+      durationMin: 30,
+      kind: ServiceKind.BASE,
+      sortOrder: 10,
+      laborCategory: ServiceLaborCategory.WASH,
+    },
+    {
+      name: 'Комплекс',
+      priceRub: 2500,
+      durationMin: 60,
+      kind: ServiceKind.BASE,
+      sortOrder: 20,
+      laborCategory: ServiceLaborCategory.WASH,
+    },
 
     // ADDON
-    { name: 'Воск', priceRub: 800, durationMin: 15, kind: ServiceKind.ADDON, sortOrder: 110 },
-    { name: 'Коврики', priceRub: 300, durationMin: 10, kind: ServiceKind.ADDON, sortOrder: 120 },
-    { name: 'Чернение резины', priceRub: 400, durationMin: 10, kind: ServiceKind.ADDON, sortOrder: 130 },
+    {
+      name: 'Воск',
+      priceRub: 800,
+      durationMin: 15,
+      kind: ServiceKind.ADDON,
+      sortOrder: 110,
+      laborCategory: ServiceLaborCategory.WASH,
+    },
+    {
+      name: 'Коврики',
+      priceRub: 300,
+      durationMin: 10,
+      kind: ServiceKind.ADDON,
+      sortOrder: 120,
+      laborCategory: ServiceLaborCategory.WASH,
+    },
+    {
+      name: 'Чернение резины',
+      priceRub: 400,
+      durationMin: 10,
+      kind: ServiceKind.ADDON,
+      sortOrder: 130,
+      laborCategory: ServiceLaborCategory.WASH,
+    },
   ];
 
-  // Мойка #2: другой набор
   const servicesLoc2: ServiceSeed[] = [
     // BASE
-    { name: 'Мойка кузова', priceRub: 1000, durationMin: 30, kind: ServiceKind.BASE, sortOrder: 10 },
-    { name: 'Комплекс', priceRub: 2300, durationMin: 60, kind: ServiceKind.BASE, sortOrder: 20 },
-    { name: 'Салон', priceRub: 1500, durationMin: 30, kind: ServiceKind.BASE, sortOrder: 30 },
+    {
+      name: 'Мойка кузова',
+      priceRub: 1000,
+      durationMin: 30,
+      kind: ServiceKind.BASE,
+      sortOrder: 10,
+      laborCategory: ServiceLaborCategory.WASH,
+    },
+    {
+      name: 'Комплекс',
+      priceRub: 2300,
+      durationMin: 60,
+      kind: ServiceKind.BASE,
+      sortOrder: 20,
+      laborCategory: ServiceLaborCategory.WASH,
+    },
+    {
+      name: 'Салон',
+      priceRub: 1500,
+      durationMin: 30,
+      kind: ServiceKind.BASE,
+      sortOrder: 30,
+      laborCategory: ServiceLaborCategory.WASH,
+    },
 
     // ADDON
-    { name: 'Воск', priceRub: 700, durationMin: 15, kind: ServiceKind.ADDON, sortOrder: 110 },
-    { name: 'Полировка', priceRub: 2000, durationMin: 30, kind: ServiceKind.ADDON, sortOrder: 120 },
+    {
+      name: 'Воск',
+      priceRub: 700,
+      durationMin: 15,
+      kind: ServiceKind.ADDON,
+      sortOrder: 110,
+      laborCategory: ServiceLaborCategory.WASH,
+    },
+    {
+      name: 'Полировка',
+      priceRub: 2000,
+      durationMin: 30,
+      kind: ServiceKind.ADDON,
+      sortOrder: 120,
+      laborCategory: ServiceLaborCategory.WASH,
+    },
   ];
 
-  for (const s of servicesLoc1) {
-    await upsertService(loc1.id, s);
-  }
-  for (const s of servicesLoc2) {
-    await upsertService(loc2.id, s);
-  }
+  for (const s of servicesLoc1) await upsertService(loc1.id, s);
+  for (const s of servicesLoc2) await upsertService(loc2.id, s);
 
-  // 4) Demo users
+  // 4) Payout rules (per location): WASH=30%, CHEM=40%
+  await ensureWasherPayRules(loc1.id);
+  await ensureWasherPayRules(loc2.id);
+
+  // 5) Demo users
   await upsertUser({
     phone: '+79990000001',
     name: 'Owner Demo',
@@ -211,8 +317,23 @@ async function main() {
     locationId: loc2.id,
   });
 
+  // 6) Demo washers (for new washer app testing)
+  await upsertUser({
+    phone: '+79990000101',
+    name: 'Washer 1 Demo',
+    role: UserRole.WASHER,
+    locationId: loc1.id,
+  });
+
+  await upsertUser({
+    phone: '+79990000102',
+    name: 'Washer 2 Demo',
+    role: UserRole.WASHER,
+    locationId: loc2.id,
+  });
+
   console.log(
-    '✅ Seed done: tenant + features + locations + bays + services(BASE/ADDON per location) + users',
+    '✅ Seed done: tenant+features + locations + bays + services + washerPayRules(WASH=30/CHEM=40) + users(admin/owner/washer)',
   );
 }
 

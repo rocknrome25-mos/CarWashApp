@@ -1,3 +1,4 @@
+// C:\dev\carwash\server_module\api\src\admin\admin.service.ts
 import {
   BadRequestException,
   ConflictException,
@@ -27,6 +28,10 @@ import { AdminBookingMoveDto } from './dto/admin-booking-move.dto';
 import { AdminBookingPayDto } from './dto/admin-booking-pay.dto';
 import { AdminBookingDiscountDto } from './dto/admin-booking-discount.dto';
 
+import { AdminAssignWasherDto } from './dto/admin-assign-washer.dto';
+import { AdminMoveWasherDto } from './dto/admin-move-washer.dto';
+import { AdminUnassignWasherDto } from './dto/admin-unassign-washer.dto';
+
 import { OpenFloatDto } from './cash/dto/open-float.dto';
 import { CashMoveDto } from './cash/dto/cash-move.dto';
 import { CloseCashDto } from './cash/dto/close-cash.dto';
@@ -34,7 +39,6 @@ import { CloseCashDto } from './cash/dto/close-cash.dto';
 import { AdminBayCloseDto } from './dto/admin-bay-close.dto';
 import { AdminBayOpenDto } from './dto/admin-bay-open.dto';
 
-// ✅ for upload-to-disk (no Express.Multer typing needed)
 import { promises as fs } from 'fs';
 import * as path from 'path';
 
@@ -97,8 +101,7 @@ export class AdminService {
 
   private _requireAdmin(user: { role: UserRole; isActive: boolean }) {
     if (!user.isActive) throw new ForbiddenException('User is inactive');
-    if (user.role !== UserRole.ADMIN)
-      throw new ForbiddenException('Not an admin');
+    if (user.role !== UserRole.ADMIN) throw new ForbiddenException('Not an admin');
   }
 
   private async _getUserOrThrow(userId: string) {
@@ -147,7 +150,33 @@ export class AdminService {
     return { user, shift };
   }
 
-  // ✅ используем локальную дату сервера (без Z)
+  // works for OPEN/CLOSED
+  private async _requireShiftOwned(userId: string, shiftId: string) {
+    const user = await this._getUserOrThrow(userId);
+
+    const shift = await this.prisma.shift.findUnique({
+      where: { id: shiftId },
+      select: {
+        id: true,
+        adminId: true,
+        locationId: true,
+        status: true,
+        openedAt: true,
+        closedAt: true,
+      },
+    });
+    if (!shift) throw new NotFoundException('Shift not found');
+
+    if (shift.adminId !== user.id) {
+      throw new ForbiddenException('Shift does not belong to this admin');
+    }
+    if (shift.locationId !== user.locationId) {
+      throw new ForbiddenException('Shift location mismatch');
+    }
+
+    return { user, shift };
+  }
+
   private _parseDayRangeLocal(dateYmd: string) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dateYmd)) {
       throw new BadRequestException('date must be YYYY-MM-DD');
@@ -172,7 +201,7 @@ export class AdminService {
         id: true,
         locationId: true,
         bayId: true,
-        requestedBayId: true, // ✅ keep accessible in admin ops
+        requestedBayId: true,
         status: true,
         carId: true,
         bufferMin: true,
@@ -210,15 +239,7 @@ export class AdminService {
     start: Date;
     durationTotalMin: number;
   }) {
-    const {
-      tx,
-      bookingIdToExclude,
-      locationId,
-      bayId,
-      carId,
-      start,
-      durationTotalMin,
-    } = args;
+    const { tx, bookingIdToExclude, locationId, bayId, carId, start, durationTotalMin } = args;
 
     const end = this._end(start, durationTotalMin);
     const windowStart = new Date(start.getTime() - 24 * 60 * 60 * 1000);
@@ -268,8 +289,7 @@ export class AdminService {
       return this._overlaps(start, end, bStart, bEnd);
     });
 
-    if (overlap)
-      throw new ConflictException('Selected time slot is already booked');
+    if (overlap) throw new ConflictException('Selected time slot is already booked');
 
     const whereCar: any = {
       carId,
@@ -307,8 +327,7 @@ export class AdminService {
       return this._overlaps(start, end, bStart, bEnd);
     });
 
-    if (carOverlap)
-      throw new ConflictException('This car already has a booking at this time');
+    if (carOverlap) throw new ConflictException('This car already has a booking at this time');
   }
 
   /* ===================== auth/shift ===================== */
@@ -398,19 +417,14 @@ export class AdminService {
   async closeShift(userId: string, shiftId: string) {
     const { user, shift } = await this._requireActiveShift(userId, shiftId);
 
-    const cashEnabled = await this.cfg.isEnabledByLocationId(
-      shift.locationId,
-      F_CASH,
-    );
+    const cashEnabled = await this.cfg.isEnabledByLocationId(shift.locationId, F_CASH);
     if (cashEnabled) {
       const cashClosed = await this.prisma.shiftCashEvent.findFirst({
         where: { shiftId: shift.id, type: ShiftCashEventType.CLOSE_COUNT },
         select: { id: true },
       });
       if (!cashClosed) {
-        throw new ConflictException(
-          'Cash close is required before closing shift',
-        );
+        throw new ConflictException('Cash close is required before closing shift');
       }
     }
 
@@ -445,6 +459,205 @@ export class AdminService {
     });
 
     return updated;
+  }
+
+  /* ===================== SHIFT: WASHERS ===================== */
+
+  async assignWasher(userId: string, shiftId: string, dto: AdminAssignWasherDto) {
+    const { shift } = await this._requireActiveShift(userId, shiftId);
+
+    const washerPhone = (dto?.washerPhone ?? '').toString().trim();
+    if (!washerPhone) throw new BadRequestException('washerPhone is required');
+
+    const bayId = Math.trunc(Number(dto?.bayId));
+    if (!Number.isFinite(bayId) || bayId < 1 || bayId > 20) {
+      throw new BadRequestException('bayId must be 1..20');
+    }
+
+    await this._requireBayActiveOrThrow(shift.locationId, bayId);
+
+    const washer = await this.prisma.user.findUnique({
+      where: { phone: washerPhone },
+      select: {
+        id: true,
+        role: true,
+        isActive: true,
+        locationId: true,
+        phone: true,
+        name: true,
+      },
+    });
+    if (!washer) throw new NotFoundException('Washer not found');
+    if (!washer.isActive) throw new ForbiddenException('Washer is inactive');
+    if (washer.role !== UserRole.WASHER) throw new ForbiddenException('User is not a washer');
+    if (washer.locationId !== shift.locationId) throw new ForbiddenException('Washer belongs to another location');
+
+    const bayTaken = await this.prisma.shiftWasher.findFirst({
+      where: { shiftId: shift.id, bayId },
+      select: { id: true },
+    });
+    if (bayTaken) throw new ConflictException('This bay already has a washer assigned');
+
+    const already = await this.prisma.shiftWasher.findFirst({
+      where: { shiftId: shift.id, washerId: washer.id },
+      select: { id: true, bayId: true },
+    });
+    if (already) throw new ConflictException(`This washer is already assigned to bay ${already.bayId}`);
+
+    let percentWash = 30;
+    let percentChem = 40;
+
+    const rules = await this.prisma.washerPayRule.findMany({
+      where: { locationId: shift.locationId, isActive: true },
+      select: { category: true, percent: true },
+    });
+
+    for (const r of rules as any[]) {
+      const cat = String(r.category ?? '').toUpperCase();
+      const p = Math.trunc(Number(r.percent));
+      if (!Number.isFinite(p)) continue;
+      if (cat === 'WASH') percentWash = p;
+      if (cat === 'CHEM') percentChem = p;
+    }
+
+    const created = await this.prisma.shiftWasher.create({
+      data: {
+        shiftId: shift.id,
+        washerId: washer.id,
+        bayId,
+        percentWash,
+        percentChem,
+      },
+      select: {
+        id: true,
+        shiftId: true,
+        washerId: true,
+        bayId: true,
+        percentWash: true,
+        percentChem: true,
+        clockInAt: true,
+        clockOutAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    return { ok: true, assignment: created, washer: { id: washer.id, phone: washer.phone, name: washer.name } };
+  }
+
+  async listShiftWashers(userId: string, shiftId: string) {
+    const { shift } = await this._requireShiftOwned(userId, shiftId);
+
+    const rows = await this.prisma.shiftWasher.findMany({
+      where: { shiftId: shift.id },
+      orderBy: { bayId: 'asc' },
+      select: {
+        id: true,
+        bayId: true,
+        percentWash: true,
+        percentChem: true,
+        clockInAt: true,
+        clockOutAt: true,
+        createdAt: true,
+        updatedAt: true,
+        washer: { select: { id: true, phone: true, name: true, isActive: true } },
+      },
+    });
+
+    return {
+      shift: {
+        id: shift.id,
+        status: shift.status,
+        openedAt: shift.openedAt,
+        closedAt: shift.closedAt,
+        locationId: shift.locationId,
+      },
+      washers: rows,
+    };
+  }
+
+  async unassignWasher(userId: string, shiftId: string, assignmentId: string) {
+    const { shift } = await this._requireShiftOwned(userId, shiftId);
+
+    const a = await this.prisma.shiftWasher.findUnique({
+      where: { id: assignmentId },
+      select: { id: true, shiftId: true, bayId: true, washerId: true },
+    });
+    if (!a) throw new NotFoundException('Washer assignment not found');
+    if (a.shiftId !== shift.id) throw new ForbiddenException('Assignment does not belong to this shift');
+
+    await this.prisma.shiftWasher.delete({ where: { id: a.id } });
+    return { ok: true, deletedAssignmentId: a.id, bayId: a.bayId, washerId: a.washerId };
+  }
+
+  async unassignWasherByPhone(userId: string, shiftId: string, dto: AdminUnassignWasherDto) {
+    const { shift } = await this._requireShiftOwned(userId, shiftId);
+
+    const phone = (dto?.washerPhone ?? '').toString().trim();
+    if (!phone) throw new BadRequestException('washerPhone is required');
+
+    const washer = await this.prisma.user.findUnique({
+      where: { phone },
+      select: { id: true, role: true },
+    });
+    if (!washer) throw new NotFoundException('Washer not found');
+    if (washer.role !== UserRole.WASHER) throw new ForbiddenException('User is not a washer');
+
+    const a = await this.prisma.shiftWasher.findFirst({
+      where: { shiftId: shift.id, washerId: washer.id },
+      select: { id: true, bayId: true, washerId: true },
+    });
+    if (!a) throw new NotFoundException('Washer is not assigned to this shift');
+
+    await this.prisma.shiftWasher.delete({ where: { id: a.id } });
+    return { ok: true, deletedAssignmentId: a.id, bayId: a.bayId, washerId: a.washerId };
+  }
+
+  async moveWasher(userId: string, shiftId: string, assignmentId: string, dto: AdminMoveWasherDto) {
+    const { shift } = await this._requireShiftOwned(userId, shiftId);
+
+    const newBayId = Math.trunc(Number(dto?.bayId));
+    if (!Number.isFinite(newBayId) || newBayId < 1 || newBayId > 20) {
+      throw new BadRequestException('bayId must be 1..20');
+    }
+
+    await this._requireBayActiveOrThrow(shift.locationId, newBayId);
+
+    const a = await this.prisma.shiftWasher.findUnique({
+      where: { id: assignmentId },
+      select: { id: true, shiftId: true, bayId: true, washerId: true },
+    });
+    if (!a) throw new NotFoundException('Washer assignment not found');
+    if (a.shiftId !== shift.id) throw new ForbiddenException('Assignment does not belong to this shift');
+
+    if (a.bayId === newBayId) {
+      return { ok: true, assignmentId: a.id, bayId: a.bayId, message: 'Already on this bay' };
+    }
+
+    const bayTaken = await this.prisma.shiftWasher.findFirst({
+      where: { shiftId: shift.id, bayId: newBayId },
+      select: { id: true },
+    });
+    if (bayTaken) throw new ConflictException('Target bay already has a washer assigned');
+
+    const updated = await this.prisma.shiftWasher.update({
+      where: { id: a.id },
+      data: { bayId: newBayId },
+      select: {
+        id: true,
+        shiftId: true,
+        washerId: true,
+        bayId: true,
+        percentWash: true,
+        percentChem: true,
+        clockInAt: true,
+        clockOutAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    return { ok: true, assignment: updated };
   }
 
   /* ===================== calendar ===================== */
@@ -492,10 +705,7 @@ export class AdminService {
         id: b.id,
         dateTime: b.dateTime,
         bayId: b.bayId,
-
-        // ✅ КЛЮЧЕВОЕ: что запросил клиент (null = любая линия)
         requestedBayId: (b as any).requestedBayId ?? null,
-
         bufferMin: b.bufferMin,
         comment: b.comment,
         adminNote: b.adminNote,
@@ -548,12 +758,7 @@ export class AdminService {
 
   /* ===================== bookings: start/move/finish ===================== */
 
-  async startBooking(
-    userId: string,
-    shiftId: string,
-    bookingId: string,
-    dto?: AdminBookingStartDto,
-  ) {
+  async startBooking(userId: string, shiftId: string, bookingId: string, dto?: AdminBookingStartDto) {
     const { user, shift } = await this._requireActiveShift(userId, shiftId);
 
     const startedAt = this._parseIsoOrNow(dto?.startedAt);
@@ -625,14 +830,8 @@ export class AdminService {
     });
   }
 
-  async moveBooking(
-    userId: string,
-    shiftId: string,
-    bookingId: string,
-    dto?: AdminBookingMoveDto,
-  ) {
+  async moveBooking(userId: string, shiftId: string, bookingId: string, dto?: AdminBookingMoveDto) {
     const { user, shift } = await this._requireActiveShift(userId, shiftId);
-
     await this._requireFeature(shift.locationId, F_MOVE);
 
     const newDateTimeRaw = (dto?.newDateTime ?? '').trim();
@@ -721,12 +920,7 @@ export class AdminService {
     return updated;
   }
 
-  async finishBooking(
-    userId: string,
-    shiftId: string,
-    bookingId: string,
-    dto?: AdminBookingFinishDto,
-  ) {
+  async finishBooking(userId: string, shiftId: string, bookingId: string, dto?: AdminBookingFinishDto) {
     const { user, shift } = await this._requireActiveShift(userId, shiftId);
 
     const finishedAt = this._parseIsoOrNow(dto?.finishedAt);
@@ -749,7 +943,16 @@ export class AdminService {
         adminNote: note ?? undefined,
         status: BookingStatus.COMPLETED,
       },
-      select: { id: true, status: true, startedAt: true, finishedAt: true, adminNote: true, shiftId: true, locationId: true, bayId: true },
+      select: {
+        id: true,
+        status: true,
+        startedAt: true,
+        finishedAt: true,
+        adminNote: true,
+        shiftId: true,
+        locationId: true,
+        bayId: true,
+      },
     });
 
     await this.prisma.auditEvent.create({
@@ -1085,7 +1288,13 @@ export class AdminService {
     });
   }
 
-  async setBayActive(userId: string, shiftId: string, bayNumber: number, isActive: boolean, reason?: string) {
+  async setBayActive(
+    userId: string,
+    shiftId: string,
+    bayNumber: number,
+    isActive: boolean,
+    reason?: string,
+  ) {
     const { user, shift } = await this._requireActiveShift(userId, shiftId);
 
     const n = Math.trunc(Number(bayNumber));
@@ -1170,7 +1379,6 @@ export class AdminService {
   async getWaitlistDay(userId: string, shiftId: string, dateYmd: string) {
     return this.waitlistDay(userId, shiftId, dateYmd);
   }
-    /* ===================== WAITLIST: delete (admin) ===================== */
 
   async deleteWaitlistRequest(
     userId: string,
@@ -1199,16 +1407,11 @@ export class AdminService {
     });
 
     if (!wl) throw new NotFoundException('Waitlist request not found');
-    if (wl.locationId !== shift.locationId) {
-      throw new ForbiddenException('Not your location waitlist');
-    }
-    if (wl.status !== WaitlistStatus.WAITING) {
-      throw new ConflictException('Waitlist request is not WAITING');
-    }
+    if (wl.locationId !== shift.locationId) throw new ForbiddenException('Not your location waitlist');
+    if (wl.status !== WaitlistStatus.WAITING) throw new ConflictException('Waitlist request is not WAITING');
 
     const reason = this._normNote(reasonRaw, 200) ?? 'ADMIN_DELETED';
 
-    // ✅ НЕ удаляем из БД. Помечаем как CANCELED, чтобы была история.
     const updated = await this.prisma.waitlistRequest.update({
       where: { id: wl.id },
       data: {
@@ -1219,7 +1422,6 @@ export class AdminService {
       select: { id: true, status: true, reason: true, updatedAt: true },
     });
 
-    // ✅ Аудит "подозрительное действие"
     await this.prisma.auditEvent.create({
       data: {
         type: AuditType.WAITLIST_DELETE,
@@ -1233,8 +1435,7 @@ export class AdminService {
           prevStatus: String(wl.status),
           newStatus: String(updated.status),
           reason,
-          desiredDateTime:
-            (wl as any).desiredDateTime?.toISOString?.() ?? wl.desiredDateTime,
+          desiredDateTime: (wl as any).desiredDateTime?.toISOString?.() ?? wl.desiredDateTime,
           desiredBayId: wl.desiredBayId ?? null,
           carId: wl.carId,
           serviceId: wl.serviceId,
@@ -1242,14 +1443,9 @@ export class AdminService {
       },
     });
 
-    // 🔔 дергаем WS чтобы админка/клиентка обновились
     this.ws.emitBookingChanged(shift.locationId, 1);
-
     return { ok: true, waitlistId: wl.id };
   }
-
-
-  /* ===================== WAITLIST -> BOOKING (convert) ===================== */
 
   async convertWaitlistToBooking(
     userId: string,
@@ -1299,7 +1495,6 @@ export class AdminService {
           shiftId: shift.id,
           dateTime: start,
           bayId,
-          // ✅ what client requested in waitlist
           requestedBayId: wl.desiredBayId ?? null,
           bufferMin: 15,
           depositRub: 0,
@@ -1503,10 +1698,7 @@ export class AdminService {
     await fs.mkdir(uploadsRoot, { recursive: true });
 
     const mime = (file.mimetype ?? '').toLowerCase();
-    const ext =
-      mime.includes('png') ? '.png' :
-      mime.includes('webp') ? '.webp' :
-      '.jpg';
+    const ext = mime.includes('png') ? '.png' : mime.includes('webp') ? '.webp' : '.jpg';
 
     const filename = `${Date.now()}_${kind.toLowerCase()}${ext}`;
     const fullPath = path.join(uploadsRoot, filename);
@@ -1537,12 +1729,7 @@ export class AdminService {
     return created;
   }
 
-  async deleteBookingPhoto(
-    userId: string,
-    shiftId: string,
-    bookingId: string,
-    photoId: string,
-  ) {
+  async deleteBookingPhoto(userId: string, shiftId: string, bookingId: string, photoId: string) {
     const { user, shift } = await this._requireActiveShift(userId, shiftId);
     const booking = await this._requireBookingInShiftLocation(shift.locationId, bookingId);
 
@@ -1560,7 +1747,6 @@ export class AdminService {
     }
 
     await this.prisma.bookingPhoto.delete({ where: { id: photo.id } });
-
     await this._tryDeleteUploadedFile(photo.url, booking.id);
 
     await this.prisma.auditEvent.create({

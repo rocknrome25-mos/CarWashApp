@@ -1,3 +1,4 @@
+// C:\dev\carwash\server_module\api\prisma\schema.prisma
 generator client {
   provider = "prisma-client-js"
 }
@@ -89,6 +90,16 @@ enum ServiceKind {
   ADDON
 }
 
+/**
+ * ✅ NEW: for washer payout calculations
+ * WASH = обычная мойка
+ * CHEM = химчистка
+ */
+enum ServiceLaborCategory {
+  WASH
+  CHEM
+}
+
 model Tenant {
   id        String   @id
   createdAt DateTime @default(now())
@@ -144,6 +155,9 @@ model Location {
 
   // ✅ services per location
   services Service[]
+
+  // ✅ payout rules per location (editable later in OWNER module)
+  washerPayRules WasherPayRule[]
 
   cashEvents       ShiftCashEvent[]
   waitlistRequests WaitlistRequest[]
@@ -262,6 +276,9 @@ model Service {
   isActive  Boolean     @default(true)
   sortOrder Int         @default(100)
 
+  // ✅ NEW: для расчёта зарплаты мойщика (30% WASH / 40% CHEM)
+  laborCategory ServiceLaborCategory @default(WASH)
+
   name        String
   priceRub    Int
   durationMin Int @default(30)
@@ -276,6 +293,7 @@ model Service {
   @@index([locationId, kind])
   @@index([locationId, isActive])
   @@index([locationId, sortOrder])
+  @@index([locationId, laborCategory])
 }
 
 model Booking {
@@ -425,6 +443,9 @@ model User {
 
   bookingPhotos BookingPhoto[] @relation("UserToBookingPhoto")
 
+  // ✅ NEW: washer assignments to shifts
+  shiftWashers ShiftWasher[]
+
   @@index([role])
   @@index([locationId])
   @@index([isActive])
@@ -446,6 +467,9 @@ model Shift {
 
   bookings   Booking[]
   cashEvents ShiftCashEvent[]
+
+  // ✅ NEW: washers on shift (one per bay or more)
+  washers ShiftWasher[]
 
   @@index([locationId, openedAt])
   @@index([adminId, openedAt])
@@ -543,4 +567,82 @@ model WaitlistRequest {
   @@index([clientId, createdAt])
   @@index([desiredDateTime])
   @@index([convertedBookingId])
+}
+
+/* ===================== NEW: Washer payouts + assignments + clock ===================== */
+
+/**
+ * ✅ Editable by owner later:
+ * per location payout percentage for service labor categories
+ */
+model WasherPayRule {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  locationId String
+  location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  category ServiceLaborCategory
+  percent  Int @default(30) // 30 for WASH, we will set CHEM to 40 via seed/owner UI
+
+  isActive Boolean @default(true)
+
+  @@unique([locationId, category])
+  @@index([locationId])
+  @@index([category])
+  @@index([isActive])
+}
+
+enum WasherClockEventType {
+  CLOCK_IN
+  CLOCK_OUT
+}
+
+/**
+ * ✅ Washer assignment to a shift and bay (one washer per bay is typical)
+ * Stores payout snapshots so history is stable even if owner changes rules later.
+ */
+model ShiftWasher {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  shiftId String
+  shift   Shift @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+
+  washerId String
+  washer   User @relation(fields: [washerId], references: [id], onDelete: Cascade)
+
+  bayId Int
+
+  // payout snapshots (if owner changes rules later, past shifts still keep original %)
+  percentWash Int @default(30)
+  percentChem Int @default(40)
+
+  clockInAt  DateTime?
+  clockOutAt DateTime?
+
+  clockEvents WasherClockEvent[]
+
+  @@unique([shiftId, washerId])
+  @@index([shiftId])
+  @@index([washerId])
+  @@index([shiftId, bayId])
+  @@index([clockInAt])
+  @@index([clockOutAt])
+}
+
+model WasherClockEvent {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  shiftWasherId String
+  shiftWasher   ShiftWasher @relation(fields: [shiftWasherId], references: [id], onDelete: Cascade)
+
+  type WasherClockEventType
+  at   DateTime @default(now())
+
+  @@index([shiftWasherId, createdAt])
+  @@index([type])
 }
