@@ -44,12 +44,10 @@ class ApiRepository implements AppRepository {
     _rtSub = realtime.events.listen((ev) {
       if (ev.type != 'booking.changed') return;
 
-      // ✅ ВСЕГДА: записи/ожидание относятся к клиенту, не зависят от выбранной локации в UI
       _rtDebounce?.cancel();
       _rtDebounce = Timer(const Duration(milliseconds: 250), () {
         _invalidateBookingCaches();
 
-        // ✅ IMPORTANT: notify UI that it should refresh
         if (!_refreshCtrl.isClosed) {
           _refreshCtrl.add(null);
         }
@@ -68,7 +66,6 @@ class ApiRepository implements AppRepository {
     cache.invalidate('cars');
     _invalidateBookingCaches();
 
-    // ✅ optional UI nudge (client changed => refresh screens)
     if (!_refreshCtrl.isClosed) _refreshCtrl.add(null);
   }
 
@@ -102,7 +99,11 @@ class ApiRepository implements AppRepository {
     } else {
       cache.set(_kLocation, loc, ttl: const Duration(days: 365));
     }
+
+    // ✅ invalidate location-scoped caches
     cache.invalidatePrefix('busy_slots_');
+    cache.invalidatePrefix('services_');
+
     _invalidateBookingCaches();
 
     if (!_refreshCtrl.isClosed) _refreshCtrl.add(null);
@@ -187,6 +188,7 @@ class ApiRepository implements AppRepository {
     final locId = currentLocation?.id;
     if (locId != null && locId.trim().isNotEmpty) {
       cache.invalidate('config_${locId.trim()}');
+      cache.invalidate('services_${locId.trim()}');
     }
   }
 
@@ -239,14 +241,24 @@ class ApiRepository implements AppRepository {
 
   @override
   Future<List<Service>> getServices({bool forceRefresh = false}) async {
-    const key = 'services';
+    final locId = currentLocation?.id.trim();
+    if (locId == null || locId.isEmpty) {
+      throw Exception(
+        'Не выбрана локация. Обнови список локаций и выбери мойку.',
+      );
+    }
+
+    final key = 'services_$locId';
 
     if (!forceRefresh) {
       final cached = cache.get<List<Service>>(key);
       if (cached != null) return cached;
     }
 
-    final data = await api.getJson('/services') as List;
+    // ✅ IMPORTANT: services are now location-scoped
+    final data =
+        await api.getJson('/services', query: {'locationId': locId}) as List;
+
     final list = data
         .map((e) => Service.fromJson(e as Map<String, dynamic>))
         .toList();
@@ -412,7 +424,6 @@ class ApiRepository implements AppRepository {
     return list;
   }
 
-  // ✅ CANCEL WAITLIST (client)
   Future<void> cancelWaitlistRequest(String waitlistId) async {
     final cid = _requireClientId();
     final wid = waitlistId.trim();
@@ -433,7 +444,7 @@ class ApiRepository implements AppRepository {
     required String serviceId,
     required DateTime dateTime,
     int? bayId,
-    int? requestedBayId, // ✅
+    int? requestedBayId,
     int? depositRub,
     int? bufferMin,
     String? comment,
@@ -449,10 +460,7 @@ class ApiRepository implements AppRepository {
       'dateTime': dateTime.toUtc().toIso8601String(),
       'clientId': cid,
       if (bayId != null) 'bayId': bayId,
-
-      // ✅ ALWAYS send. null = “любой пост”
       'requestedBayId': requestedBayId,
-
       if (depositRub != null) 'depositRub': depositRub,
       if (bufferMin != null) 'bufferMin': bufferMin,
       if (comment != null && comment.trim().isNotEmpty)
@@ -509,7 +517,6 @@ class ApiRepository implements AppRepository {
     _rtSub = null;
 
     await realtime.close();
-
     await _refreshCtrl.close();
   }
 }

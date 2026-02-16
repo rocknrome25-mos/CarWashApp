@@ -202,8 +202,9 @@ class _BookingsPageState extends State<BookingsPage> {
 
   String _serviceImage(Service? s) {
     final name = (s?.name ?? '').toLowerCase();
-    if (name.contains('комплекс'))
+    if (name.contains('комплекс')) {
       return 'assets/images/services/kompleks_512.jpg';
+    }
     if (name.contains('воск')) return 'assets/images/services/vosk_512.jpg';
     return 'assets/images/services/kuzov_512.jpg';
   }
@@ -393,8 +394,9 @@ class _BookingsPageState extends State<BookingsPage> {
 
   String _waitlistServiceImage(Map<String, dynamic> w) {
     final name = _waitlistServiceName(w).toLowerCase();
-    if (name.contains('комплекс'))
+    if (name.contains('комплекс')) {
       return 'assets/images/services/kompleks_512.jpg';
+    }
     if (name.contains('воск')) return 'assets/images/services/vosk_512.jpg';
     return 'assets/images/services/kuzov_512.jpg';
   }

@@ -17,6 +17,13 @@ class _SelectServicePageState extends State<SelectServicePage> {
   List<Service> services = const [];
   String? selectedId;
 
+  bool _isBase(Service s) {
+    final k = (s.kind ?? '').toUpperCase().trim();
+    return k.isEmpty || k == 'BASE'; // backward compatible
+  }
+
+  int _sortOrder(Service s) => s.sortOrder ?? 100000;
+
   @override
   void initState() {
     super.initState();
@@ -29,11 +36,21 @@ class _SelectServicePageState extends State<SelectServicePage> {
       error = null;
     });
     try {
-      final s = await widget.repo.getServices(forceRefresh: true);
+      final all = await widget.repo.getServices(forceRefresh: true);
+
+      // ✅ only BASE here
+      final base = all.where(_isBase).toList();
+      base.sort((a, b) {
+        final ao = _sortOrder(a);
+        final bo = _sortOrder(b);
+        if (ao != bo) return ao.compareTo(bo);
+        return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+      });
+
       if (!mounted) return;
       setState(() {
-        services = s;
-        selectedId = s.isNotEmpty ? s.first.id : null;
+        services = base;
+        selectedId = base.isNotEmpty ? base.first.id : null;
         loading = false;
       });
     } catch (e) {
@@ -116,7 +133,7 @@ class _SelectServicePageState extends State<SelectServicePage> {
                                 ),
                                 const SizedBox(height: 6),
                                 Text(
-                                  '${s.priceRub} ₽  •  $dur мин',
+                                  '${s.priceRub} ₽ • $dur мин',
                                   style: TextStyle(
                                     color: Colors.black.withValues(alpha: 0.65),
                                     fontWeight: FontWeight.w700,

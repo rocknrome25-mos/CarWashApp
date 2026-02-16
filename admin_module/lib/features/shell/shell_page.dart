@@ -1,4 +1,3 @@
-// ======================= shell_page.dart — PART 1/2 =======================
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -38,6 +37,10 @@ class _ShellPageState extends State<ShellPage> {
   late final RealtimeClient _rt;
   StreamSubscription<BookingRealtimeEvent>? _rtSub;
   Timer? _rtDebounce;
+
+  // ✅ keys to force refresh after manual creation
+  final _shiftKey = GlobalKey<_ShiftTabState>();
+  final _waitlistKey = GlobalKey<_WaitlistTabState>();
 
   String get _todayYmd => DateFormat('yyyy-MM-dd').format(DateTime.now());
 
@@ -131,16 +134,52 @@ class _ShellPageState extends State<ShellPage> {
     );
   }
 
+  void _goShiftAndRefresh() {
+    setState(() => idx = 0);
+    // дать кадр переключиться
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _shiftKey.currentState?.load();
+    });
+  }
+
+  void _goWaitlistAndRefresh() {
+    setState(() => idx = 2);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _waitlistKey.currentState?.load();
+      _loadWaitlistCount();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: IndexedStack(
         index: idx,
         children: [
-          ShiftTab(api: widget.api, store: widget.store, session: widget.session),
-          BaysTab(api: widget.api, store: widget.store, session: widget.session),
-          WaitlistTab(api: widget.api, store: widget.store, session: widget.session),
-          RecordTab(api: widget.api, store: widget.store, session: widget.session),
+          ShiftTab(
+            key: _shiftKey,
+            api: widget.api,
+            store: widget.store,
+            session: widget.session,
+          ),
+          BaysTab(
+            api: widget.api,
+            store: widget.store,
+            session: widget.session,
+          ),
+          WaitlistTab(
+            key: _waitlistKey,
+            api: widget.api,
+            store: widget.store,
+            session: widget.session,
+          ),
+          RecordTab(
+            api: widget.api,
+            store: widget.store,
+            session: widget.session,
+            onCreatedBooking: _goShiftAndRefresh,
+            onCreatedWaitlist: _goWaitlistAndRefresh,
+          ),
         ],
       ),
       bottomNavigationBar: NavigationBar(
@@ -150,10 +189,19 @@ class _ShellPageState extends State<ShellPage> {
           if (v == 2) _loadWaitlistCount();
         },
         destinations: [
-          const NavigationDestination(icon: Icon(Icons.event_note), label: 'Смена'),
-          const NavigationDestination(icon: Icon(Icons.car_repair), label: 'Посты'),
+          const NavigationDestination(
+            icon: Icon(Icons.event_note),
+            label: 'Смена',
+          ),
+          const NavigationDestination(
+            icon: Icon(Icons.car_repair),
+            label: 'Посты',
+          ),
           NavigationDestination(icon: _queueIconWithBadge(), label: 'Ожидание'),
-          const NavigationDestination(icon: Icon(Icons.add_box_outlined), label: 'Записать'),
+          const NavigationDestination(
+            icon: Icon(Icons.add_box_outlined),
+            label: 'Записать',
+          ),
         ],
       ),
     );
@@ -167,11 +215,17 @@ class RecordTab extends StatefulWidget {
   final SessionStore store;
   final AdminSession session;
 
+  // ✅ new: navigate+refresh after creation
+  final VoidCallback onCreatedBooking;
+  final VoidCallback onCreatedWaitlist;
+
   const RecordTab({
     super.key,
     required this.api,
     required this.store,
     required this.session,
+    required this.onCreatedBooking,
+    required this.onCreatedWaitlist,
   });
 
   @override
@@ -191,7 +245,6 @@ class _RecordTabState extends State<RecordTab> {
   DateTime selectedDay = DateTime.now();
   int selectedBay = 1;
 
-  // services from backend
   List<Map<String, dynamic>> baseServices = [];
   List<Map<String, dynamic>> addonServices = [];
 
@@ -206,11 +259,16 @@ class _RecordTabState extends State<RecordTab> {
   final plateCtrl = TextEditingController();
   String bodyType = 'SEDAN';
 
+  bool _nameFormatting = false;
+  bool _phoneFormatting = false;
+
   List<int> activeBays = const [1, 2];
   List<DateTimeRange> busy = const [];
   DateTime? selectedSlot;
 
   String get _locId => widget.session.locationId.trim();
+
+  // ---- helpers ----
 
   int _durationOf(Map<String, dynamic> s) {
     final v = s['durationMin'];
@@ -258,9 +316,76 @@ class _RecordTabState extends State<RecordTab> {
 
   DateTime _dateOnly(DateTime dt) => DateTime(dt.year, dt.month, dt.day);
 
+  String _capitalizeWords(String s) {
+    final trimmed = s.trim().replaceAll(RegExp(r'\s+'), ' ');
+    if (trimmed.isEmpty) return '';
+    final parts = trimmed.split(' ');
+    final out = parts
+        .map((w) {
+          if (w.isEmpty) return w;
+          final lower = w.toLowerCase();
+          final first = lower[0].toUpperCase();
+          return first + (lower.length > 1 ? lower.substring(1) : '');
+        })
+        .join(' ');
+    return out;
+  }
+
+  void _setupNameCapitalization() {
+    nameCtrl.addListener(() {
+      if (_nameFormatting) return;
+      final raw = nameCtrl.text;
+      final formatted = _capitalizeWords(raw);
+      if (raw == formatted) return;
+      _nameFormatting = true;
+      nameCtrl.value = nameCtrl.value.copyWith(
+        text: formatted,
+        selection: TextSelection.collapsed(offset: formatted.length),
+        composing: TextRange.empty,
+      );
+      _nameFormatting = false;
+      if (mounted) setState(() {}); // enables button
+    });
+  }
+
+  String _normalizePhoneForDb(String raw) {
+    var s = raw.trim();
+    if (s.isEmpty) return s;
+    // keep only + and digits
+    s = s.replaceAll(RegExp(r'[^\d\+]'), '');
+    // if starts with 8XXXXXXXXXX -> +7XXXXXXXXXX
+    if (s.startsWith('8') && s.length == 11) {
+      s = '+7${s.substring(1)}';
+    }
+    // if starts with 7XXXXXXXXXX -> +7XXXXXXXXXX
+    if (!s.startsWith('+') && s.startsWith('7') && s.length == 11) {
+      s = '+$s';
+    }
+    return s;
+  }
+
+  void _setupPhoneSanitizer() {
+    phoneCtrl.addListener(() {
+      if (_phoneFormatting) return;
+      final raw = phoneCtrl.text;
+      final cleaned = raw.replaceAll(RegExp(r'[^\d\+\s]'), '');
+      if (cleaned == raw) return;
+      _phoneFormatting = true;
+      phoneCtrl.value = phoneCtrl.value.copyWith(
+        text: cleaned,
+        selection: TextSelection.collapsed(offset: cleaned.length),
+        composing: TextRange.empty,
+      );
+      _phoneFormatting = false;
+      if (mounted) setState(() {});
+    });
+  }
+
   @override
   void initState() {
     super.initState();
+    _setupNameCapitalization();
+    _setupPhoneSanitizer();
     _init();
   }
 
@@ -284,7 +409,6 @@ class _RecordTabState extends State<RecordTab> {
       final loc = _locId;
       if (loc.isEmpty) throw Exception('Нет locationId в сессии. Перезайди.');
 
-      // active bays
       final bays = await widget.api.listBays(widget.session.userId, sid);
       final act = <int>[];
       for (final x in bays) {
@@ -299,7 +423,6 @@ class _RecordTabState extends State<RecordTab> {
         if (!activeBays.contains(selectedBay)) selectedBay = activeBays.first;
       }
 
-      // load services catalog (single source of truth)
       final base = await widget.api.services(locationId: loc, kind: 'BASE');
       final add = await widget.api.services(locationId: loc, kind: 'ADDON');
 
@@ -325,6 +448,42 @@ class _RecordTabState extends State<RecordTab> {
     } finally {
       if (mounted) setState(() => loading = false);
     }
+  }
+
+  Future<void> _loadBusy() async {
+    final loc = _locId;
+    final day = _dateOnly(selectedDay);
+    final from = DateTime(day.year, day.month, day.day, _openHour, 0);
+    final to = DateTime(day.year, day.month, day.day, _closeHour, 0);
+
+    final rows = await widget.api.publicBusySlots(
+      locationId: loc,
+      bayId: selectedBay,
+      fromIsoUtc: from.toUtc().toIso8601String(),
+      toIsoUtc: to.toUtc().toIso8601String(),
+    );
+
+    busy = _parseBusyRanges(rows);
+
+    if (selectedSlot != null && !_isFree(selectedSlot!)) {
+      selectedSlot = null;
+    }
+  }
+
+  List<DateTimeRange> _parseBusyRanges(List<dynamic> rows) {
+    final out = <DateTimeRange>[];
+    for (final x in rows) {
+      if (x is Map) {
+        final s = x['start']?.toString() ?? '';
+        final e = x['end']?.toString() ?? '';
+        final ds = DateTime.tryParse(s);
+        final de = DateTime.tryParse(e);
+        if (ds != null && de != null) {
+          out.add(DateTimeRange(start: ds.toLocal(), end: de.toLocal()));
+        }
+      }
+    }
+    return out;
   }
 
   List<DateTime> _buildSlotsForDay(DateTime day) {
@@ -365,42 +524,6 @@ class _RecordTabState extends State<RecordTab> {
     DateTime bEnd,
   ) {
     return aStart.isBefore(bEnd) && bStart.isBefore(aEnd);
-  }
-
-  List<DateTimeRange> _parseBusyRanges(List<dynamic> rows) {
-    final out = <DateTimeRange>[];
-    for (final x in rows) {
-      if (x is Map) {
-        final s = x['start']?.toString() ?? '';
-        final e = x['end']?.toString() ?? '';
-        final ds = DateTime.tryParse(s);
-        final de = DateTime.tryParse(e);
-        if (ds != null && de != null) {
-          out.add(DateTimeRange(start: ds.toLocal(), end: de.toLocal()));
-        }
-      }
-    }
-    return out;
-  }
-
-  Future<void> _loadBusy() async {
-    final loc = _locId;
-    final day = _dateOnly(selectedDay);
-    final from = DateTime(day.year, day.month, day.day, _openHour, 0);
-    final to = DateTime(day.year, day.month, day.day, _closeHour, 0);
-
-    final rows = await widget.api.publicBusySlots(
-      locationId: loc,
-      bayId: selectedBay,
-      fromIsoUtc: from.toUtc().toIso8601String(),
-      toIsoUtc: to.toUtc().toIso8601String(),
-    );
-
-    busy = _parseBusyRanges(rows);
-
-    if (selectedSlot != null && !_isFree(selectedSlot!)) {
-      selectedSlot = null;
-    }
   }
 
   bool _isFree(DateTime start) {
@@ -447,17 +570,6 @@ class _RecordTabState extends State<RecordTab> {
     );
   }
 
-  bool get _canSubmit {
-    final nameOk = nameCtrl.text.trim().isNotEmpty;
-    final phoneOk = phoneCtrl.text.trim().isNotEmpty;
-    final plateOk = plateCtrl.text.trim().isNotEmpty;
-    return nameOk &&
-        phoneOk &&
-        plateOk &&
-        selectedSlot != null &&
-        (selectedServiceId ?? '').isNotEmpty;
-  }
-
   Future<void> _refresh() async {
     setState(() {
       loading = true;
@@ -470,6 +582,17 @@ class _RecordTabState extends State<RecordTab> {
     } finally {
       if (mounted) setState(() => loading = false);
     }
+  }
+
+  bool get _canSubmit {
+    final nameOk = nameCtrl.text.trim().isNotEmpty;
+    final phoneOk = phoneCtrl.text.trim().isNotEmpty;
+    final plateOk = plateCtrl.text.trim().isNotEmpty;
+    return nameOk &&
+        phoneOk &&
+        plateOk &&
+        selectedSlot != null &&
+        (selectedServiceId ?? '').isNotEmpty;
   }
 
   Future<void> _submit() async {
@@ -488,14 +611,16 @@ class _RecordTabState extends State<RecordTab> {
           .map((id) => {'serviceId': id, 'qty': 1})
           .toList();
 
-      await widget.api.createAdminBooking(
+      final phoneDb = _normalizePhoneForDb(phoneCtrl.text);
+
+      final res = await widget.api.createAdminBooking(
         userId,
         shiftId,
         locationId: locId,
         bayId: selectedBay,
         dateTimeIsoUtc: dtUtc,
         clientName: nameCtrl.text.trim(),
-        clientPhone: phoneCtrl.text.trim(),
+        clientPhone: phoneDb,
         carPlate: plateCtrl.text.trim(),
         bodyType: bodyType,
         serviceId: selectedServiceId!,
@@ -504,6 +629,7 @@ class _RecordTabState extends State<RecordTab> {
 
       if (!mounted) return;
 
+      // reset
       setState(() {
         selectedAddonIds.clear();
         selectedSlot = null;
@@ -514,12 +640,18 @@ class _RecordTabState extends State<RecordTab> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Запись создана'),
+          content: Text('Создано'),
           behavior: SnackBarBehavior.floating,
         ),
       );
 
-      await _refresh();
+      // ✅ navigate based on backend resultType (BOOKING vs WAITLIST)
+      final rt = (res['resultType'] ?? '').toString().toUpperCase();
+      if (rt == 'WAITLIST') {
+        widget.onCreatedWaitlist();
+      } else {
+        widget.onCreatedBooking();
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -544,11 +676,13 @@ class _RecordTabState extends State<RecordTab> {
     );
     final slots = _freeSlots();
 
-    // ✅ Итоговая строка (после доп. услуг)
     final addonNames = _selectedAddonNames;
-    final addonLine = addonNames.isEmpty ? 'Доп. услуги: —' : 'Доп. услуги: ${addonNames.join(', ')}';
+    final addonLine = addonNames.isEmpty
+        ? 'Доп. услуги: —'
+        : 'Доп. услуги: ${addonNames.join(', ')}';
     final totalLine = 'Основная: ${selectedServiceName ?? '—'} • $addonLine';
-    final calcLine = 'Итого: ${baseMin + extraMin} мин + буфер $_bufferMin = блок $blockMin мин';
+    final calcLine =
+        'Итого: ${baseMin + extraMin} мин + буфер $_bufferMin = блок $blockMin мин';
 
     return Scaffold(
       appBar: AppBar(
@@ -565,343 +699,347 @@ class _RecordTabState extends State<RecordTab> {
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : (error != null)
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Text(error!, style: const TextStyle(color: Colors.red)),
-                  ),
-                )
-              : ListView(
-                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
-                  children: [
-                    _sectionBox(
-                      context,
-                      title: 'Пост и услуга',
-                      child: Column(
-                        children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: DropdownButtonFormField<int>(
-                                  value: selectedBay,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Пост',
-                                  ),
-                                  items: [
-                                    for (final b in activeBays)
-                                      DropdownMenuItem(
-                                        value: b,
-                                        child: Text('Пост $b'),
-                                      ),
-                                  ],
-                                  onChanged: (v) async {
-                                    final next = v ?? activeBays.first;
-                                    if (next == selectedBay) return;
-                                    setState(() {
-                                      selectedBay = next;
-                                      selectedSlot = null;
-                                    });
-                                    await _refresh();
-                                  },
-                                ),
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(error!, style: const TextStyle(color: Colors.red)),
+              ),
+            )
+          : ListView(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
+              children: [
+                _sectionBox(
+                  context,
+                  title: 'Пост и услуга',
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: DropdownButtonFormField<int>(
+                          key: ValueKey('bay_$selectedBay'),
+                          initialValue: selectedBay,
+                          decoration: const InputDecoration(labelText: 'Пост'),
+                          items: [
+                            for (final b in activeBays)
+                              DropdownMenuItem(
+                                value: b,
+                                child: Text('Пост $b'),
                               ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: DropdownButtonFormField<String>(
-                                  value: selectedServiceId,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Основная услуга',
-                                  ),
-                                  items: [
-                                    for (final s in baseServices)
-                                      DropdownMenuItem(
-                                        value: (s['id'] ?? '').toString(),
-                                        child: Text(
-                                          '${(s['name'] ?? '').toString()} (${_durationOf(s)} мин)',
-                                        ),
-                                      ),
-                                  ],
-                                  onChanged: (v) {
-                                    final id = (v ?? '').toString();
-                                    if (id.isEmpty) return;
-                                    final sel = baseServices.firstWhere(
-                                      (x) => (x['id'] ?? '').toString() == id,
-                                      orElse: () => baseServices.first,
-                                    );
-                                    setState(() {
-                                      selectedServiceId = id;
-                                      selectedServiceName = (sel['name'] ?? '')
-                                          .toString();
-                                      baseMin = _durationOf(sel);
-                                      if (selectedSlot != null &&
-                                          !_isFree(selectedSlot!)) {
-                                        selectedSlot = null;
-                                      }
-                                    });
-                                  },
-                                ),
-                              ),
-                            ],
-                          ),
-                          // ❌ Раньше тут была строка калькуляции — убрали по твоей просьбе
-                        ],
-                      ),
-                    ),
-
-                    const SizedBox(height: 12),
-
-                    _sectionBox(
-                      context,
-                      title: 'Доп. услуги',
-                      child: addonServices.isEmpty
-                          ? Text(
-                              'Доп. услуги не настроены',
-                              style: TextStyle(
-                                color: cs.onSurface.withValues(alpha: 0.7),
-                                fontWeight: FontWeight.w700,
-                              ),
-                            )
-                          : Wrap(
-                              spacing: 10,
-                              runSpacing: 10,
-                              children: [
-                                for (final s in addonServices)
-                                  FilterChip(
-                                    label: Text(
-                                      '${(s['name'] ?? '').toString()} (+${_durationOf(s)} мин)',
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w900,
-                                      ),
-                                    ),
-                                    selected: selectedAddonIds.contains(
-                                      (s['id'] ?? '').toString(),
-                                    ),
-                                    onSelected: (v) {
-                                      final id = (s['id'] ?? '').toString();
-                                      setState(() {
-                                        if (v) {
-                                          selectedAddonIds.add(id);
-                                        } else {
-                                          selectedAddonIds.remove(id);
-                                        }
-                                        if (selectedSlot != null &&
-                                            !_isFree(selectedSlot!)) {
-                                          selectedSlot = null;
-                                        }
-                                      });
-                                    },
-                                  ),
-                              ],
-                            ),
-                    ),
-
-                    const SizedBox(height: 12),
-
-                    // ✅ НОВОЕ: Итоговая секция сразу после доп. услуг
-                    _sectionBox(
-                      context,
-                      title: 'Итог',
-                      child: Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(
-                            color: cs.outlineVariant.withValues(alpha: 0.6),
-                          ),
-                          color: cs.surfaceContainerHighest.withValues(alpha: 0.14),
-                        ),
-                        child: Text(
-                          '$totalLine\n$calcLine',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w900,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(height: 12),
-
-                    _sectionBox(
-                      context,
-                      title: 'Дата',
-                      child: SizedBox(
-                        height: 44,
-                        child: ListView.separated(
-                          scrollDirection: Axis.horizontal,
-                          itemCount: days.length,
-                          separatorBuilder: (_, _) => const SizedBox(width: 10),
-                          itemBuilder: (_, i) {
-                            final d = days[i];
-                            final selected = _dateOnly(d) == _dateOnly(selectedDay);
-                            return InkWell(
-                              borderRadius: BorderRadius.circular(999),
-                              onTap: () async {
-                                setState(() {
-                                  selectedDay = d;
-                                  selectedSlot = null;
-                                });
-                                await _refresh();
-                              },
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 10,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: selected
-                                      ? cs.primary.withValues(alpha: 0.18)
-                                      : cs.surfaceContainerHighest.withValues(
-                                          alpha: 0.18,
-                                        ),
-                                  borderRadius: BorderRadius.circular(999),
-                                  border: Border.all(
-                                    color: selected
-                                        ? cs.primary.withValues(alpha: 0.65)
-                                        : cs.outlineVariant.withValues(alpha: 0.55),
-                                  ),
-                                ),
-                                child: Text(
-                                  '${['ВС', 'ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ'][d.weekday % 7]} ${d.day}',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.w900,
-                                    color: cs.onSurface.withValues(alpha: 0.92),
-                                  ),
-                                ),
-                              ),
-                            );
+                          ],
+                          onChanged: (v) async {
+                            final next = v ?? activeBays.first;
+                            if (next == selectedBay) return;
+                            setState(() {
+                              selectedBay = next;
+                              selectedSlot = null;
+                            });
+                            await _refresh();
                           },
                         ),
                       ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: DropdownButtonFormField<String>(
+                          key: ValueKey('svc_${selectedServiceId ?? ''}'),
+                          initialValue: selectedServiceId,
+                          decoration: const InputDecoration(
+                            labelText: 'Основная услуга',
+                          ),
+                          items: [
+                            for (final s in baseServices)
+                              DropdownMenuItem(
+                                value: (s['id'] ?? '').toString(),
+                                child: Text(
+                                  '${(s['name'] ?? '').toString()} (${_durationOf(s)} мин)',
+                                ),
+                              ),
+                          ],
+                          onChanged: (v) {
+                            final id = (v ?? '').toString();
+                            if (id.isEmpty) return;
+                            final sel = baseServices.firstWhere(
+                              (x) => (x['id'] ?? '').toString() == id,
+                              orElse: () => baseServices.first,
+                            );
+                            setState(() {
+                              selectedServiceId = id;
+                              selectedServiceName = (sel['name'] ?? '')
+                                  .toString();
+                              baseMin = _durationOf(sel);
+                              if (selectedSlot != null &&
+                                  !_isFree(selectedSlot!)) {
+                                selectedSlot = null;
+                              }
+                            });
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 12),
+
+                _sectionBox(
+                  context,
+                  title: 'Доп. услуги',
+                  child: addonServices.isEmpty
+                      ? Text(
+                          'Доп. услуги не настроены',
+                          style: TextStyle(
+                            color: cs.onSurface.withValues(alpha: 0.7),
+                            fontWeight: FontWeight.w700,
+                          ),
+                        )
+                      : Wrap(
+                          spacing: 10,
+                          runSpacing: 10,
+                          children: [
+                            for (final s in addonServices)
+                              FilterChip(
+                                label: Text(
+                                  '${(s['name'] ?? '').toString()} (+${_durationOf(s)} мин)',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                                selected: selectedAddonIds.contains(
+                                  (s['id'] ?? '').toString(),
+                                ),
+                                onSelected: (v) {
+                                  final id = (s['id'] ?? '').toString();
+                                  setState(() {
+                                    if (v) {
+                                      selectedAddonIds.add(id);
+                                    } else {
+                                      selectedAddonIds.remove(id);
+                                    }
+                                    if (selectedSlot != null &&
+                                        !_isFree(selectedSlot!)) {
+                                      selectedSlot = null;
+                                    }
+                                  });
+                                },
+                              ),
+                          ],
+                        ),
+                ),
+
+                const SizedBox(height: 12),
+
+                _sectionBox(
+                  context,
+                  title: 'Итог',
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
                     ),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: cs.outlineVariant.withValues(alpha: 0.6),
+                      ),
+                      color: cs.surfaceContainerHighest.withValues(alpha: 0.14),
+                    ),
+                    child: Text(
+                      '$totalLine\n$calcLine',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w900,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                ),
 
-                    const SizedBox(height: 12),
+                const SizedBox(height: 12),
 
-                    _sectionBox(
-                      context,
-                      title: 'Время (только свободные)',
-                      child: slots.isEmpty
-                          ? Text(
-                              'Нет доступных слотов на выбранный день.',
+                _sectionBox(
+                  context,
+                  title: 'Дата',
+                  child: SizedBox(
+                    height: 44,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: days.length,
+                      separatorBuilder: (_, _) => const SizedBox(width: 10),
+                      itemBuilder: (_, i) {
+                        final d = days[i];
+                        final selected = _dateOnly(d) == _dateOnly(selectedDay);
+                        return InkWell(
+                          borderRadius: BorderRadius.circular(999),
+                          onTap: () async {
+                            setState(() {
+                              selectedDay = d;
+                              selectedSlot = null;
+                            });
+                            await _refresh();
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
+                            decoration: BoxDecoration(
+                              color: selected
+                                  ? cs.primary.withValues(alpha: 0.18)
+                                  : cs.surfaceContainerHighest.withValues(
+                                      alpha: 0.18,
+                                    ),
+                              borderRadius: BorderRadius.circular(999),
+                              border: Border.all(
+                                color: selected
+                                    ? cs.primary.withValues(alpha: 0.65)
+                                    : cs.outlineVariant.withValues(alpha: 0.55),
+                              ),
+                            ),
+                            child: Text(
+                              '${['ВС', 'ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ'][d.weekday % 7]} ${d.day}',
                               style: TextStyle(
-                                color: cs.onSurface.withValues(alpha: 0.75),
-                                fontWeight: FontWeight.w700,
+                                fontWeight: FontWeight.w900,
+                                color: cs.onSurface.withValues(alpha: 0.92),
                               ),
-                            )
-                          : Wrap(
-                              spacing: 10,
-                              runSpacing: 10,
-                              children: [
-                                for (final s in slots)
-                                  (selectedSlot == s)
-                                      ? FilledButton(
-                                          onPressed: () =>
-                                              setState(() => selectedSlot = s),
-                                          child: Text(
-                                            DateFormat('HH:mm').format(s),
-                                            style: const TextStyle(
-                                              fontWeight: FontWeight.w900,
-                                            ),
-                                          ),
-                                        )
-                                      : OutlinedButton(
-                                          onPressed: () =>
-                                              setState(() => selectedSlot = s),
-                                          child: Text(
-                                            DateFormat('HH:mm').format(s),
-                                            style: const TextStyle(
-                                              fontWeight: FontWeight.w900,
-                                            ),
-                                          ),
-                                        ),
-                              ],
                             ),
+                          ),
+                        );
+                      },
                     ),
+                  ),
+                ),
 
-                    const SizedBox(height: 12),
+                const SizedBox(height: 12),
 
-                    _sectionBox(
-                      context,
-                      title: 'Клиент (по звонку)',
-                      child: Column(
-                        children: [
-                          TextField(
-                            controller: nameCtrl,
-                            decoration: const InputDecoration(labelText: 'Имя'),
+                _sectionBox(
+                  context,
+                  title: 'Время (только свободные)',
+                  child: slots.isEmpty
+                      ? Text(
+                          'Нет доступных слотов на выбранный день.',
+                          style: TextStyle(
+                            color: cs.onSurface.withValues(alpha: 0.75),
+                            fontWeight: FontWeight.w700,
                           ),
-                          const SizedBox(height: 10),
-                          TextField(
-                            controller: phoneCtrl,
-                            keyboardType: TextInputType.phone,
-                            decoration: const InputDecoration(labelText: 'Телефон'),
+                        )
+                      : Wrap(
+                          spacing: 10,
+                          runSpacing: 10,
+                          children: [
+                            for (final s in slots)
+                              (selectedSlot == s)
+                                  ? FilledButton(
+                                      onPressed: () =>
+                                          setState(() => selectedSlot = s),
+                                      child: Text(
+                                        DateFormat('HH:mm').format(s),
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w900,
+                                        ),
+                                      ),
+                                    )
+                                  : OutlinedButton(
+                                      onPressed: () =>
+                                          setState(() => selectedSlot = s),
+                                      child: Text(
+                                        DateFormat('HH:mm').format(s),
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w900,
+                                        ),
+                                      ),
+                                    ),
+                          ],
+                        ),
+                ),
+
+                const SizedBox(height: 12),
+
+                _sectionBox(
+                  context,
+                  title: 'Клиент (по звонку)',
+                  child: Column(
+                    children: [
+                      TextField(
+                        controller: nameCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Имя Фамилия',
+                        ),
+                        onChanged: (_) => setState(() {}),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: phoneCtrl,
+                        keyboardType: TextInputType.phone,
+                        decoration: const InputDecoration(labelText: 'Телефон'),
+                        onChanged: (_) => setState(() {}),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: plateCtrl,
+                        textCapitalization: TextCapitalization.characters,
+                        decoration: const InputDecoration(
+                          labelText: 'Номер авто',
+                        ),
+                        onChanged: (_) => setState(() {}),
+                      ),
+                      const SizedBox(height: 10),
+                      DropdownButtonFormField<String>(
+                        key: ValueKey('body_$bodyType'),
+                        initialValue: bodyType,
+                        decoration: const InputDecoration(
+                          labelText: 'Тип кузова',
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'SEDAN',
+                            child: Text('Седан'),
                           ),
-                          const SizedBox(height: 10),
-                          TextField(
-                            controller: plateCtrl,
-                            textCapitalization: TextCapitalization.characters,
-                            decoration: const InputDecoration(
-                              labelText: 'Номер авто',
-                            ),
+                          DropdownMenuItem(value: 'SUV', child: Text('SUV')),
+                          DropdownMenuItem(
+                            value: 'HATCH',
+                            child: Text('Хэтчбек'),
                           ),
-                          const SizedBox(height: 10),
-                          DropdownButtonFormField<String>(
-                            value: bodyType,
-                            decoration: const InputDecoration(
-                              labelText: 'Тип кузова',
-                            ),
-                            items: const [
-                              DropdownMenuItem(
-                                value: 'SEDAN',
-                                child: Text('Седан'),
-                              ),
-                              DropdownMenuItem(value: 'SUV', child: Text('SUV')),
-                              DropdownMenuItem(
-                                value: 'HATCH',
-                                child: Text('Хэтчбек'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'WAGON',
-                                child: Text('Универсал'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'MINIVAN',
-                                child: Text('Минивэн'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'OTHER',
-                                child: Text('Другое'),
-                              ),
-                            ],
-                            onChanged: (v) =>
-                                setState(() => bodyType = v ?? 'SEDAN'),
+                          DropdownMenuItem(
+                            value: 'WAGON',
+                            child: Text('Универсал'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'MINIVAN',
+                            child: Text('Минивэн'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'OTHER',
+                            child: Text('Другое'),
                           ),
                         ],
+                        onChanged: (v) =>
+                            setState(() => bodyType = v ?? 'SEDAN'),
                       ),
-                    ),
-
-                    const SizedBox(height: 14),
-
-                    SizedBox(
-                      width: double.infinity,
-                      child: FilledButton.icon(
-                        onPressed: submitting ? null : (_canSubmit ? _submit : null),
-                        icon: submitting
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : const Icon(Icons.done),
-                        label: Text(submitting ? 'Создаю...' : 'Создать запись'),
-                      ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
+
+                const SizedBox(height: 14),
+
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: submitting
+                        ? null
+                        : (_canSubmit ? _submit : null),
+                    icon: submitting
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.done),
+                    label: Text(submitting ? 'Создаю...' : 'Создать запись'),
+                  ),
+                ),
+              ],
+            ),
     );
   }
 }
-
 
 /* ========================= TAB 1: СМЕНА ========================= */
 

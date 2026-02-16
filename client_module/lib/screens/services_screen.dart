@@ -1,3 +1,4 @@
+// C:\dev\carwash\client_module\lib\screens\services_screen.dart
 import 'package:flutter/material.dart';
 import '../core/data/app_repository.dart';
 import '../core/models/service.dart';
@@ -60,6 +61,12 @@ class _ServicesScreenState extends State<ServicesScreen> {
     try {
       await _future;
     } catch (_) {}
+  }
+
+  bool _isBase(Service s) {
+    // kind: BASE / ADDON (server). null/empty считаем как BASE для совместимости
+    final k = (s.kind ?? '').trim().toUpperCase();
+    return k.isEmpty || k == 'BASE';
   }
 
   ImageProvider _serviceThumb(Service s) {
@@ -153,12 +160,21 @@ class _ServicesScreenState extends State<ServicesScreen> {
           );
         }
 
-        final services = data.services;
+        // ✅ показываем только основные услуги (BASE), допы (ADDON) скрываем
+        final services =
+            data.services.where((s) {
+              final activeOk = (s.isActive ?? true) == true;
+              return activeOk && _isBase(s);
+            }).toList()..sort(
+              (a, b) =>
+                  (a.sortOrder ?? 100000).compareTo(b.sortOrder ?? 100000),
+            );
+
         if (services.isEmpty) {
           return const EmptyState(
             icon: Icons.local_car_wash,
-            title: 'Нет услуг',
-            subtitle: 'Backend вернул пустой список услуг.',
+            title: 'Нет основных услуг',
+            subtitle: 'Нет услуг типа BASE для отображения на этой странице.',
           );
         }
 
@@ -226,7 +242,6 @@ class _ServicesScreenState extends State<ServicesScreen> {
                 ),
               ),
               const SizedBox(height: 10),
-
               for (final s in services)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 12),

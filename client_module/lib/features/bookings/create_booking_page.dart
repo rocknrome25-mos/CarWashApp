@@ -14,6 +14,7 @@ import '../../core/realtime/realtime_client.dart';
 import 'payment_page.dart';
 
 enum _BayMode { any, bay1, bay2 }
+
 enum _DayPart { morning, day, evening }
 
 class CreateBookingPage extends StatefulWidget {
@@ -210,7 +211,12 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     return _ceilToStep(lead, _slotStepMin);
   }
 
-  bool _overlaps(DateTime aStart, DateTime aEnd, DateTime bStart, DateTime bEnd) {
+  bool _overlaps(
+    DateTime aStart,
+    DateTime aEnd,
+    DateTime bStart,
+    DateTime bEnd,
+  ) {
     return aStart.isBefore(bEnd) && bStart.isBefore(aEnd);
   }
 
@@ -262,7 +268,13 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
   bool _endsBeforeClose(DateTime slotStart) {
     final blockMin = _effectiveBlockMinForSelectedService();
     final end = slotStart.add(Duration(minutes: blockMin));
-    final close = DateTime(slotStart.year, slotStart.month, slotStart.day, _closeHour, 0);
+    final close = DateTime(
+      slotStart.year,
+      slotStart.month,
+      slotStart.day,
+      _closeHour,
+      0,
+    );
     return !end.isAfter(close);
   }
 
@@ -300,7 +312,10 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     return null;
   }
 
-  Color _hexToColorSafe(String hex, {Color fallback = const Color(0xFF2D9CDB)}) {
+  Color _hexToColorSafe(
+    String hex, {
+    Color fallback = const Color(0xFF2D9CDB),
+  }) {
     final s = hex.trim();
     if (s.isEmpty) return fallback;
     var h = s;
@@ -418,10 +433,15 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
     for (final b in list) {
       if (!_isBookingStillBlocking(b)) continue;
-      if (b.status == BookingStatus.canceled || b.status == BookingStatus.completed) continue;
+      if (b.status == BookingStatus.canceled ||
+          b.status == BookingStatus.completed) {
+        continue;
+      }
 
       final bStart = b.dateTime.toLocal();
-      final bEnd = bStart.add(Duration(minutes: _blockMinForExistingBooking(b)));
+      final bEnd = bStart.add(
+        Duration(minutes: _blockMinForExistingBooking(b)),
+      );
 
       if (_overlaps(slotStart, slotEnd, bStart, bEnd)) {
         return true;
@@ -432,7 +452,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
   }
 
   // ✅ if client already has WAITING waitlist overlapping => block spam
-  Future<bool> _hasClientWaitlistOverlapForSelectedSlot(DateTime slotStart) async {
+  Future<bool> _hasClientWaitlistOverlapForSelectedSlot(
+    DateTime slotStart,
+  ) async {
     final cid = widget.repo.currentClient?.id.trim() ?? '';
     if (cid.isEmpty) return false;
 
@@ -446,7 +468,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
       );
 
       for (final w in list) {
-        final iso = (w['desiredDateTime'] ?? w['dateTime'] ?? '').toString().trim();
+        final iso = (w['desiredDateTime'] ?? w['dateTime'] ?? '')
+            .toString()
+            .trim();
         final dt = DateTime.tryParse(iso)?.toLocal();
         if (dt == null) continue;
 
@@ -468,7 +492,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
   // ---------------- auto-pick slot logic ----------------
 
-  Future<void> _autoPickBestSlotForCurrentState({required bool forceBusyRefresh}) async {
+  Future<void> _autoPickBestSlotForCurrentState({
+    required bool forceBusyRefresh,
+  }) async {
     if (_location == null) return;
 
     if (forceBusyRefresh) {
@@ -576,7 +602,8 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
       final String? selectedCarId = cars.isNotEmpty ? cars.first.id : null;
 
       String? selectedServiceId =
-          widget.preselectedServiceId ?? (services.isNotEmpty ? services.first.id : null);
+          widget.preselectedServiceId ??
+          (services.isNotEmpty ? services.first.id : null);
       if (widget.preselectedServiceId != null &&
           !services.any((s) => s.id == widget.preselectedServiceId)) {
         selectedServiceId = services.isNotEmpty ? services.first.id : null;
@@ -735,11 +762,16 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                   ),
                   const SizedBox(width: 10),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
                     decoration: BoxDecoration(
                       color: cs.surfaceContainerHighest.withValues(alpha: 0.18),
                       borderRadius: BorderRadius.circular(999),
-                      border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
+                      border: Border.all(
+                        color: cs.outlineVariant.withValues(alpha: 0.6),
+                      ),
                     ),
                     child: Text(
                       c.plateDisplay,
@@ -997,7 +1029,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
   List<Service> _addonCandidates() {
     final sid = serviceId;
-    final list = _services.where((s) => sid == null ? true : s.id != sid).toList();
+    final list = _services
+        .where((s) => sid == null ? true : s.id != sid)
+        .toList();
     list.sort((a, b) => a.priceRub.compareTo(b.priceRub));
     return list;
   }
@@ -1115,9 +1149,8 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                     Expanded(
                       child: Text(
                         'Дополнительные услуги',
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w900,
-                            ),
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w900),
                       ),
                     ),
                   ],
@@ -1216,8 +1249,14 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     return visible;
   }
 
-  List<DateTime> _filterByHourRange(List<DateTime> slots, int fromHour, int toHourExclusive) {
-    return slots.where((d) => d.hour >= fromHour && d.hour < toHourExclusive).toList();
+  List<DateTime> _filterByHourRange(
+    List<DateTime> slots,
+    int fromHour,
+    int toHourExclusive,
+  ) {
+    return slots
+        .where((d) => d.hour >= fromHour && d.hour < toHourExclusive)
+        .toList();
   }
 
   ButtonStyle _slotStyleOutlined() {
@@ -1264,12 +1303,18 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
         ? FilledButton(
             style: _slotStyleFilled(),
             onPressed: _uiLocked ? null : select,
-            child: Text(label, style: const TextStyle(fontWeight: FontWeight.w900)),
+            child: Text(
+              label,
+              style: const TextStyle(fontWeight: FontWeight.w900),
+            ),
           )
         : OutlinedButton(
             style: _slotStyleOutlined(),
             onPressed: _uiLocked ? null : select,
-            child: Text(label, style: const TextStyle(fontWeight: FontWeight.w900)),
+            child: Text(
+              label,
+              style: const TextStyle(fontWeight: FontWeight.w900),
+            ),
           );
   }
 
@@ -1294,7 +1339,10 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
           initiallyExpanded: initiallyExpanded,
           tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
           childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
-          title: Text(title.toUpperCase(), style: const TextStyle(fontWeight: FontWeight.w900)),
+          title: Text(
+            title.toUpperCase(),
+            style: const TextStyle(fontWeight: FontWeight.w900),
+          ),
           children: [
             Wrap(
               spacing: 10,
@@ -1327,7 +1375,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
       ),
     );
     if (!mounted) return;
-    Navigator.of(context).pop('waitlisted'); // parent should switch to Bookings tab
+    Navigator.of(
+      context,
+    ).pop('waitlisted'); // parent should switch to Bookings tab
   }
 
   // ---------------- SAVE ----------------
@@ -1337,21 +1387,29 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     if (_location == null) return;
 
     if (_cars.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Сначала добавь авто.')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Сначала добавь авто.')));
       return;
     }
     if (carId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Выбери авто.')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Выбери авто.')));
       return;
     }
     if (serviceId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Выбери услугу.')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Выбери услугу.')));
       return;
     }
 
     final slot = _selectedSlotStart;
     if (slot == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Выбери время.')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Выбери время.')));
       return;
     }
 
@@ -1367,7 +1425,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
       if (hasOverlap) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('У вас уже есть запись на это время. Выберите другое время или отмените текущую запись.'),
+            content: Text(
+              'У вас уже есть запись на это время. Выберите другое время или отмените текущую запись.',
+            ),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -1383,7 +1443,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
         _lockWaitlistUi('У вас уже есть заявка в ожидании на это время.');
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('У вас уже есть заявка в ожидании. Перейдите в “Записи”.'),
+            content: Text(
+              'У вас уже есть заявка в ожидании. Перейдите в “Записи”.',
+            ),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -1399,7 +1461,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
       if (bayIdToSend == null) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Нет доступной линии на это время. Выбери другое.')),
+          const SnackBar(
+            content: Text('Нет доступной линии на это время. Выбери другое.'),
+          ),
         );
         return;
       }
@@ -1420,7 +1484,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
         requestedBayId: requestedBayId,
         depositRub: _depositRub,
         bufferMin: _bufferMin,
-        comment: _commentCtrl.text.trim().isEmpty ? null : _commentCtrl.text.trim(),
+        comment: _commentCtrl.text.trim().isEmpty
+            ? null
+            : _commentCtrl.text.trim(),
         addons: addonsPayload.isEmpty ? null : addonsPayload,
       );
 
@@ -1453,13 +1519,18 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
       // ✅ reliable waitlist recognition
       if (_isWaitlistedException(e)) {
-        _lockWaitlistUi('Посты сейчас закрыты. Вы добавлены в очередь ожидания.');
+        _lockWaitlistUi(
+          'Посты сейчас закрыты. Вы добавлены в очередь ожидания.',
+        );
         await _showWaitlistDialogAndGoToBookings();
         return;
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Ошибка: $e'), behavior: SnackBarBehavior.floating),
+        SnackBar(
+          content: Text('Ошибка: $e'),
+          behavior: SnackBarBehavior.floating,
+        ),
       );
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -1505,9 +1576,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
       child: Text(
         t,
         style: Theme.of(context).textTheme.labelLarge?.copyWith(
-              fontWeight: FontWeight.w900,
-              color: cs.onSurface.withValues(alpha: 0.90),
-            ),
+          fontWeight: FontWeight.w900,
+          color: cs.onSurface.withValues(alpha: 0.90),
+        ),
       ),
     );
   }
@@ -1523,9 +1594,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
       child: Text(
         text,
         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              fontWeight: FontWeight.w900,
-              color: cs.onSurface.withValues(alpha: 0.92),
-            ),
+          fontWeight: FontWeight.w900,
+          color: cs.onSurface.withValues(alpha: 0.92),
+        ),
       ),
     );
   }
@@ -1549,9 +1620,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
             child: Text(
               t,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    color: cs.onSurface.withValues(alpha: 0.90),
-                  ),
+                fontWeight: FontWeight.w800,
+                color: cs.onSurface.withValues(alpha: 0.90),
+              ),
             ),
           ),
         ],
@@ -1631,7 +1702,10 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
               children: [
                 Text('Ошибка: $_error', textAlign: TextAlign.center),
                 const SizedBox(height: 12),
-                FilledButton(onPressed: _bootstrap, child: const Text('Повторить')),
+                FilledButton(
+                  onPressed: _bootstrap,
+                  child: const Text('Повторить'),
+                ),
               ],
             ),
           ),
@@ -1640,7 +1714,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
     }
 
     final serviceIds = _services.map((s) => s.id).toSet();
-    final safeServiceId = (serviceId != null && serviceIds.contains(serviceId)) ? serviceId : null;
+    final safeServiceId = (serviceId != null && serviceIds.contains(serviceId))
+        ? serviceId
+        : null;
 
     final dates = _quickDates();
 
@@ -1660,7 +1736,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
     String pickedLineText;
     if (_bayMode == _BayMode.any && _pickedBayIdForAny != null) {
-      pickedLineText = _pickedBayIdForAny == 1 ? 'Зелёная линия' : 'Синяя линия';
+      pickedLineText = _pickedBayIdForAny == 1
+          ? 'Зелёная линия'
+          : 'Синяя линия';
     } else {
       pickedLineText = _bayMode == _BayMode.any
           ? 'Любая линия'
@@ -1674,7 +1752,10 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Записаться на мойку')),
-      bottomNavigationBar: _bottomCtaBar(canProceed: canProceed, remainingRub: remaining),
+      bottomNavigationBar: _bottomCtaBar(
+        canProceed: canProceed,
+        remainingRub: remaining,
+      ),
       body: Padding(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
         child: ListView(
@@ -1722,7 +1803,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                           ? null
                           : (id) async {
                               if (id == null) return;
-                              final picked = _locations.firstWhere((x) => x.id == id);
+                              final picked = _locations.firstWhere(
+                                (x) => x.id == id,
+                              );
                               await widget.repo.setCurrentLocation(picked);
                               if (!mounted) return;
 
@@ -1733,7 +1816,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                               });
 
                               await _refreshBusy(force: true);
-                              await _autoPickBestSlotForCurrentState(forceBusyRefresh: false);
+                              await _autoPickBestSlotForCurrentState(
+                                forceBusyRefresh: false,
+                              );
                             },
                     ),
                     const SizedBox(height: 10),
@@ -1751,7 +1836,8 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                         Expanded(
                           child: Text(
                             'Проверь, что выбран правильный адрес мойки.',
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(
                                   color: cs.onSurface.withValues(alpha: 0.70),
                                   fontWeight: FontWeight.w700,
                                 ),
@@ -1782,7 +1868,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                     .map(
                       (s) => DropdownMenuItem<String>(
                         value: s.id,
-                        child: Text('${s.name} (${s.priceRub} ₽) • ${s.durationMin ?? 30} мин'),
+                        child: Text(
+                          '${s.name} (${s.priceRub} ₽) • ${s.durationMin ?? 30} мин',
+                        ),
                       ),
                     )
                     .toList(),
@@ -1796,7 +1884,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                           _selectedAddonServiceIds.clear();
                         });
                         await _refreshBusy(force: true);
-                        await _autoPickBestSlotForCurrentState(forceBusyRefresh: false);
+                        await _autoPickBestSlotForCurrentState(
+                          forceBusyRefresh: false,
+                        );
                       },
               ),
             ),
@@ -1831,7 +1921,8 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                       child: Center(
                         child: Text(
                           'В этот день нет свободного времени',
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          style: Theme.of(context).textTheme.bodyMedium
+                              ?.copyWith(
                                 color: cs.onSurface.withValues(alpha: 0.80),
                                 fontWeight: FontWeight.w700,
                               ),
@@ -1869,7 +1960,8 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                 maxLines: 3,
                 decoration: const InputDecoration(
                   labelText: 'Комментарий (по желанию)',
-                  hintText: 'Например: машина в плёнке, арки под давлением не мыть…',
+                  hintText:
+                      'Например: машина в плёнке, арки под давлением не мыть…',
                   border: OutlineInputBorder(),
                 ),
               ),
@@ -1884,9 +1976,9 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                   Text(
                     'Расчётное время на мойке ~${_washTimeMinApprox()} мин',
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.w900,
-                          color: cs.onSurface.withValues(alpha: 0.92),
-                        ),
+                      fontWeight: FontWeight.w900,
+                      color: cs.onSurface.withValues(alpha: 0.92),
+                    ),
                   ),
                   const SizedBox(height: 10),
                   Wrap(
@@ -1914,7 +2006,8 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                           pickedLineText,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
                                 fontWeight: FontWeight.w800,
                                 color: cs.onSurface.withValues(alpha: 0.78),
                               ),
@@ -1926,17 +2019,17 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                   Text(
                     'Длительность слота: ${_effectiveBlockMinForSelectedService()} мин (с запасом $_bufferMin минут)',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: cs.onSurface.withValues(alpha: 0.70),
-                          fontWeight: FontWeight.w700,
-                        ),
+                      color: cs.onSurface.withValues(alpha: 0.70),
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                   const SizedBox(height: 6),
                   Text(
                     'Стоимость: $totalPriceRub ₽',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: cs.onSurface.withValues(alpha: 0.70),
-                          fontWeight: FontWeight.w700,
-                        ),
+                      color: cs.onSurface.withValues(alpha: 0.70),
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                   const SizedBox(height: 10),
                   Row(
@@ -1955,7 +2048,8 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                           'Выбранная мойка: ${loc?.name ?? '—'}',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
                                 fontWeight: FontWeight.w800,
                                 color: cs.onSurface.withValues(alpha: 0.78),
                               ),

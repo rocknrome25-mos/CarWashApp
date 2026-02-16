@@ -1,6 +1,7 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart'; // kIsWeb, kDebugMode, Uint8List
+import 'package:flutter/foundation.dart'; // kIsWeb, kDebugMode
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
@@ -173,6 +174,8 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     if (v is num) return v.toInt();
     return int.tryParse(v?.toString() ?? '') ?? 0;
   }
+
+  String _fmtRub(int x) => '${x.toString()} ₽';
 
   String _fmtTimeIso(String? iso) {
     if (iso == null || iso.isEmpty) return '--:--';
@@ -661,6 +664,207 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     }, closeAfter: false);
   }
 
+  // ---------------- PAY breakdown (NEW) ----------------
+
+  int _baseServicePriceRub() {
+    final s = widget.booking['service'];
+    if (s is Map) {
+      final m = Map<String, dynamic>.from(s);
+      final p = m['priceRub'];
+      if (p is int) return p;
+      if (p is num) return p.toInt();
+      final parsed = int.tryParse('${m['priceRub']}');
+      if (parsed != null) return parsed;
+    }
+    // fallback: derive from effective + discount - addons
+    final eff = _effectivePriceRub();
+    final disc = _discountRub();
+    final addonsSum = _addonsTotalPrice();
+    final derived = eff + disc - addonsSum;
+    return derived < 0 ? 0 : derived;
+  }
+
+  String _baseServiceName() {
+    final s = widget.booking['service'];
+    if (s is Map) {
+      final m = Map<String, dynamic>.from(s);
+      final n = (m['name'] ?? '').toString().trim();
+      if (n.isNotEmpty) return n;
+    }
+    return (widget.booking['serviceName'] ?? 'Услуга').toString();
+  }
+
+  List<Map<String, dynamic>> _chargeLines() {
+    // line: { title, qty, unit, sum }
+    final lines = <Map<String, dynamic>>[];
+
+    final baseName = _baseServiceName();
+    final baseUnit = _baseServicePriceRub();
+    lines.add({
+      'title': baseName,
+      'qty': 1,
+      'unit': baseUnit,
+      'sum': baseUnit,
+      'kind': 'BASE',
+    });
+
+    for (final a in addons) {
+      final title =
+          (a['service']?['name'] ??
+                  a['serviceName'] ??
+                  a['serviceId'] ??
+                  'Доп. услуга')
+              .toString();
+
+      final qtyRaw = _intOr0(a['qty']);
+      final qty = qtyRaw <= 0 ? 1 : qtyRaw;
+      final unit = _intOr0(a['priceRubSnapshot']);
+      final sum = unit * qty;
+
+      lines.add({
+        'title': title,
+        'qty': qty,
+        'unit': unit,
+        'sum': sum,
+        'kind': 'ADDON',
+      });
+    }
+
+    return lines;
+  }
+
+  int _subtotalRub() {
+    var sum = 0;
+    for (final l in _chargeLines()) {
+      sum += _intOr0(l['sum']);
+    }
+    return sum;
+  }
+
+  Widget _chargesTable() {
+    final cs = Theme.of(context).colorScheme;
+    final lines = _chargeLines();
+    final subtotal = _subtotalRub();
+    final discount = _discountRub();
+    final totalByItems = (subtotal - discount) < 0 ? 0 : (subtotal - discount);
+    final totalByBackend = _effectivePriceRub();
+    final paid = _paidTotalRub();
+    final remaining = _toPayRub();
+
+    final mismatch = (totalByBackend > 0 && totalByItems != totalByBackend);
+
+    Widget row(String left, String right, {bool strong = false}) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                left,
+                style: TextStyle(
+                  fontWeight: strong ? FontWeight.w900 : FontWeight.w700,
+                  color: cs.onSurface.withValues(alpha: strong ? 0.95 : 0.75),
+                ),
+              ),
+            ),
+            Text(
+              right,
+              style: TextStyle(
+                fontWeight: strong ? FontWeight.w900 : FontWeight.w800,
+                color: cs.onSurface.withValues(alpha: 0.92),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    Widget lineItem(Map<String, dynamic> l) {
+      final title = (l['title'] ?? '').toString();
+      final qty = _intOr0(l['qty']);
+      final unit = _intOr0(l['unit']);
+      final sum = _intOr0(l['sum']);
+      final isAddon = (l['kind'] ?? '') == 'ADDON';
+
+      return Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: cs.surfaceContainerHighest.withValues(alpha: 0.18),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                title,
+                style: const TextStyle(fontWeight: FontWeight.w900),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              isAddon ? 'x$qty' : '',
+              style: TextStyle(
+                fontWeight: FontWeight.w900,
+                color: cs.onSurface.withValues(alpha: 0.75),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              qty > 1 ? '${_fmtRub(unit)}' : '',
+              style: TextStyle(
+                fontWeight: FontWeight.w800,
+                color: cs.onSurface.withValues(alpha: 0.70),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              _fmtRub(sum),
+              style: const TextStyle(fontWeight: FontWeight.w900),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final l in lines) lineItem(l),
+        const SizedBox(height: 6),
+        row('Стоимость', _fmtRub(subtotal), strong: true),
+        row('Скидка', discount > 0 ? '-${_fmtRub(discount)}' : _fmtRub(0)),
+        const Divider(height: 18),
+        row('Итого', _fmtRub(totalByItems), strong: true),
+
+        if (mismatch) ...[
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.amber.withValues(alpha: 0.16),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: Colors.amber.withValues(alpha: 0.7)),
+            ),
+            child: Text(
+              'Внимание: расчёт по позициям = ${_fmtRub(totalByItems)}, '
+              'а по системе = ${_fmtRub(totalByBackend)}. '
+              'Это может быть из-за депозита/правил ценообразования.',
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
+          ),
+        ],
+
+        const SizedBox(height: 12),
+        row('Оплачено', _fmtRub(paid), strong: true),
+        row('Остаток', _fmtRub(remaining), strong: true),
+      ],
+    );
+  }
+
   // ---------------- photos ----------------
 
   ImageSource _bestImageSource() {
@@ -769,25 +973,19 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
 
     if (ok != true) return;
 
-    // ✅ UI удаляем сразу (оптимистично), чтобы карточка сразу исчезла
     final removedSnapshot = Map<String, dynamic>.from(p);
     setState(() {
       _localPreviewByTempId.remove(id);
       photos.removeWhere((x) => (x['id'] ?? '').toString().trim() == id);
     });
 
-    // локальное фото — на этом всё
     if (isLocal) return;
 
     try {
-      // server delete
       await _delete('/admin/bookings/$_bookingId/photos/$id');
-
-      // подстрахуемся обновлением (если сервер удалил, но порядок/список поменялся)
       await _refreshAddonsAndPhotos(showErrors: true);
       widget.onDone();
     } catch (e) {
-      // если сервер не удалил — возвращаем карточку и показываем ошибку
       if (mounted) {
         setState(() {
           photos.insert(0, removedSnapshot);
@@ -1174,9 +1372,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                                   text:
                                       '$dtLine • $serviceName • Пост $bayIdStr',
                                 ),
-                                _requestedDotSpan(
-                                  b,
-                                ), // ✅ точка сразу после "Пост X"
+                                _requestedDotSpan(b),
                               ],
                             ),
                             maxLines: 1,
@@ -1186,12 +1382,19 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                               fontSize: 14,
                             ),
                           ),
-
                           const SizedBox(height: 3),
+                          Text(
+                            'Клиент: $clientTitle • Авто: $carLine',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              color: cs.onSurface.withValues(alpha: 0.7),
+                            ),
+                          ),
                         ],
                       ),
                     ),
-
                     _statusPill(_statusRu),
                   ],
                 ),
@@ -1475,7 +1678,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                       ),
                     ),
 
-                    // TAB: PAY
+                    // TAB: PAY (UPDATED)
                     SingleChildScrollView(
                       padding: EdgeInsets.only(
                         left: 12,
@@ -1485,6 +1688,21 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                       ),
                       child: Column(
                         children: [
+                          // ✅ NEW: Breakdown of charges for admin
+                          _sectionCard(
+                            title: 'Состав заказа',
+                            trailing: IconButton(
+                              tooltip: 'Обновить',
+                              onPressed: loading
+                                  ? null
+                                  : () => _refreshAddonsAndPhotos(
+                                      showErrors: true,
+                                    ),
+                              icon: const Icon(Icons.refresh),
+                            ),
+                            child: _chargesTable(),
+                          ),
+
                           _sectionCard(
                             title: 'Статус оплаты',
                             trailing: Container(
@@ -1522,7 +1740,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                                 ),
                                 const SizedBox(height: 6),
                                 Text(
-                                  'Стоимость: $effectivePriceRub ₽ (скидка: $discountRub ₽)',
+                                  'Итого по системе: $effectivePriceRub ₽ (скидка: $discountRub ₽)',
                                   style: TextStyle(
                                     color: cs.onSurface.withValues(alpha: 0.75),
                                     fontWeight: FontWeight.w800,
@@ -1552,6 +1770,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                               ],
                             ),
                           ),
+
                           if (toPay > 0)
                             _sectionCard(
                               title: 'Оплатить остаток',

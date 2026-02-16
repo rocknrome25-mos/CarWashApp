@@ -21,12 +21,16 @@ function roundUpToStep(mins: number, step: number) {
 export class AdminBookingsService {
   constructor(private prisma: PrismaService) {}
 
-  async createManual(payload: any, p0: { userId: string | null; shiftId: string | null; }) {
+  async createManual(
+    payload: any,
+    ctx: { userId: string | null; shiftId: string | null },
+  ) {
     const locationId = (payload?.locationId ?? '').toString().trim();
     const bayId = Number(payload?.bayId ?? 1);
 
     const dtRaw = (payload?.dateTime ?? '').toString();
     const start = new Date(dtRaw);
+
     if (!locationId) throw new BadRequestException('locationId is required');
     if (!Number.isFinite(bayId) || bayId < 1) {
       throw new BadRequestException('bayId is invalid');
@@ -37,6 +41,22 @@ export class AdminBookingsService {
 
     const serviceId = (payload?.serviceId ?? '').toString().trim();
     if (!serviceId) throw new BadRequestException('serviceId is required');
+
+    // 0) check bay state (if closed => WAITLIST)
+    const bayRow = await this.prisma.bay.findFirst({
+      where: { locationId, number: bayId },
+      select: { isActive: true, closedReason: true },
+    });
+
+    // if bay row missing -> treat as closed
+    const bayIsOpen = bayRow?.isActive === true;
+
+    // if all bays closed -> WAITLIST too
+    const anyOpenBay = await this.prisma.bay.findFirst({
+      where: { locationId, isActive: true },
+      select: { number: true },
+    });
+    const allBaysClosed = !anyOpenBay;
 
     // --- base service ---
     const baseService = await this.prisma.service.findFirst({
@@ -58,37 +78,15 @@ export class AdminBookingsService {
 
     // duration model (UI should match)
     const bufferMin = 15;
-    const addonMin = addonServices.reduce((sum, s) => sum + (s.durationMin ?? 0), 0);
-    const blockMin = roundUpToStep((baseService.durationMin ?? 30) + addonMin + bufferMin, 30);
+    const addonMin = addonServices.reduce(
+      (sum, s) => sum + (s.durationMin ?? 0),
+      0,
+    );
+    const blockMin = roundUpToStep(
+      (baseService.durationMin ?? 30) + addonMin + bufferMin,
+      30,
+    );
     const end = new Date(start.getTime() + blockMin * 60_000);
-
-    // conflict check in this bay
-    const existing = await this.prisma.booking.findMany({
-      where: {
-        locationId,
-        bayId,
-        status: { in: ['ACTIVE', 'PENDING_PAYMENT'] },
-        dateTime: {
-          gte: new Date(start.getTime() - 24 * 60 * 60_000),
-          lte: new Date(end.getTime() + 24 * 60 * 60_000),
-        },
-      },
-      include: { service: true, addons: true },
-    });
-
-    for (const b of existing) {
-      const bBase = b.service?.durationMin ?? 30;
-      const bAddon = (b.addons ?? []).reduce(
-        (sum, a) => sum + (a.durationMinSnapshot ?? 0) * (a.qty ?? 1),
-        0,
-      );
-      const bBlock = roundUpToStep(bBase + bAddon + (b.bufferMin ?? 0), 30);
-      const bStart = new Date(b.dateTime);
-      const bEnd = new Date(bStart.getTime() + bBlock * 60_000);
-      if (bStart < end && start < bEnd) {
-        throw new ConflictException('slot occupied');
-      }
-    }
 
     // --- client upsert by phone (optional) ---
     const clientPhone = (payload?.client?.phone ?? '').toString().trim();
@@ -121,7 +119,9 @@ export class AdminBookingsService {
     const plateNorm = normPlate(plateDisplay);
     if (!plateNorm) throw new BadRequestException('car plate is required');
 
-    const bodyType = payload?.car?.bodyType ? String(payload.car.bodyType) : null;
+    const bodyType = payload?.car?.bodyType
+      ? String(payload.car.bodyType)
+      : null;
 
     let carId: string;
     const existingCar = await this.prisma.car.findUnique({
@@ -152,13 +152,73 @@ export class AdminBookingsService {
       carId = createdCar.id;
     }
 
+    // 1) if bay closed OR all bays closed => WAITLIST
+    if (!bayIsOpen || allBaysClosed) {
+      const reason = allBaysClosed
+        ? 'ALL_BAYS_CLOSED_ADMIN'
+        : `BAY_CLOSED_ADMIN:${bayId}:${(bayRow?.closedReason ?? '').toString()}`;
+
+      const desiredBayId = bayId; // what admin requested
+
+      const wait = await this.prisma.waitlistRequest.create({
+        data: {
+          status: 'WAITING',
+          locationId,
+          desiredDateTime: start,
+          desiredBayId,
+          clientId: clientId!, // admin создаёт “по звонку” => телефон обязателен в UI
+          carId,
+          serviceId: baseService.id,
+          comment: null,
+          reason,
+        },
+        include: {
+          service: true,
+          client: true,
+          car: true,
+        },
+      });
+
+      return { resultType: 'WAITLIST', waitlist: wait };
+    }
+
+    // 2) Otherwise — create Booking (with conflict check)
+    const existing = await this.prisma.booking.findMany({
+      where: {
+        locationId,
+        bayId,
+        status: { in: ['ACTIVE', 'PENDING_PAYMENT'] },
+        dateTime: {
+          gte: new Date(start.getTime() - 24 * 60 * 60_000),
+          lte: new Date(end.getTime() + 24 * 60 * 60_000),
+        },
+      },
+      include: { service: true, addons: true },
+    });
+
+    for (const b of existing) {
+      const bBase = b.service?.durationMin ?? 30;
+      const bAddon = (b.addons ?? []).reduce(
+        (sum, a) => sum + (a.durationMinSnapshot ?? 0) * (a.qty ?? 1),
+        0,
+      );
+      const bBlock = roundUpToStep(
+        bBase + bAddon + (b.bufferMin ?? 0),
+        30,
+      );
+      const bStart = new Date(b.dateTime);
+      const bEnd = new Date(bStart.getTime() + bBlock * 60_000);
+      if (bStart < end && start < bEnd) {
+        throw new ConflictException('slot occupied');
+      }
+    }
+
     // --- create booking + addons ---
     const booking = await this.prisma.$transaction(async (tx) => {
       const b = await tx.booking.create({
         data: {
           locationId,
-          // shiftId не обязателен, но если хочешь — можешь передавать с фронта
-          shiftId: null,
+          shiftId: ctx.shiftId ?? null, // ✅ keep shiftId so it shows in Shift screen
           dateTime: start,
           bayId,
           requestedBayId: null,
@@ -171,6 +231,11 @@ export class AdminBookingsService {
           carId,
           serviceId: baseService.id,
           clientId,
+        },
+        include: {
+          service: true,
+          client: true,
+          car: true,
         },
       });
 
@@ -189,6 +254,6 @@ export class AdminBookingsService {
       return b;
     });
 
-    return booking;
+    return { resultType: 'BOOKING', booking };
   }
 }
