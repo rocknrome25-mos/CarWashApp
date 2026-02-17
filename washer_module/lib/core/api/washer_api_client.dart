@@ -27,6 +27,16 @@ class WasherApiClient {
     return h;
   }
 
+  String _extractMessage(dynamic body, int statusCode) {
+    // Nest часто возвращает { message: "..." } или { message: ["...", "..."] }
+    if (body is Map && body['message'] != null) {
+      final m = body['message'];
+      if (m is List) return m.join(', ');
+      return m.toString();
+    }
+    return 'HTTP $statusCode';
+  }
+
   Never _throwFrom(http.Response r) {
     dynamic body;
     try {
@@ -34,9 +44,7 @@ class WasherApiClient {
     } catch (_) {
       body = r.body;
     }
-    final msg = (body is Map && body['message'] != null)
-        ? body['message'].toString()
-        : 'HTTP ${r.statusCode}';
+    final msg = _extractMessage(body, r.statusCode);
     throw WasherApiException(r.statusCode, msg, raw: body);
   }
 
@@ -88,6 +96,23 @@ class WasherApiClient {
       'to': to.toUtc().toIso8601String(),
     };
     final uri = Uri.parse('$baseUrl/washer/stats').replace(queryParameters: qs);
+    final r = await http.get(uri, headers: _headers());
+    if (r.statusCode < 200 || r.statusCode >= 300) _throwFrom(r);
+    return jsonDecode(r.body) as Map<String, dynamic>;
+  }
+
+  // ✅ NEW: schedule (planned shifts)
+  Future<Map<String, dynamic>> schedule({
+    required DateTime from,
+    required DateTime to,
+  }) async {
+    final qs = {
+      'from': from.toUtc().toIso8601String(),
+      'to': to.toUtc().toIso8601String(),
+    };
+    final uri = Uri.parse(
+      '$baseUrl/washer/schedule',
+    ).replace(queryParameters: qs);
     final r = await http.get(uri, headers: _headers());
     if (r.statusCode < 200 || r.statusCode >= 300) _throwFrom(r);
     return jsonDecode(r.body) as Map<String, dynamic>;

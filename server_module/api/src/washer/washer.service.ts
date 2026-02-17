@@ -13,6 +13,7 @@ import {
   ShiftStatus,
   UserRole,
   WasherClockEventType,
+  PlannedShiftStatus,
 } from '@prisma/client';
 import { WasherLoginDto } from './dto/washer-login.dto';
 import { WasherClockDto } from './dto/washer-clock.dto';
@@ -27,6 +28,12 @@ export class WasherService {
     if (!raw) return new Date();
     const d = new Date(raw);
     if (isNaN(d.getTime())) throw new BadRequestException('Invalid ISO date');
+    return d;
+  }
+
+  private _parseIso(raw: string, field: string): Date {
+    const d = new Date(raw);
+    if (isNaN(d.getTime())) throw new BadRequestException(`${field} must be ISO`);
     return d;
   }
 
@@ -46,7 +53,6 @@ export class WasherService {
   }
 
   private async _getCurrentAssignmentOrThrow(washerId: string) {
-    // latest assignment where shift is OPEN
     const row = await this.prisma.shiftWasher.findFirst({
       where: {
         washerId,
@@ -108,7 +114,6 @@ export class WasherService {
     if (!user) throw new NotFoundException('User not found');
     this._requireWasher(user);
 
-    // show if they already have an OPEN shift assignment
     const activeAssign = await this.prisma.shiftWasher.findFirst({
       where: {
         washerId: user.id,
@@ -146,7 +151,6 @@ export class WasherService {
     const washer = await this._getWasherOrThrow(washerId);
     const asg = await this._getCurrentAssignmentOrThrow(washer.id);
 
-    // counts for this shift+bay
     const completedCount = await this.prisma.booking.count({
       where: {
         shiftId: asg.shift.id,
@@ -155,7 +159,6 @@ export class WasherService {
       },
     });
 
-    // earnings for this shift+bay (computed server-side, not exposing prices)
     const earningsRub = await this._computeEarningsForShiftBay({
       shiftId: asg.shift.id,
       bayId: asg.bayId,
@@ -195,8 +198,14 @@ export class WasherService {
       where: {
         shiftId: asg.shift.id,
         bayId: asg.bayId,
-        // показываем всё, что относится к смене (в т.ч. completed) — UI сам отфильтрует
-        status: { in: [BookingStatus.PENDING_PAYMENT, BookingStatus.ACTIVE, BookingStatus.COMPLETED, BookingStatus.CANCELED] },
+        status: {
+          in: [
+            BookingStatus.PENDING_PAYMENT,
+            BookingStatus.ACTIVE,
+            BookingStatus.COMPLETED,
+            BookingStatus.CANCELED,
+          ],
+        },
       },
       orderBy: { dateTime: 'asc' },
       select: {
@@ -222,7 +231,6 @@ export class WasherService {
           },
         },
 
-        // ✅ NO prices for washer app
         service: {
           select: {
             id: true,
@@ -239,7 +247,7 @@ export class WasherService {
             serviceId: true,
             qty: true,
             note: true,
-            service: { select: { id: true, name: true, kind: true, laborCategory: true } }, // no price
+            service: { select: { id: true, name: true, kind: true, laborCategory: true } },
           },
         },
       },
@@ -257,11 +265,8 @@ export class WasherService {
         finishedAt: b.finishedAt,
         canceledAt: b.canceledAt,
         cancelReason: b.cancelReason,
-
-        // ✅ instructions
         comment: b.comment,
         adminNote: b.adminNote,
-
         car: b.car,
         service: b.service,
         addons: (b.addons ?? []).map((a) => ({
@@ -370,16 +375,12 @@ export class WasherService {
   async getStats(washerId: string, fromIso: string, toIso: string) {
     const washer = await this._getWasherOrThrow(washerId);
 
-    const from = new Date(fromIso);
-    const to = new Date(toIso);
-    if (isNaN(from.getTime()) || isNaN(to.getTime())) {
-      throw new BadRequestException('from/to must be ISO');
-    }
+    const from = this._parseIso(fromIso, 'from');
+    const to = this._parseIso(toIso, 'to');
     if (to.getTime() <= from.getTime()) {
       throw new BadRequestException('to must be greater than from');
     }
 
-    // find assignments overlapping this period (based on shift.openedAt)
     const assignments = await this.prisma.shiftWasher.findMany({
       where: {
         washerId: washer.id,
@@ -463,6 +464,64 @@ export class WasherService {
     };
   }
 
+  /* ===================== schedule (planned shifts) ===================== */
+
+  async getSchedule(washerId: string, fromIso: string, toIso: string) {
+    const washer = await this._getWasherOrThrow(washerId);
+
+    const from = this._parseIso(fromIso, 'from');
+    const to = this._parseIso(toIso, 'to');
+    if (to.getTime() <= from.getTime()) {
+      throw new BadRequestException('to must be greater than from');
+    }
+
+    const rows = await this.prisma.plannedShiftWasher.findMany({
+      where: {
+        washerId: washer.id,
+        plannedShift: {
+          startAt: { gte: from, lt: to },
+          status: { in: [PlannedShiftStatus.DRAFT, PlannedShiftStatus.PUBLISHED] },
+        },
+      },
+      orderBy: { plannedShift: { startAt: 'asc' } },
+      include: {
+        plannedShift: {
+          include: {
+            location: {
+              select: {
+                id: true,
+                name: true,
+                address: true,
+                colorHex: true,
+                baysCount: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    return {
+      washer: {
+        id: washer.id,
+        phone: washer.phone,
+        name: washer.name,
+        locationId: washer.locationId,
+      },
+      from,
+      to,
+      shifts: rows.map((r) => ({
+        id: r.plannedShift.id,
+        status: r.plannedShift.status,
+        startAt: r.plannedShift.startAt,
+        endAt: r.plannedShift.endAt,
+        note: r.plannedShift.note,
+        plannedBayId: r.plannedBayId,
+        location: r.plannedShift.location,
+      })),
+    };
+  }
+
   /* ===================== earnings computation (internal) ===================== */
 
   private async _computeEarningsForShiftBay(args: {
@@ -474,7 +533,6 @@ export class WasherService {
     const pWash = this._safePercent(args.percentWash, 30);
     const pChem = this._safePercent(args.percentChem, 40);
 
-    // We need prices internally, but we do NOT return them.
     const bookings = await this.prisma.booking.findMany({
       where: {
         shiftId: args.shiftId,

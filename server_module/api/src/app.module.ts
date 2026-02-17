@@ -14,8 +14,11 @@ import { ServicesModule } from './services/services.module';
 import { ConfigModule } from './config/config.module';
 import { CronHousekeeperService } from '../src/cron/cron-housekeeper.service';
 
-// ✅ NEW
+// ✅ existing
 import { WasherModule } from './washer/washer.module';
+
+// ✅ NEW: planned schedule module (admin/planned-shifts)
+import { PlannedShiftsModule } from './planned_shifts/planned_shifts.module';
 
 @Module({
   imports: [
@@ -31,8 +34,9 @@ import { WasherModule } from './washer/washer.module';
     AdminModule,
     ConfigModule,
 
-    // ✅ NEW
+    // ✅ modules
     WasherModule,
+    PlannedShiftsModule,
   ],
   controllers: [AppController],
   providers: [

@@ -44,6 +44,13 @@ enum ShiftStatus {
   CLOSED
 }
 
+/** ✅ NEW: planned schedule status */
+enum PlannedShiftStatus {
+  DRAFT
+  PUBLISHED
+  CANCELED
+}
+
 enum AuditType {
   BOOKING_MOVE
   BOOKING_DELETE
@@ -158,6 +165,9 @@ model Location {
 
   // ✅ payout rules per location (editable later in OWNER module)
   washerPayRules WasherPayRule[]
+
+  // ✅ NEW: planned schedule per location
+  plannedShifts PlannedShift[]
 
   cashEvents       ShiftCashEvent[]
   waitlistRequests WaitlistRequest[]
@@ -443,8 +453,12 @@ model User {
 
   bookingPhotos BookingPhoto[] @relation("UserToBookingPhoto")
 
-  // ✅ NEW: washer assignments to shifts
+  // ✅ washer assignments to live shifts
   shiftWashers ShiftWasher[]
+
+  // ✅ NEW: schedule relations
+  plannedShiftsCreated PlannedShift[] @relation("PlannedShiftCreatedBy")
+  plannedShiftAssignments PlannedShiftWasher[] @relation("PlannedShiftWasherUser")
 
   @@index([role])
   @@index([locationId])
@@ -462,18 +476,23 @@ model Shift {
   openedAt DateTime    @default(now())
   closedAt DateTime?
 
+  // ✅ NEW: link to planned shift (optional)
+  plannedShiftId String?
+  plannedShift   PlannedShift? @relation(fields: [plannedShiftId], references: [id], onDelete: SetNull)
+
   location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
   admin    User     @relation(fields: [adminId], references: [id], onDelete: Cascade)
 
   bookings   Booking[]
   cashEvents ShiftCashEvent[]
 
-  // ✅ NEW: washers on shift (one per bay or more)
+  // washers on live shift
   washers ShiftWasher[]
 
   @@index([locationId, openedAt])
   @@index([adminId, openedAt])
   @@index([status])
+  @@index([plannedShiftId])
 }
 
 model ShiftCashEvent {
@@ -571,10 +590,6 @@ model WaitlistRequest {
 
 /* ===================== NEW: Washer payouts + assignments + clock ===================== */
 
-/**
- * ✅ Editable by owner later:
- * per location payout percentage for service labor categories
- */
 model WasherPayRule {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
@@ -584,7 +599,7 @@ model WasherPayRule {
   location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
 
   category ServiceLaborCategory
-  percent  Int @default(30) // 30 for WASH, we will set CHEM to 40 via seed/owner UI
+  percent  Int @default(30)
 
   isActive Boolean @default(true)
 
@@ -599,10 +614,6 @@ enum WasherClockEventType {
   CLOCK_OUT
 }
 
-/**
- * ✅ Washer assignment to a shift and bay (one washer per bay is typical)
- * Stores payout snapshots so history is stable even if owner changes rules later.
- */
 model ShiftWasher {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
@@ -616,7 +627,6 @@ model ShiftWasher {
 
   bayId Int
 
-  // payout snapshots (if owner changes rules later, past shifts still keep original %)
   percentWash Int @default(30)
   percentChem Int @default(40)
 
@@ -645,4 +655,50 @@ model WasherClockEvent {
 
   @@index([shiftWasherId, createdAt])
   @@index([type])
+}
+
+/* ===================== NEW: Planned schedule (big SaaS) ===================== */
+
+model PlannedShift {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  locationId String
+  location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  createdByUserId String
+  createdByUser   User @relation("PlannedShiftCreatedBy", fields: [createdByUserId], references: [id], onDelete: Cascade)
+
+  startAt DateTime
+  endAt   DateTime
+
+  status PlannedShiftStatus @default(DRAFT)
+  note   String?
+
+  washers PlannedShiftWasher[]
+  shifts  Shift[] // Shift.plannedShiftId
+
+  @@index([locationId, startAt])
+  @@index([createdByUserId, createdAt])
+  @@index([status])
+}
+
+model PlannedShiftWasher {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  plannedShiftId String
+  plannedShift   PlannedShift @relation(fields: [plannedShiftId], references: [id], onDelete: Cascade)
+
+  washerId String
+  washer   User @relation("PlannedShiftWasherUser", fields: [washerId], references: [id], onDelete: Cascade)
+
+  plannedBayId Int?
+  note         String?
+
+  @@unique([plannedShiftId, washerId])
+  @@index([plannedShiftId, plannedBayId])
+  @@index([washerId, createdAt])
 }

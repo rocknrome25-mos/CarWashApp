@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import '../../core/api/washer_api_client.dart';
 import '../../core/storage/washer_session_store.dart';
+
+enum _StatsPreset { day, week, month, all }
 
 class StatsPage extends StatefulWidget {
   final WasherApiClient api;
@@ -18,37 +19,58 @@ class _StatsPageState extends State<StatsPage> {
   String? error;
   Map<String, dynamic>? data;
 
-  DateTimeRange range = DateTimeRange(
-    start: DateTime.now().subtract(const Duration(days: 7)),
-    end: DateTime.now(),
-  );
+  _StatsPreset preset = _StatsPreset.week;
+
+  DateTime _startOfDay(DateTime d) => DateTime(d.year, d.month, d.day);
+
+  DateTimeRange _rangeForPreset(_StatsPreset p) {
+    final now = DateTime.now();
+    switch (p) {
+      case _StatsPreset.day:
+        return DateTimeRange(start: _startOfDay(now), end: now);
+      case _StatsPreset.week:
+        return DateTimeRange(
+          start: now.subtract(const Duration(days: 7)),
+          end: now,
+        );
+      case _StatsPreset.month:
+        return DateTimeRange(
+          start: now.subtract(const Duration(days: 30)),
+          end: now,
+        );
+      case _StatsPreset.all:
+        return DateTimeRange(start: DateTime(2000, 1, 1), end: now);
+    }
+  }
+
+  String _presetTitle(_StatsPreset p) {
+    switch (p) {
+      case _StatsPreset.day:
+        return 'День';
+      case _StatsPreset.week:
+        return 'Неделя';
+      case _StatsPreset.month:
+        return 'Месяц';
+      case _StatsPreset.all:
+        return 'Всего';
+    }
+  }
 
   Future<void> _load() async {
+    final r = _rangeForPreset(preset);
+
     setState(() {
       loading = true;
       error = null;
     });
 
     try {
-      final res = await widget.api.stats(from: range.start, to: range.end);
+      final res = await widget.api.stats(from: r.start, to: r.end);
       setState(() => data = res);
     } catch (e) {
       setState(() => error = e.toString());
     } finally {
       setState(() => loading = false);
-    }
-  }
-
-  Future<void> _pickRange() async {
-    final picked = await showDateRangePicker(
-      context: context,
-      firstDate: DateTime.now().subtract(const Duration(days: 365)),
-      lastDate: DateTime.now().add(const Duration(days: 1)),
-      initialDateRange: range,
-    );
-    if (picked != null) {
-      setState(() => range = picked);
-      await _load();
     }
   }
 
@@ -60,88 +82,122 @@ class _StatsPageState extends State<StatsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final df = DateFormat('dd.MM.yyyy');
-    final title = '${df.format(range.start)} — ${df.format(range.end)}';
+    final totals = (data?['totals'] as Map?)?.cast<String, dynamic>() ?? {};
+    final cars = totals['carsCompleted'] ?? 0;
+    final earn = totals['earningsRub'] ?? 0;
 
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: ListView(
+        physics:
+            const AlwaysScrollableScrollPhysics(), // ✅ web refresh always works
+        padding: const EdgeInsets.all(16),
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  title,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: _StatsPreset.values.map((p) {
+                final selected = p == preset;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 10),
+                  child: ChoiceChip(
+                    label: Text(_presetTitle(p)),
+                    selected: selected,
+                    onSelected: (v) async {
+                      if (!v) return;
+                      setState(() => preset = p);
+                      await _load();
+                    },
                   ),
-                ),
-              ),
-              OutlinedButton(
-                onPressed: _pickRange,
-                child: const Text('Период'),
-              ),
-            ],
+                );
+              }).toList(),
+            ),
           ),
           const SizedBox(height: 12),
-
           if (loading) const LinearProgressIndicator(),
           if (error != null) ...[
             const SizedBox(height: 12),
             Text(error!, textAlign: TextAlign.center),
           ],
-
           const SizedBox(height: 12),
-          if (data != null) _StatsCard(data!),
-
-          const Spacer(),
-          SizedBox(
-            width: double.infinity,
-            height: 52,
-            child: FilledButton(
-              onPressed: loading ? null : _load,
-              child: const Text('Обновить'),
+          _YCard(
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Итого • ${_presetTitle(preset)}',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  _RowLine(label: 'Помыл машин', value: '$cars'),
+                  const SizedBox(height: 6),
+                  _RowLine(label: 'Заработал', value: '$earn ₽'),
+                ],
+              ),
             ),
           ),
+          const SizedBox(height: 24),
         ],
       ),
     );
   }
 }
 
-class _StatsCard extends StatelessWidget {
-  final Map<String, dynamic> data;
-  const _StatsCard(this.data);
+class _RowLine extends StatelessWidget {
+  final String label;
+  final String value;
+  const _RowLine({required this.label, required this.value});
 
   @override
   Widget build(BuildContext context) {
-    final totals = (data['totals'] as Map?)?.cast<String, dynamic>() ?? {};
-    final cars = totals['carsCompleted'] ?? 0;
-    final earn = totals['earningsRub'] ?? 0;
-
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: Theme.of(context).colorScheme.outlineVariant.withOpacity(0.5),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Итого',
-            style: Theme.of(
-              context,
-            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
+    final cs = Theme.of(context).colorScheme;
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            label,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+              color: cs.onSurface.withValues(alpha: 0.70),
+            ),
           ),
-          const SizedBox(height: 8),
-          Text('Помыл машин: $cars'),
-          const SizedBox(height: 4),
-          Text('Заработал: $earn ₽'),
+        ),
+        Text(
+          value,
+          style: Theme.of(
+            context,
+          ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w900),
+        ),
+      ],
+    );
+  }
+}
+
+class _YCard extends StatelessWidget {
+  final Widget child;
+  const _YCard({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
+        boxShadow: [
+          BoxShadow(
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+            color: Colors.black.withValues(alpha: 0.06),
+          ),
         ],
       ),
+      child: child,
     );
   }
 }
