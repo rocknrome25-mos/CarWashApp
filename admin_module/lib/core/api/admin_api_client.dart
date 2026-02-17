@@ -85,11 +85,7 @@ class AdminApiClient {
 
   // ===== CALENDAR =====
 
-  Future<List<dynamic>> calendarDay(
-    String userId,
-    String shiftId,
-    String ymd,
-  ) async {
+  Future<List<dynamic>> calendarDay(String userId, String shiftId, String ymd) async {
     final res = await http
         .get(
           _u('/admin/calendar/day', {'date': ymd}),
@@ -101,11 +97,7 @@ class AdminApiClient {
 
   // ===== WAITLIST =====
 
-  Future<List<dynamic>> waitlistDay(
-    String userId,
-    String shiftId,
-    String ymd,
-  ) async {
+  Future<List<dynamic>> waitlistDay(String userId, String shiftId, String ymd) async {
     final res = await http
         .get(
           _u('/admin/waitlist/day', {'date': ymd}),
@@ -163,6 +155,7 @@ class AdminApiClient {
   }
 
   // ===== PUBLIC BUSY SLOTS (NO ADMIN HEADERS) =====
+
   Future<List<dynamic>> publicBusySlots({
     required String locationId,
     required int bayId,
@@ -184,8 +177,8 @@ class AdminApiClient {
     return _decodeList(res, 'busy slots');
   }
 
-  // ===== SERVICES (single source of truth) =====
-  // GET /services?locationId=...&kind=BASE|ADDON
+  // ===== SERVICES =====
+
   Future<List<dynamic>> services({
     required String locationId,
     String? kind, // 'BASE' | 'ADDON'
@@ -224,17 +217,14 @@ class AdminApiClient {
     required bool isActive,
     String? reason,
   }) async {
-    final path = isActive
-        ? '/admin/bays/$bayNumber/open'
-        : '/admin/bays/$bayNumber/close';
+    final path =
+        isActive ? '/admin/bays/$bayNumber/open' : '/admin/bays/$bayNumber/close';
 
     String? body;
     if (!isActive) {
       final r = (reason ?? '').trim();
       if (r.isEmpty) throw Exception('Причина закрытия обязательна');
       body = jsonEncode({'reason': r});
-    } else {
-      body = null;
     }
 
     final res = await http
@@ -307,7 +297,6 @@ class AdminApiClient {
   }
 
   // ===== ADMIN PAY / DISCOUNT / ADDONS / PHOTOS / CASH =====
-  // (оставлено как у тебя — без изменений)
 
   Future<Map<String, dynamic>> adminPayBooking(
     String userId,
@@ -478,10 +467,7 @@ class AdminApiClient {
     }
   }
 
-  Future<Map<String, dynamic>> cashExpected(
-    String userId,
-    String shiftId,
-  ) async {
+  Future<Map<String, dynamic>> cashExpected(String userId, String shiftId) async {
     final res = await http
         .get(
           _u('/admin/cash/expected'),
@@ -520,6 +506,7 @@ class AdminApiClient {
   }
 
   // ===== ADMIN MANUAL BOOKING =====
+
   Future<Map<String, dynamic>> createAdminBooking(
     String userId,
     String shiftId, {
@@ -531,7 +518,7 @@ class AdminApiClient {
     required String carPlate,
     String? bodyType,
     required String serviceId,
-    List<Map<String, dynamic>>? addons, // [{serviceId, qty}]
+    List<Map<String, dynamic>>? addons,
     String? note,
   }) async {
     final payload = <String, dynamic>{
@@ -540,18 +527,14 @@ class AdminApiClient {
       'dateTime': dateTimeIsoUtc.trim(),
       'source': 'ADMIN_PHONE',
       'createdBy': 'ADMIN',
-
       'client': {'name': clientName.trim(), 'phone': clientPhone.trim()},
       'car': {
         'plate': carPlate.trim(),
         if (bodyType != null && bodyType.trim().isNotEmpty)
           'bodyType': bodyType.trim(),
       },
-
-      // ✅ canonical: base service + addons
       'serviceId': serviceId.trim(),
       if (addons != null && addons.isNotEmpty) 'addons': addons,
-
       if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
     };
 
@@ -564,5 +547,162 @@ class AdminApiClient {
         .timeout(_timeout);
 
     return _decodeMap(res, 'admin create booking');
+  }
+
+  /* ========================= PLANNED SHIFTS (washers schedule) ========================= */
+
+  Future<List<dynamic>> listPlannedShifts(
+    String userId, {
+    required DateTime from,
+    required DateTime to,
+  }) async {
+    final q = <String, String>{
+      'from': from.toUtc().toIso8601String(),
+      'to': to.toUtc().toIso8601String(),
+    };
+
+    final res = await http
+        .get(
+          _u('/admin/planned-shifts', q),
+          headers: _jsonHeaders(userId: userId),
+        )
+        .timeout(_timeout);
+
+    return _decodeList(res, 'planned shifts list');
+  }
+
+  Future<Map<String, dynamic>> createPlannedShift(
+    String userId, {
+    required DateTime startAtUtc,
+    required DateTime endAtUtc,
+    String? note,
+  }) async {
+    final payload = <String, dynamic>{
+      'startAt': startAtUtc.toUtc().toIso8601String(),
+      'endAt': endAtUtc.toUtc().toIso8601String(),
+      if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
+    };
+
+    final res = await http
+        .post(
+          _u('/admin/planned-shifts'),
+          headers: _jsonHeaders(userId: userId),
+          body: jsonEncode(payload),
+        )
+        .timeout(_timeout);
+
+    return _decodeMap(res, 'planned shift create');
+  }
+
+  Future<Map<String, dynamic>> updatePlannedShift(
+    String userId,
+    String plannedShiftId, {
+    DateTime? startAtUtc,
+    DateTime? endAtUtc,
+    String? note,
+    String? status,
+  }) async {
+    final id = plannedShiftId.trim();
+    if (id.isEmpty) throw Exception('plannedShiftId is required');
+
+    final payload = <String, dynamic>{
+      if (startAtUtc != null) 'startAt': startAtUtc.toUtc().toIso8601String(),
+      if (endAtUtc != null) 'endAt': endAtUtc.toUtc().toIso8601String(),
+      if (note != null) 'note': note,
+      if (status != null && status.trim().isNotEmpty) 'status': status.trim(),
+    };
+
+    final res = await http
+        .patch(
+          _u('/admin/planned-shifts/$id'),
+          headers: _jsonHeaders(userId: userId),
+          body: jsonEncode(payload),
+        )
+        .timeout(_timeout);
+
+    return _decodeMap(res, 'planned shift update');
+  }
+
+  Future<Map<String, dynamic>> publishPlannedShift(
+    String userId,
+    String plannedShiftId,
+  ) async {
+    final id = plannedShiftId.trim();
+    if (id.isEmpty) throw Exception('plannedShiftId is required');
+
+    final res = await http
+        .post(
+          _u('/admin/planned-shifts/$id/publish'),
+          headers: _jsonHeaders(userId: userId),
+          body: jsonEncode({}),
+        )
+        .timeout(_timeout);
+
+    return _decodeMap(res, 'planned shift publish');
+  }
+
+  Future<Map<String, dynamic>> deletePlannedShift(
+    String userId,
+    String plannedShiftId,
+  ) async {
+    final id = plannedShiftId.trim();
+    if (id.isEmpty) throw Exception('plannedShiftId is required');
+
+    final res = await http
+        .delete(
+          _u('/admin/planned-shifts/$id'),
+          headers: _jsonHeaders(userId: userId),
+        )
+        .timeout(_timeout);
+
+    return _decodeMap(res, 'planned shift delete');
+  }
+
+  Future<Map<String, dynamic>> assignWasherToPlannedShift(
+    String userId,
+    String plannedShiftId, {
+    required String washerPhone,
+    required int plannedBayId,
+    String? note,
+  }) async {
+    final id = plannedShiftId.trim();
+    if (id.isEmpty) throw Exception('plannedShiftId is required');
+
+    final payload = <String, dynamic>{
+      'washerPhone': washerPhone.trim(),
+      'plannedBayId': plannedBayId,
+      if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
+    };
+
+    final res = await http
+        .post(
+          _u('/admin/planned-shifts/$id/assign-washer'),
+          headers: _jsonHeaders(userId: userId),
+          body: jsonEncode(payload),
+        )
+        .timeout(_timeout);
+
+    return _decodeMap(res, 'planned shift assign washer');
+  }
+
+  // ⚠️ Этот endpoint может быть ещё не реализован на сервере — метод не мешает компиляции.
+  Future<Map<String, dynamic>> unassignWasherFromPlannedShift(
+    String userId,
+    String plannedShiftId,
+    String assignmentId,
+  ) async {
+    final ps = plannedShiftId.trim();
+    final a = assignmentId.trim();
+    if (ps.isEmpty) throw Exception('plannedShiftId is required');
+    if (a.isEmpty) throw Exception('assignmentId is required');
+
+    final res = await http
+        .delete(
+          _u('/admin/planned-shifts/$ps/assignments/$a'),
+          headers: _jsonHeaders(userId: userId),
+        )
+        .timeout(_timeout);
+
+    return _decodeMap(res, 'planned shift unassign washer');
   }
 }

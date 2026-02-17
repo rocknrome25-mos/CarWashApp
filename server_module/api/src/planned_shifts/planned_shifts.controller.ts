@@ -32,6 +32,7 @@ export class PlannedShiftsController {
     const from = (fromRaw ?? '').trim();
     const to = (toRaw ?? '').trim();
     if (!from || !to) throw new BadRequestException('from and to are required');
+
     return this.svc.list(uid, from, to);
   }
 
@@ -83,6 +84,7 @@ export class PlannedShiftsController {
     return this.svc.assignWasher(uid, pid, dto);
   }
 
+  // ✅ remove washer from planned shift (washerId = userId of washer)
   @Delete(':id/washers/:washerId')
   removeWasher(
     @Headers('x-user-id') userId?: string,
@@ -96,5 +98,18 @@ export class PlannedShiftsController {
     if (!pid) throw new BadRequestException('id is required');
     if (!wid) throw new BadRequestException('washerId is required');
     return this.svc.removeWasher(uid, pid, wid);
+  }
+
+  // ✅ "Delete planned shift" = soft-cancel
+  @Delete(':id')
+  deletePlannedShift(
+    @Headers('x-user-id') userId?: string,
+    @Param('id') id?: string,
+  ) {
+    const uid = (userId ?? '').trim();
+    const pid = (id ?? '').trim();
+    if (!uid) throw new BadRequestException('x-user-id is required');
+    if (!pid) throw new BadRequestException('id is required');
+    return this.svc.deletePlannedShift(uid, pid);
   }
 }

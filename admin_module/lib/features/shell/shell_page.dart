@@ -1,10 +1,10 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // Clipboard
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
-
+import '../washers/washers_page.dart';
 import '../../core/api/admin_api_client.dart';
 import '../../core/models/admin_session.dart';
 import '../../core/realtime/realtime_client.dart';
@@ -150,6 +150,12 @@ class _ShellPageState extends State<ShellPage> {
     });
   }
 
+  //////////////////////////////////////////////////////////////////////
+  ///
+  ///
+  ///
+  ///
+  ///
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -180,6 +186,11 @@ class _ShellPageState extends State<ShellPage> {
             onCreatedBooking: _goShiftAndRefresh,
             onCreatedWaitlist: _goWaitlistAndRefresh,
           ),
+          WashersPage(
+            api: widget.api,
+            store: widget.store,
+            session: widget.session,
+          ),
         ],
       ),
       bottomNavigationBar: NavigationBar(
@@ -201,6 +212,10 @@ class _ShellPageState extends State<ShellPage> {
           const NavigationDestination(
             icon: Icon(Icons.add_box_outlined),
             label: 'Записать',
+          ),
+          const NavigationDestination(
+            icon: Icon(Icons.people_alt_outlined),
+            label: 'Мойщики',
           ),
         ],
       ),
