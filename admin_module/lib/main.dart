@@ -1,3 +1,5 @@
+import 'dart:io' show Platform;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:intl/date_symbol_data_local.dart';
 
@@ -20,11 +22,30 @@ class AdminApp extends StatefulWidget {
 }
 
 class _AdminAppState extends State<AdminApp> {
-  final api = AdminApiClient(baseUrl: 'http://127.0.0.1:3000');
+  late final AdminApiClient api;
   final store = SessionStore();
 
   // Акцент “тиффани” (можно поменять потом)
   static const _seed = Color(0xFF2DD4BF);
+
+  String _resolveBaseUrl() {
+    const defined = String.fromEnvironment('BASE_URL', defaultValue: '');
+    if (defined.trim().isNotEmpty) return defined.trim();
+
+    if (kIsWeb) return 'http://localhost:3000';
+
+    // Android emulator default
+    if (!kIsWeb && Platform.isAndroid) return 'http://10.0.2.2:3000';
+
+    // Для реального устройства / других платформ задаём явный placeholder
+    return 'http://CHANGE_ME:3000';
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    api = AdminApiClient(baseUrl: _resolveBaseUrl());
+  }
 
   @override
   Widget build(BuildContext context) {

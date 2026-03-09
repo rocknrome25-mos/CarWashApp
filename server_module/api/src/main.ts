@@ -1,12 +1,26 @@
+import { ValidationPipe, Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module';
 import { WsAdapter } from '@nestjs/platform-ws';
-import { ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { join } from 'path';
 
+import { AppModule } from './app.module';
+
+function parseCorsOrigins(raw?: string): string[] {
+  return (raw ?? '')
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const logger = new Logger('Bootstrap');
+
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    bufferLogs: true,
+  });
+
+  app.enableShutdownHooks();
 
   // ✅ Global validation for DTOs
   app.useGlobalPipes(
@@ -18,21 +32,59 @@ async function bootstrap() {
     }),
   );
 
-  // HTTP CORS (для Flutter Web / отладки)
-  app.enableCors({
-    origin: true,
-    credentials: true,
-  });
+  // ✅ Production-ready body limits
+  app.useBodyParser('json', { limit: '10mb' });
+  app.useBodyParser('urlencoded', { limit: '10mb', extended: true });
 
   // ✅ Serve uploaded files
-  app.useStaticAssets(join(process.cwd(), 'uploads'), {
+  const uploadDir = process.env.UPLOAD_DIR?.trim() || 'uploads';
+  app.useStaticAssets(join(process.cwd(), uploadDir), {
     prefix: '/uploads',
   });
 
-  // ✅ RAW WebSocket adapter (ws), чтобы Flutter мог подключаться через web_socket_channel
+  // ✅ HTTP CORS
+  const nodeEnv = (process.env.NODE_ENV ?? 'development').trim();
+  const corsOrigins = parseCorsOrigins(process.env.CORS_ORIGINS);
+
+  app.enableCors({
+    origin: (origin, callback) => {
+      // no origin -> mobile apps / curl / server-to-server
+      if (!origin) {
+        return callback(null, true);
+      }
+
+      // development fallback
+      if (nodeEnv !== 'production' && corsOrigins.length === 0) {
+        return callback(null, true);
+      }
+
+      if (corsOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(new Error(`CORS blocked for origin: ${origin}`), false);
+    },
+    credentials: true,
+  });
+
+  // ✅ RAW WebSocket adapter (ws)
   app.useWebSocketAdapter(new WsAdapter(app));
 
-  await app.listen(process.env.PORT ?? 3000);
+  const port = Number(process.env.PORT ?? 3000);
+  await app.listen(port, '0.0.0.0');
+
+  logger.log(`API started on port ${port}`);
+  logger.log(`NODE_ENV=${nodeEnv}`);
+  logger.log(`UPLOAD_DIR=${uploadDir}`);
+  if (corsOrigins.length > 0) {
+    logger.log(`CORS_ORIGINS=${corsOrigins.join(', ')}`);
+  } else {
+    logger.warn('CORS_ORIGINS is empty');
+  }
 }
 
-bootstrap();
+bootstrap().catch((e) => {
+  // eslint-disable-next-line no-console
+  console.error('Fatal bootstrap error:', e);
+  process.exit(1);
+});
