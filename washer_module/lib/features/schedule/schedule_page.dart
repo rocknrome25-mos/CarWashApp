@@ -35,8 +35,11 @@ class _SchedulePageState extends State<SchedulePage>
   late final Animation<double> _fadeAnim;
   late final Animation<Offset> _slideAnim;
 
-  DateTime get _from => DateTime.now();
-  DateTime get _to => DateTime.now().add(const Duration(days: 7));
+  DateTime _startOfDay(DateTime d) => DateTime(d.year, d.month, d.day);
+
+  DateTime get _from => _startOfDay(DateTime.now());
+
+  DateTime get _to => _startOfDay(DateTime.now().add(const Duration(days: 8)));
 
   @override
   void initState() {
@@ -168,7 +171,10 @@ class _SchedulePageState extends State<SchedulePage>
     if (diff == 1) return 'Завтра';
 
     final df = DateFormat('EEE, dd.MM', 'ru');
-    return df.format(d);
+    final raw = df.format(d);
+    if (raw.isEmpty) return 'День';
+
+    return raw[0].toUpperCase() + raw.substring(1);
   }
 
   _StatusUi _statusUi(String status, ColorScheme cs) {
@@ -223,15 +229,40 @@ class _SchedulePageState extends State<SchedulePage>
     if (loading) return const Center(child: CircularProgressIndicator());
 
     final groups = <DateTime, List<Map<String, dynamic>>>{};
+    final undated = <Map<String, dynamic>>[];
+
     for (final s in shifts) {
       final start = DateTime.tryParse(
         (s['startAt'] ?? '').toString(),
       )?.toLocal();
-      final d = start == null
-          ? DateTime(1970)
-          : DateTime(start.year, start.month, start.day);
+
+      if (start == null) {
+        undated.add(s);
+        continue;
+      }
+
+      final d = DateTime(start.year, start.month, start.day);
       groups.putIfAbsent(d, () => []).add(s);
     }
+
+    for (final entry in groups.entries) {
+      entry.value.sort((a, b) {
+        final da =
+            DateTime.tryParse((a['startAt'] ?? '').toString())?.toLocal() ??
+            DateTime(1970);
+        final db =
+            DateTime.tryParse((b['startAt'] ?? '').toString())?.toLocal() ??
+            DateTime(1970);
+
+        final cmpStatus = _statusRank(
+          (a['status'] ?? '').toString(),
+        ).compareTo(_statusRank((b['status'] ?? '').toString()));
+        if (cmpStatus != 0) return cmpStatus;
+
+        return da.compareTo(db);
+      });
+    }
+
     final days = groups.keys.toList()..sort((a, b) => a.compareTo(b));
 
     return RefreshIndicator(
@@ -250,8 +281,8 @@ class _SchedulePageState extends State<SchedulePage>
                   child: Row(
                     children: [
                       Container(
-                        width: 48,
-                        height: 48,
+                        width: 50,
+                        height: 50,
                         decoration: BoxDecoration(
                           color: cs.primary.withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(16),
@@ -307,13 +338,13 @@ class _SchedulePageState extends State<SchedulePage>
                 const SizedBox(height: 12),
                 _YCard(
                   child: Padding(
-                    padding: const EdgeInsets.all(14),
+                    padding: const EdgeInsets.all(16),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Container(
-                          width: 50,
-                          height: 50,
+                          width: 52,
+                          height: 52,
                           decoration: BoxDecoration(
                             color: cs.primary.withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(16),
@@ -370,12 +401,20 @@ class _SchedulePageState extends State<SchedulePage>
                 const SizedBox(height: 12),
                 _YCard(
                   child: Padding(
-                    padding: const EdgeInsets.all(14),
+                    padding: const EdgeInsets.all(16),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Icon(Icons.error_outline, color: cs.error),
-                        const SizedBox(width: 10),
+                        Container(
+                          width: 42,
+                          height: 42,
+                          decoration: BoxDecoration(
+                            color: cs.error.withValues(alpha: 0.10),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Icon(Icons.error_outline, color: cs.error),
+                        ),
+                        const SizedBox(width: 12),
                         Expanded(
                           child: Text(
                             error!,
@@ -400,8 +439,8 @@ class _SchedulePageState extends State<SchedulePage>
                     child: Row(
                       children: [
                         Container(
-                          width: 46,
-                          height: 46,
+                          width: 48,
+                          height: 48,
                           decoration: BoxDecoration(
                             color: cs.surfaceContainerHighest.withValues(
                               alpha: 0.45,
@@ -455,7 +494,46 @@ class _SchedulePageState extends State<SchedulePage>
                 for (final s in groups[day]!) ...[
                   _YCard(
                     child: Padding(
-                      padding: const EdgeInsets.all(14),
+                      padding: const EdgeInsets.all(16),
+                      child: _ShiftTile(
+                        s: s,
+                        dfTime: dfTime,
+                        statusUi: _statusUi((s['status'] ?? '').toString(), cs),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                ],
+              ],
+
+              if (undated.isNotEmpty) ...[
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 26,
+                      decoration: BoxDecoration(
+                        color: cs.error.withValues(alpha: 0.85),
+                        borderRadius: BorderRadius.circular(99),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'Смены без даты',
+                        style: textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                for (final s in undated) ...[
+                  _YCard(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
                       child: _ShiftTile(
                         s: s,
                         dfTime: dfTime,
@@ -504,8 +582,8 @@ class _ShiftTile extends StatelessWidget {
     final end = DateTime.tryParse((s['endAt'] ?? '').toString())?.toLocal();
 
     final loc = (s['location'] as Map?)?.cast<String, dynamic>();
-    final locName = (loc?['name'] ?? '').toString();
-    final locAddr = (loc?['address'] ?? '').toString();
+    final washName = (loc?['name'] ?? '').toString().trim();
+    final washAddress = (loc?['address'] ?? '').toString().trim();
 
     final plannedBayId = s['plannedBayId'];
     final noteRaw = (s['note'] ?? '').toString();
@@ -559,15 +637,18 @@ class _ShiftTile extends StatelessWidget {
           spacing: 10,
           runSpacing: 10,
           children: [
-            if (locName.isNotEmpty)
-              _Pill(icon: Icons.place_outlined, text: locName),
-            if (plannedBayId != null)
+            if (washName.isNotEmpty)
               _Pill(
                 icon: Icons.local_car_wash_rounded,
-                text: 'Пост: $plannedBayId',
+                text: 'Мойка: $washName',
               ),
-            if (locAddr.isNotEmpty)
-              _Pill(icon: Icons.map_outlined, text: locAddr),
+            if (plannedBayId != null)
+              _Pill(icon: Icons.grid_view_rounded, text: 'Пост: $plannedBayId'),
+            if (washAddress.isNotEmpty)
+              _Pill(
+                icon: Icons.place_outlined,
+                text: 'Адрес мойки: $washAddress',
+              ),
           ],
         ),
         if (showNote) ...[
@@ -584,9 +665,14 @@ class _ShiftTile extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(
-                  Icons.notes_rounded,
-                  color: cs.onSurface.withValues(alpha: 0.8),
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: cs.primary.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(Icons.notes_rounded, size: 18, color: cs.primary),
                 ),
                 const SizedBox(width: 10),
                 Expanded(

@@ -23,6 +23,7 @@ class _ClockPageState extends State<ClockPage>
   String? error;
 
   bool noAssignment = false;
+  bool upcomingAssignment = false;
 
   Map<String, dynamic>? shift;
   DateTime? lastUpdated;
@@ -45,13 +46,18 @@ class _ClockPageState extends State<ClockPage>
     return DateTime.tryParse(v.toString())?.toLocal();
   }
 
+  DateTime _startOfDay(DateTime d) => DateTime(d.year, d.month, d.day);
+
+  DateTime _endOfDay(DateTime d) =>
+      DateTime(d.year, d.month, d.day, 23, 59, 59, 999);
+
   @override
   void initState() {
     super.initState();
 
     _introController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 500),
+      duration: const Duration(milliseconds: 520),
     );
 
     _fadeAnim = CurvedAnimation(
@@ -84,6 +90,111 @@ class _ClockPageState extends State<ClockPage>
     super.dispose();
   }
 
+  Future<Map<String, dynamic>?> _findTodayAssignedShift() async {
+    final now = DateTime.now();
+    final from = _startOfDay(now);
+    final to = _endOfDay(now);
+
+    final res = await widget.api.schedule(from: from, to: to);
+    final list = (res['shifts'] as List? ?? [])
+        .cast<Map>()
+        .map((x) => x.cast<String, dynamic>())
+        .toList();
+
+    if (list.isEmpty) return null;
+
+    bool isToday(Map<String, dynamic> s) {
+      final start = DateTime.tryParse(
+        (s['startAt'] ?? '').toString(),
+      )?.toLocal();
+      if (start == null) return false;
+      return start.year == now.year &&
+          start.month == now.month &&
+          start.day == now.day;
+    }
+
+    int statusRank(String status) {
+      switch (status.toUpperCase().trim()) {
+        case 'PUBLISHED':
+          return 0;
+        case 'ACTIVE':
+          return 1;
+        case 'DRAFT':
+          return 2;
+        case 'PENDING_PAYMENT':
+          return 3;
+        case 'COMPLETED':
+          return 4;
+        case 'CANCELED':
+          return 9;
+        default:
+          return 8;
+      }
+    }
+
+    final candidates = list.where((s) {
+      if (!isToday(s)) return false;
+      final status = (s['status'] ?? '').toString().toUpperCase().trim();
+      return status != 'CANCELED';
+    }).toList();
+
+    if (candidates.isEmpty) return null;
+
+    candidates.sort((a, b) {
+      final sa = statusRank((a['status'] ?? '').toString());
+      final sb = statusRank((b['status'] ?? '').toString());
+      if (sa != sb) return sa.compareTo(sb);
+
+      final da =
+          DateTime.tryParse((a['startAt'] ?? '').toString())?.toLocal() ??
+          DateTime.fromMillisecondsSinceEpoch(0);
+      final db =
+          DateTime.tryParse((b['startAt'] ?? '').toString())?.toLocal() ??
+          DateTime.fromMillisecondsSinceEpoch(0);
+
+      return da.compareTo(db);
+    });
+
+    return _normalizeScheduledShift(candidates.first);
+  }
+
+  Map<String, dynamic> _normalizeScheduledShift(Map<String, dynamic> raw) {
+    final start = DateTime.tryParse(
+      (raw['startAt'] ?? '').toString(),
+    )?.toLocal();
+    final end = DateTime.tryParse((raw['endAt'] ?? '').toString())?.toLocal();
+    final now = DateTime.now();
+
+    String normalizedStatus;
+    if (start != null &&
+        end != null &&
+        !now.isBefore(start) &&
+        now.isBefore(end)) {
+      normalizedStatus = 'ACTIVE';
+    } else if (start != null && now.isBefore(start)) {
+      normalizedStatus = 'SCHEDULED';
+    } else {
+      normalizedStatus = (raw['status'] ?? 'PUBLISHED')
+          .toString()
+          .toUpperCase()
+          .trim();
+    }
+
+    return <String, dynamic>{
+      ...raw,
+      '_source': 'schedule',
+      '_upcoming': start != null && now.isBefore(start),
+      '_normalizedStatus': normalizedStatus,
+      'bayId': raw['bayId'] ?? raw['plannedBayId'] ?? '—',
+      'clock': {
+        'canClockIn': false,
+        'canClockOut': false,
+        'clockInAt': null,
+        'clockOutAt': null,
+      },
+    };
+  }
+
   Future<void> _load({bool initial = false, bool silent = false}) async {
     setState(() {
       if (initial) loading = true;
@@ -97,16 +208,39 @@ class _ClockPageState extends State<ClockPage>
       setState(() {
         shift = s;
         noAssignment = false;
+        upcomingAssignment = false;
         lastUpdated = DateTime.now();
       });
     } on WasherApiException catch (e) {
       if (!mounted) return;
+
       if (e.status == 404) {
-        setState(() {
-          noAssignment = true;
-          shift = null;
-          lastUpdated = DateTime.now();
-        });
+        try {
+          final fallbackShift = await _findTodayAssignedShift();
+
+          if (!mounted) return;
+
+          if (fallbackShift != null) {
+            setState(() {
+              shift = fallbackShift;
+              noAssignment = false;
+              upcomingAssignment = fallbackShift['_upcoming'] == true;
+              lastUpdated = DateTime.now();
+              error = null;
+            });
+          } else {
+            setState(() {
+              noAssignment = true;
+              upcomingAssignment = false;
+              shift = null;
+              lastUpdated = DateTime.now();
+            });
+          }
+        } catch (fallbackError) {
+          if (!silent && mounted) {
+            setState(() => error = fallbackError.toString());
+          }
+        }
       } else {
         if (!silent) setState(() => error = e.toString());
       }
@@ -166,20 +300,20 @@ class _ClockPageState extends State<ClockPage>
               position: _slideAnim,
               child: _YCard(
                 child: Padding(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(18),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Container(
-                        width: 52,
-                        height: 52,
+                        width: 56,
+                        height: 56,
                         decoration: BoxDecoration(
                           color: cs.error.withValues(alpha: 0.10),
-                          borderRadius: BorderRadius.circular(16),
+                          borderRadius: BorderRadius.circular(18),
                         ),
                         child: Icon(Icons.error_outline, color: cs.error),
                       ),
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 12),
                       Text(
                         'Не удалось загрузить данные',
                         textAlign: TextAlign.center,
@@ -199,9 +333,10 @@ class _ClockPageState extends State<ClockPage>
                       SizedBox(
                         width: double.infinity,
                         child: _ScaleTap(
-                          child: FilledButton(
+                          child: FilledButton.icon(
                             onPressed: () => _load(),
-                            child: const Text('Повторить'),
+                            icon: const Icon(Icons.refresh_rounded),
+                            label: const Text('Повторить'),
                           ),
                         ),
                       ),
@@ -229,8 +364,8 @@ class _ClockPageState extends State<ClockPage>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Container(
-                      width: 50,
-                      height: 50,
+                      width: 52,
+                      height: 52,
                       decoration: BoxDecoration(
                         color: cs.primary.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(16),
@@ -243,14 +378,14 @@ class _ClockPageState extends State<ClockPage>
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Нет активного назначения',
+                            'Нет назначения на сегодня',
                             style: textTheme.titleSmall?.copyWith(
                               fontWeight: FontWeight.w900,
                             ),
                           ),
                           const SizedBox(height: 6),
                           Text(
-                            'Clock-in будет доступен после назначения на пост.',
+                            'Clock-in будет доступен после назначения на сегодняшнюю смену.',
                             style: textTheme.bodyMedium?.copyWith(
                               fontWeight: FontWeight.w600,
                               color: cs.onSurface.withValues(alpha: 0.78),
@@ -280,13 +415,43 @@ class _ClockPageState extends State<ClockPage>
     }
 
     final s = shift!;
-    final clock = (s['clock'] as Map).cast<String, dynamic>();
+    final clock =
+        ((s['clock'] as Map?)?.cast<String, dynamic>()) ??
+        <String, dynamic>{
+          'canClockIn': false,
+          'canClockOut': false,
+          'clockInAt': null,
+          'clockOutAt': null,
+        };
 
-    final canIn = _asBool(clock['canClockIn']);
-    final canOut = _asBool(clock['canClockOut']);
+    final canInFromApi = _asBool(clock['canClockIn']);
+    final canOutFromApi = _asBool(clock['canClockOut']);
 
     final inAt = _asDate(clock['clockInAt']);
     final outAt = _asDate(clock['clockOutAt']);
+
+    final startAt = _asDate(s['startAt']);
+    final endAt = _asDate(s['endAt']);
+
+    final now = DateTime.now();
+    final isTodayAssigned =
+        startAt != null &&
+        startAt.year == now.year &&
+        startAt.month == now.month &&
+        startAt.day == now.day;
+
+    final isUpcomingToday = upcomingAssignment;
+    final isAlreadyStarted = startAt != null && !now.isBefore(startAt);
+    final isStillRelevant = endAt == null || now.isBefore(endAt);
+
+    final canIn =
+        canInFromApi && isTodayAssigned && isAlreadyStarted && inAt == null;
+    final canOut =
+        canOutFromApi &&
+        isTodayAssigned &&
+        isStillRelevant &&
+        inAt != null &&
+        outAt == null;
 
     final df = DateFormat('dd.MM HH:mm');
     final tf = DateFormat('HH:mm:ss');
@@ -297,17 +462,23 @@ class _ClockPageState extends State<ClockPage>
 
     if (inAt != null && outAt == null) {
       statusText = 'На смене';
-      statusIcon = Icons.play_circle_outline;
+      statusIcon = Icons.play_circle_outline_rounded;
       statusColor = Colors.green;
     } else if (inAt != null && outAt != null) {
       statusText = 'Смена закрыта';
-      statusIcon = Icons.check_circle_outline;
+      statusIcon = Icons.check_circle_outline_rounded;
+      statusColor = cs.primary;
+    } else if (isUpcomingToday) {
+      statusText = 'Смена назначена';
+      statusIcon = Icons.event_available_rounded;
       statusColor = cs.primary;
     } else {
       statusText = 'Ожидает отметку';
-      statusIcon = Icons.schedule;
+      statusIcon = Icons.schedule_rounded;
       statusColor = Colors.orange;
     }
+
+    final bayId = s['bayId'] ?? s['plannedBayId'] ?? '—';
 
     return RefreshIndicator(
       onRefresh: () => _load(),
@@ -324,13 +495,16 @@ class _ClockPageState extends State<ClockPage>
                   child: Row(
                     children: [
                       Container(
-                        width: 48,
-                        height: 48,
+                        width: 50,
+                        height: 50,
                         decoration: BoxDecoration(
                           color: cs.primary.withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(16),
                         ),
-                        child: Icon(Icons.access_time, color: cs.primary),
+                        child: Icon(
+                          Icons.access_time_rounded,
+                          color: cs.primary,
+                        ),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
@@ -373,12 +547,10 @@ class _ClockPageState extends State<ClockPage>
                   ),
                 ),
               ),
-
               const SizedBox(height: 12),
-
               _YCard(
                 child: Padding(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(18),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -390,22 +562,81 @@ class _ClockPageState extends State<ClockPage>
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        'Отмечайте начало и завершение смены',
+                        'Отмечайте начало и завершение смены по назначенной смене на сегодня',
                         style: textTheme.bodyMedium?.copyWith(
                           color: cs.onSurfaceVariant.withValues(alpha: 0.92),
                           fontWeight: FontWeight.w500,
                         ),
                       ),
-                      const SizedBox(height: 12),
-
-                      _StatusPill(
-                        icon: statusIcon,
-                        text: statusText,
-                        color: statusColor,
-                      ),
-
                       const SizedBox(height: 14),
-
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        children: [
+                          _StatusPill(
+                            icon: statusIcon,
+                            text: statusText,
+                            color: statusColor,
+                          ),
+                          _MetaPill(
+                            icon: Icons.local_car_wash_rounded,
+                            text: 'Пост: $bayId',
+                          ),
+                          if (startAt != null)
+                            _MetaPill(
+                              icon: Icons.schedule_rounded,
+                              text:
+                                  '${DateFormat('HH:mm').format(startAt)}'
+                                  '${endAt != null ? '—${DateFormat('HH:mm').format(endAt)}' : ''}',
+                            ),
+                        ],
+                      ),
+                      if (isUpcomingToday) ...[
+                        const SizedBox(height: 14),
+                        Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: cs.secondaryContainer.withValues(
+                              alpha: 0.42,
+                            ),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: cs.outlineVariant.withValues(alpha: 0.50),
+                            ),
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Container(
+                                width: 34,
+                                height: 34,
+                                decoration: BoxDecoration(
+                                  color: cs.onSecondaryContainer.withValues(
+                                    alpha: 0.10,
+                                  ),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Icon(
+                                  Icons.info_outline_rounded,
+                                  size: 18,
+                                  color: cs.onSecondaryContainer,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  'Смена на сегодня уже назначена. Clock-in станет доступен после начала смены.',
+                                  style: textTheme.bodyMedium?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                    color: cs.onSecondaryContainer,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 14),
                       Container(
                         padding: const EdgeInsets.all(14),
                         decoration: BoxDecoration(
@@ -433,9 +664,7 @@ class _ClockPageState extends State<ClockPage>
                           ],
                         ),
                       ),
-
                       const SizedBox(height: 16),
-
                       Row(
                         children: [
                           Expanded(
@@ -548,6 +777,41 @@ class _StatusPill extends StatelessWidget {
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: color,
               fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MetaPill extends StatelessWidget {
+  final IconData icon;
+  final String text;
+
+  const _MetaPill({required this.icon, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.20),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: cs.onSurface.withValues(alpha: 0.82)),
+          const SizedBox(width: 6),
+          Text(
+            text,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              fontWeight: FontWeight.w800,
+              color: cs.onSurface.withValues(alpha: 0.90),
             ),
           ),
         ],

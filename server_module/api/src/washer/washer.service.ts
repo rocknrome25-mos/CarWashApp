@@ -37,6 +37,14 @@ export class WasherService {
     return d;
   }
 
+  private _startOfDay(d: Date): Date {
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
+  }
+
+  private _endOfDay(d: Date): Date {
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
+  }
+
   private _requireWasher(user: { role: UserRole; isActive: boolean }) {
     if (!user.isActive) throw new ForbiddenException('User is inactive');
     if (user.role !== UserRole.WASHER) throw new ForbiddenException('Not a washer');
@@ -45,15 +53,22 @@ export class WasherService {
   private async _getWasherOrThrow(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, role: true, isActive: true, locationId: true, phone: true, name: true },
+      select: {
+        id: true,
+        role: true,
+        isActive: true,
+        locationId: true,
+        phone: true,
+        name: true,
+      },
     });
     if (!user) throw new NotFoundException('User not found');
     this._requireWasher(user);
     return user;
   }
 
-  private async _getCurrentAssignmentOrThrow(washerId: string) {
-    const row = await this.prisma.shiftWasher.findFirst({
+  private async _getCurrentAssignmentOrNull(washerId: string) {
+    return this.prisma.shiftWasher.findFirst({
       where: {
         washerId,
         shift: { status: ShiftStatus.OPEN },
@@ -73,16 +88,192 @@ export class WasherService {
             openedAt: true,
             closedAt: true,
             locationId: true,
+            plannedShiftId: true,
             admin: { select: { id: true, phone: true, name: true } },
+            location: {
+              select: {
+                id: true,
+                name: true,
+                address: true,
+                colorHex: true,
+                baysCount: true,
+              },
+            },
+            plannedShift: {
+              select: {
+                id: true,
+                startAt: true,
+                endAt: true,
+                note: true,
+                status: true,
+              },
+            },
           },
         },
       },
     });
+  }
 
+  private async _getCurrentAssignmentOrThrow(washerId: string) {
+    const row = await this._getCurrentAssignmentOrNull(washerId);
     if (!row) {
       throw new NotFoundException('No active shift assignment for this washer');
     }
     return row;
+  }
+
+  private async _getTodayPlannedAssignmentOrNull(
+    washerId: string,
+    at = new Date(),
+  ) {
+    const from = this._startOfDay(at);
+    const to = this._endOfDay(at);
+
+    return this.prisma.plannedShiftWasher.findFirst({
+      where: {
+        washerId,
+        plannedShift: {
+          startAt: { gte: from, lte: to },
+          status: PlannedShiftStatus.PUBLISHED,
+        },
+      },
+      orderBy: { plannedShift: { startAt: 'asc' } },
+      select: {
+        id: true,
+        plannedBayId: true,
+        note: true,
+        plannedShift: {
+          select: {
+            id: true,
+            locationId: true,
+            createdByUserId: true,
+            startAt: true,
+            endAt: true,
+            status: true,
+            note: true,
+            createdByUser: {
+              select: { id: true, phone: true, name: true },
+            },
+            location: {
+              select: {
+                id: true,
+                name: true,
+                address: true,
+                colorHex: true,
+                baysCount: true,
+              },
+            },
+          },
+        },
+      },
+    });
+  }
+
+  private async _getPayPercents(locationId: string) {
+    const rules = await this.prisma.washerPayRule.findMany({
+      where: {
+        locationId,
+        isActive: true,
+      },
+      select: {
+        category: true,
+        percent: true,
+      },
+    });
+
+    let percentWash = 30;
+    let percentChem = 40;
+
+    for (const r of rules) {
+      if (r.category === ServiceLaborCategory.WASH) {
+        percentWash = this._safePercent(r.percent, 30);
+      } else if (r.category === ServiceLaborCategory.CHEM) {
+        percentChem = this._safePercent(r.percent, 40);
+      }
+    }
+
+    return { percentWash, percentChem };
+  }
+
+  private async _ensureLiveAssignmentForTodayPlannedShift(args: {
+    washerId: string;
+    at: Date;
+  }) {
+    const { washerId, at } = args;
+
+    const existing = await this._getCurrentAssignmentOrNull(washerId);
+    if (existing) return existing;
+
+    const planned = await this._getTodayPlannedAssignmentOrNull(washerId, at);
+    if (!planned) {
+      throw new NotFoundException('No planned shift assignment for today');
+    }
+
+    if (planned.plannedBayId == null) {
+      throw new ConflictException('Planned shift has no assigned bay');
+    }
+
+    const bayId = planned.plannedBayId;
+
+    if (at.getTime() < planned.plannedShift.startAt.getTime()) {
+      throw new ConflictException('Shift has not started yet');
+    }
+
+    if (at.getTime() > planned.plannedShift.endAt.getTime()) {
+      throw new ConflictException('Planned shift already ended');
+    }
+
+    const pay = await this._getPayPercents(planned.plannedShift.locationId);
+
+    await this.prisma.$transaction(async (tx) => {
+      let liveShift = await tx.shift.findFirst({
+        where: {
+          plannedShiftId: planned.plannedShift.id,
+          status: ShiftStatus.OPEN,
+        },
+        select: { id: true },
+      });
+
+      if (!liveShift) {
+        liveShift = await tx.shift.create({
+          data: {
+            locationId: planned.plannedShift.locationId,
+            adminId: planned.plannedShift.createdByUserId,
+            status: ShiftStatus.OPEN,
+            openedAt: at,
+            plannedShiftId: planned.plannedShift.id,
+          },
+          select: { id: true },
+        });
+      }
+
+      const existingAsg = await tx.shiftWasher.findFirst({
+        where: {
+          shiftId: liveShift.id,
+          washerId,
+        },
+        select: { id: true },
+      });
+
+      if (!existingAsg) {
+        await tx.shiftWasher.create({
+          data: {
+            shiftId: liveShift.id,
+            washerId,
+            bayId,
+            percentWash: pay.percentWash,
+            percentChem: pay.percentChem,
+          },
+          select: { id: true },
+        });
+      }
+    });
+
+    const created = await this._getCurrentAssignmentOrNull(washerId);
+    if (!created) {
+      throw new ConflictException('Failed to create live shift assignment');
+    }
+    return created;
   }
 
   private _safePercent(p: unknown, def: number) {
@@ -149,55 +340,134 @@ export class WasherService {
 
   async getCurrentShift(washerId: string) {
     const washer = await this._getWasherOrThrow(washerId);
-    const asg = await this._getCurrentAssignmentOrThrow(washer.id);
 
-    const completedCount = await this.prisma.booking.count({
-      where: {
-        shiftId: asg.shift.id,
-        bayId: asg.bayId,
-        status: BookingStatus.COMPLETED,
-      },
-    });
+    const liveAsg = await this._getCurrentAssignmentOrNull(washer.id);
+    if (liveAsg) {
+      const completedCount = await this.prisma.booking.count({
+        where: {
+          shiftId: liveAsg.shift.id,
+          bayId: liveAsg.bayId,
+          status: BookingStatus.COMPLETED,
+        },
+      });
 
-    const earningsRub = await this._computeEarningsForShiftBay({
-      shiftId: asg.shift.id,
-      bayId: asg.bayId,
-      percentWash: asg.percentWash,
-      percentChem: asg.percentChem,
-    });
+      const earningsRub = await this._computeEarningsForShiftBay({
+        shiftId: liveAsg.shift.id,
+        bayId: liveAsg.bayId,
+        percentWash: liveAsg.percentWash,
+        percentChem: liveAsg.percentChem,
+      });
+
+      return {
+        washer: {
+          id: washer.id,
+          phone: washer.phone,
+          name: washer.name,
+          locationId: washer.locationId,
+        },
+        shift: {
+          id: liveAsg.shift.id,
+          status: liveAsg.shift.status,
+          openedAt: liveAsg.shift.openedAt,
+          closedAt: liveAsg.shift.closedAt,
+          locationId: liveAsg.shift.locationId,
+          plannedShiftId: liveAsg.shift.plannedShiftId ?? null,
+        },
+        startAt:
+          liveAsg.shift.plannedShift?.startAt ??
+          liveAsg.shift.openedAt ??
+          null,
+        endAt: liveAsg.shift.plannedShift?.endAt ?? null,
+        note: liveAsg.shift.plannedShift?.note ?? null,
+        location: liveAsg.shift.location,
+        bayId: liveAsg.bayId,
+        adminOnDuty: liveAsg.shift.admin,
+        clock: {
+          clockInAt: liveAsg.clockInAt,
+          clockOutAt: liveAsg.clockOutAt,
+          canClockIn: !liveAsg.clockInAt,
+          canClockOut: !!liveAsg.clockInAt && !liveAsg.clockOutAt,
+        },
+        totals: {
+          carsCompleted: completedCount,
+          earningsRub,
+        },
+      };
+    }
+
+    const now = new Date();
+    const planned = await this._getTodayPlannedAssignmentOrNull(washer.id, now);
+    if (!planned) {
+      throw new NotFoundException(
+        'No active or planned shift assignment for this washer',
+      );
+    }
+
+    const canClockIn =
+      planned.plannedBayId != null &&
+      now.getTime() >= planned.plannedShift.startAt.getTime() &&
+      now.getTime() <= planned.plannedShift.endAt.getTime();
 
     return {
-      washer: { id: washer.id, phone: washer.phone, name: washer.name, locationId: washer.locationId },
-      shift: {
-        id: asg.shift.id,
-        status: asg.shift.status,
-        openedAt: asg.shift.openedAt,
-        closedAt: asg.shift.closedAt,
-        locationId: asg.shift.locationId,
+      washer: {
+        id: washer.id,
+        phone: washer.phone,
+        name: washer.name,
+        locationId: washer.locationId,
       },
-      bayId: asg.bayId,
-      adminOnDuty: asg.shift.admin,
+      shift: {
+        id: planned.plannedShift.id,
+        status: 'PLANNED',
+        openedAt: null,
+        closedAt: null,
+        locationId: planned.plannedShift.locationId,
+        plannedShiftId: planned.plannedShift.id,
+      },
+      startAt: planned.plannedShift.startAt,
+      endAt: planned.plannedShift.endAt,
+      note: planned.plannedShift.note,
+      location: planned.plannedShift.location,
+      bayId: planned.plannedBayId,
+      adminOnDuty: planned.plannedShift.createdByUser,
       clock: {
-        clockInAt: asg.clockInAt,
-        clockOutAt: asg.clockOutAt,
-        canClockIn: !asg.clockInAt,
-        canClockOut: !!asg.clockInAt && !asg.clockOutAt,
+        clockInAt: null,
+        clockOutAt: null,
+        canClockIn,
+        canClockOut: false,
       },
       totals: {
-        carsCompleted: completedCount,
-        earningsRub,
+        carsCompleted: 0,
+        earningsRub: 0,
       },
     };
   }
 
   async getCurrentShiftBookings(washerId: string) {
     const washer = await this._getWasherOrThrow(washerId);
-    const asg = await this._getCurrentAssignmentOrThrow(washer.id);
+    const liveAsg = await this._getCurrentAssignmentOrNull(washer.id);
+
+    if (!liveAsg) {
+      const planned = await this._getTodayPlannedAssignmentOrNull(
+        washer.id,
+        new Date(),
+      );
+      if (!planned) {
+        throw new NotFoundException(
+          'No active or planned shift assignment for this washer',
+        );
+      }
+
+      return {
+        shiftId: null,
+        bayId: planned.plannedBayId,
+        bookings: [],
+      };
+    }
 
     const rows = await this.prisma.booking.findMany({
       where: {
-        shiftId: asg.shift.id,
-        bayId: asg.bayId,
+        shiftId: liveAsg.shift.id,
+        bayId: liveAsg.bayId,
         status: {
           in: [
             BookingStatus.PENDING_PAYMENT,
@@ -247,15 +517,22 @@ export class WasherService {
             serviceId: true,
             qty: true,
             note: true,
-            service: { select: { id: true, name: true, kind: true, laborCategory: true } },
+            service: {
+              select: {
+                id: true,
+                name: true,
+                kind: true,
+                laborCategory: true,
+              },
+            },
           },
         },
       },
     });
 
     return {
-      shiftId: asg.shift.id,
-      bayId: asg.bayId,
+      shiftId: liveAsg.shift.id,
+      bayId: liveAsg.bayId,
       bookings: rows.map((b) => ({
         id: b.id,
         dateTime: b.dateTime,
@@ -283,7 +560,12 @@ export class WasherService {
 
   async clockIn(washerId: string, dto: WasherClockDto) {
     const washer = await this._getWasherOrThrow(washerId);
-    const asg = await this._getCurrentAssignmentOrThrow(washer.id);
+    const at = this._parseIsoOrNow(dto?.at);
+
+    const asg = await this._ensureLiveAssignmentForTodayPlannedShift({
+      washerId: washer.id,
+      at,
+    });
 
     if (asg.clockInAt) {
       return {
@@ -294,8 +576,6 @@ export class WasherService {
         message: 'Already clocked-in',
       };
     }
-
-    const at = this._parseIsoOrNow(dto?.at);
 
     const updated = await this.prisma.$transaction(async (tx) => {
       const u = await tx.shiftWasher.update({

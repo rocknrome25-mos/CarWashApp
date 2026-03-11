@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:intl/date_symbol_data_local.dart';
+
 import 'core/api/washer_api_client.dart';
 import 'core/storage/washer_session_store.dart';
 import 'features/shell/shell_page.dart';
 import 'features/login/login_page.dart';
 
-void main() async {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await initializeDateFormatting('ru');
+  await initializeDateFormatting('ru_RU');
 
   final store = WasherSessionStore();
   await store.load();

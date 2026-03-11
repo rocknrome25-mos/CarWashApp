@@ -23,18 +23,24 @@ class WashersPage extends StatefulWidget {
 
 class _WashersPageState extends State<WashersPage> {
   bool loading = true;
-  String? error;
+
+  String? plannedError;
+  String? washersError;
 
   List<Map<String, dynamic>> planned = [];
   List<Map<String, dynamic>> washers = [];
+
+  int selectedDayIndex = 0;
+  bool showCanceled = false;
 
   DateTime _todayOnly(DateTime d) => DateTime(d.year, d.month, d.day);
 
   DateTime get _from => _todayOnly(DateTime.now());
 
-  DateTime get _to => _todayOnly(
-    DateTime.now().add(const Duration(days: 7)),
-  ).add(const Duration(days: 1));
+  DateTime get _to =>
+      _todayOnly(DateTime.now().add(const Duration(days: 7))).add(
+        const Duration(days: 1),
+      );
 
   @override
   void initState() {
@@ -42,69 +48,90 @@ class _WashersPageState extends State<WashersPage> {
     load();
   }
 
+  DateTime? _tryParseDate(dynamic value) {
+    final raw = (value ?? '').toString().trim();
+    if (raw.isEmpty) return null;
+    return DateTime.tryParse(raw);
+  }
+
   Future<void> load() async {
     if (!mounted) return;
 
     setState(() {
       loading = true;
-      error = null;
+      plannedError = null;
+      washersError = null;
     });
 
-    try {
-      final results = await Future.wait([
-        widget.api.listPlannedShifts(
+    List<Map<String, dynamic>> nextPlanned = planned;
+    List<Map<String, dynamic>> nextWashers = washers;
+
+    String? nextPlannedError;
+    String? nextWashersError;
+
+    final plannedFuture = () async {
+      try {
+        final response = await widget.api.listPlannedShifts(
           widget.session.userId,
           from: _from,
           to: _to,
-        ),
-        widget.api.listWashers(widget.session.userId),
-      ]);
+        );
 
-      final plannedRows = results[0]
-          .whereType<Map>()
-          .map((e) => e.cast<String, dynamic>())
-          .toList();
+        final plannedRows = response
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList();
 
-      final washerRows = results[1]
-          .whereType<Map>()
-          .map((e) => e.cast<String, dynamic>())
-          .toList();
+        plannedRows.sort((a, b) {
+          final da = _tryParseDate(a['startAt']) ?? DateTime(1970);
+          final db = _tryParseDate(b['startAt']) ?? DateTime(1970);
+          return da.compareTo(db);
+        });
 
-      plannedRows.sort((a, b) {
-        final da =
-            DateTime.tryParse((a['startAt'] ?? '').toString()) ??
-            DateTime(1970);
-        final db =
-            DateTime.tryParse((b['startAt'] ?? '').toString()) ??
-            DateTime(1970);
-        return da.compareTo(db);
-      });
+        nextPlanned = plannedRows;
+      } catch (e) {
+        nextPlannedError = e.toString();
+      }
+    }();
 
-      washerRows.sort((a, b) {
-        final an = (a['name'] ?? a['phone'] ?? '')
-            .toString()
-            .trim()
-            .toLowerCase();
-        final bn = (b['name'] ?? b['phone'] ?? '')
-            .toString()
-            .trim()
-            .toLowerCase();
-        return an.compareTo(bn);
-      });
+    final washersFuture = () async {
+      try {
+        final response = await widget.api.listWashers(widget.session.userId);
 
-      if (!mounted) return;
-      setState(() {
-        planned = plannedRows;
-        washers = washerRows;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => error = e.toString());
-    } finally {
-      // ignore: control_flow_in_finally
-      if (!mounted) return;
-      setState(() => loading = false);
-    }
+        final washerRows = response
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList();
+
+        washerRows.sort((a, b) {
+          final an = (a['name'] ?? a['phone'] ?? '')
+              .toString()
+              .trim()
+              .toLowerCase();
+          final bn = (b['name'] ?? b['phone'] ?? '')
+              .toString()
+              .trim()
+              .toLowerCase();
+          return an.compareTo(bn);
+        });
+
+        nextWashers = washerRows;
+      } catch (e) {
+        nextWashersError = e.toString();
+      }
+    }();
+
+    await Future.wait([plannedFuture, washersFuture]);
+
+    if (!mounted) return;
+
+    setState(() {
+      planned = nextPlanned;
+      washers = nextWashers;
+      plannedError = nextPlannedError;
+      washersError = nextWashersError;
+      loading = false;
+    });
   }
 
   List<DateTime> _days() {
@@ -112,28 +139,42 @@ class _WashersPageState extends State<WashersPage> {
     return List.generate(7, (i) => start.add(Duration(days: i)));
   }
 
+  DateTime get _selectedDay => _days()[selectedDayIndex];
+
   bool _sameDay(DateTime a, DateTime b) {
     final x = _todayOnly(a);
     final y = _todayOnly(b);
     return x == y;
   }
 
+  bool _isCanceled(Map<String, dynamic> p) {
+    final status = (p['status'] ?? '').toString().toUpperCase().trim();
+    return status == 'CANCELED';
+  }
+
   List<Map<String, dynamic>> _plannedForDay(DateTime day) {
     final rows = planned.where((p) {
-      final start = DateTime.tryParse((p['startAt'] ?? '').toString());
+      final start = _tryParseDate(p['startAt']);
       if (start == null) return false;
-      return _sameDay(start.toLocal(), day);
+      if (!_sameDay(start.toLocal(), day)) return false;
+      if (!showCanceled && _isCanceled(p)) return false;
+      return true;
     }).toList();
 
     rows.sort((a, b) {
-      final da =
-          DateTime.tryParse((a['startAt'] ?? '').toString()) ?? DateTime(1970);
-      final db =
-          DateTime.tryParse((b['startAt'] ?? '').toString()) ?? DateTime(1970);
+      final da = _tryParseDate(a['startAt']) ?? DateTime(1970);
+      final db = _tryParseDate(b['startAt']) ?? DateTime(1970);
       return da.compareTo(db);
     });
 
     return rows;
+  }
+
+  int _totalVisibleShiftsForDay(DateTime day) => _plannedForDay(day).length;
+
+  int _assignedCount(Map<String, dynamic> p) {
+    final rows = ((p['washers'] as List?) ?? const []).whereType<Map>().toList();
+    return rows.length;
   }
 
   String _statusText(String raw) {
@@ -153,11 +194,11 @@ class _WashersPageState extends State<WashersPage> {
     final cs = Theme.of(context).colorScheme;
     switch (raw.toUpperCase().trim()) {
       case 'PUBLISHED':
-        return cs.secondaryContainer.withValues(alpha: 0.75);
+        return cs.secondaryContainer.withValues(alpha: 0.78);
       case 'DRAFT':
-        return cs.surfaceContainerHighest.withValues(alpha: 0.75);
+        return cs.surfaceContainerHighest.withValues(alpha: 0.78);
       case 'CANCELED':
-        return cs.errorContainer.withValues(alpha: 0.75);
+        return cs.errorContainer.withValues(alpha: 0.78);
       default:
         return cs.surfaceContainerHighest.withValues(alpha: 0.55);
     }
@@ -184,6 +225,36 @@ class _WashersPageState extends State<WashersPage> {
     return phone.isEmpty ? 'Мойщик' : phone;
   }
 
+  String _formatShiftTime(Map<String, dynamic> p) {
+    final start = _tryParseDate(p['startAt'])?.toLocal();
+    final end = _tryParseDate(p['endAt'])?.toLocal();
+
+    if (start == null || end == null) {
+      return 'Время не указано';
+    }
+
+    final df = DateFormat('HH:mm');
+    return '${df.format(start)} — ${df.format(end)}';
+  }
+
+  String _formatDayShort(DateTime day) {
+    final weekday = DateFormat('EEE', 'ru_RU').format(day);
+    final date = DateFormat('dd.MM', 'ru_RU').format(day);
+    final w = weekday.isEmpty
+        ? ''
+        : '${weekday[0].toUpperCase()}${weekday.substring(1)}';
+    return '$w • $date';
+  }
+
+  String _formatDayLong(DateTime day) {
+    final weekday = DateFormat('EEEE', 'ru_RU').format(day);
+    final date = DateFormat('d MMMM', 'ru_RU').format(day);
+    final w = weekday.isEmpty
+        ? ''
+        : '${weekday[0].toUpperCase()}${weekday.substring(1)}';
+    return '$w • $date';
+  }
+
   Future<void> _createOrEditPlannedShift({
     Map<String, dynamic>? existing,
     DateTime? presetDay,
@@ -196,16 +267,18 @@ class _WashersPageState extends State<WashersPage> {
     final noteCtrl = TextEditingController();
 
     if (existing != null) {
-      startAt = DateTime.parse(
-        (existing['startAt'] ?? '').toString(),
-      ).toLocal();
-      endAt = DateTime.parse((existing['endAt'] ?? '').toString()).toLocal();
+      final existingStart = _tryParseDate(existing['startAt'])?.toLocal();
+      final existingEnd = _tryParseDate(existing['endAt'])?.toLocal();
+
+      startAt =
+          existingStart ?? DateTime(now.year, now.month, now.day, 8, 0);
+      endAt = existingEnd ?? startAt.add(const Duration(hours: 12));
       noteCtrl.text = (existing['note'] ?? '').toString();
     } else {
       final base = presetDay ?? now;
       startAt = DateTime(base.year, base.month, base.day, 8, 0);
       endAt = DateTime(base.year, base.month, base.day, 20, 0);
-      if (endAt.isBefore(startAt)) {
+      if (!endAt.isAfter(startAt)) {
         endAt = startAt.add(const Duration(hours: 12));
       }
     }
@@ -223,7 +296,6 @@ class _WashersPageState extends State<WashersPage> {
       if (d == null) return;
 
       final t = await showTimePicker(
-        // ignore: use_build_context_synchronously
         context: dialogCtx,
         initialTime: TimeOfDay.fromDateTime(startAt),
       );
@@ -249,7 +321,6 @@ class _WashersPageState extends State<WashersPage> {
       if (d == null) return;
 
       final t = await showTimePicker(
-        // ignore: use_build_context_synchronously
         context: dialogCtx,
         initialTime: TimeOfDay.fromDateTime(endAt),
       );
@@ -271,16 +342,15 @@ class _WashersPageState extends State<WashersPage> {
           final df = DateFormat('dd.MM HH:mm');
 
           InputDecoration deco(String label) => InputDecoration(
-            labelText: label,
-            filled: true,
-            fillColor: cs.surfaceContainerHighest.withValues(alpha: 0.10),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
-          );
+                labelText: label,
+                filled: true,
+                fillColor: cs.surfaceContainerHighest.withValues(alpha: 0.10),
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+              );
 
           return AlertDialog(
-            title: Text(
-              existing == null ? 'Новая смена' : 'Редактировать смену',
-            ),
+            title: Text(existing == null ? 'Новая смена' : 'Редактировать смену'),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -301,9 +371,8 @@ class _WashersPageState extends State<WashersPage> {
                           Expanded(
                             child: Text(
                               'Старт: ${df.format(startAt)}',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w800,
-                              ),
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.w800),
                             ),
                           ),
                           TextButton(
@@ -318,9 +387,8 @@ class _WashersPageState extends State<WashersPage> {
                           Expanded(
                             child: Text(
                               'Конец: ${df.format(endAt)}',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w800,
-                              ),
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.w800),
                             ),
                           ),
                           TextButton(
@@ -384,12 +452,21 @@ class _WashersPageState extends State<WashersPage> {
   Future<void> _assignWasher(Map<String, dynamic> plannedShift) async {
     final messenger = ScaffoldMessenger.of(context);
 
+    if (washersError != null) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Не удалось загрузить список мойщиков. Обновите экран.'),
+        ),
+      );
+      return;
+    }
+
     final shiftId = (plannedShift['id'] ?? '').toString().trim();
     if (shiftId.isEmpty) return;
 
     final existingWashers = ((plannedShift['washers'] as List?) ?? const [])
         .whereType<Map>()
-        .map((e) => e.cast<String, dynamic>())
+        .map((e) => Map<String, dynamic>.from(e))
         .toList();
 
     final assignedWasherIds = existingWashers
@@ -408,9 +485,8 @@ class _WashersPageState extends State<WashersPage> {
       return;
     }
 
-    String? selectedWasherId = (availableWashers.first['id'] ?? '')
-        .toString()
-        .trim();
+    String? selectedWasherId =
+        (availableWashers.first['id'] ?? '').toString().trim();
     int plannedBayId = 1;
     final noteCtrl = TextEditingController();
 
@@ -429,11 +505,12 @@ class _WashersPageState extends State<WashersPage> {
           final cs = Theme.of(dialogCtx).colorScheme;
 
           InputDecoration deco(String label) => InputDecoration(
-            labelText: label,
-            filled: true,
-            fillColor: cs.surfaceContainerHighest.withValues(alpha: 0.10),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
-          );
+                labelText: label,
+                filled: true,
+                fillColor: cs.surfaceContainerHighest.withValues(alpha: 0.10),
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+              );
 
           return AlertDialog(
             title: const Text('Назначить мойщика'),
@@ -441,7 +518,7 @@ class _WashersPageState extends State<WashersPage> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 DropdownButtonFormField<String>(
-                  initialValue: selectedWasherId,
+                  value: selectedWasherId,
                   decoration: deco('Мойщик'),
                   items: availableWashers.map((w) {
                     final id = (w['id'] ?? '').toString();
@@ -460,7 +537,7 @@ class _WashersPageState extends State<WashersPage> {
                 ),
                 const SizedBox(height: 10),
                 DropdownButtonFormField<int>(
-                  initialValue: plannedBayId,
+                  value: plannedBayId,
                   decoration: deco('Пост'),
                   items: const [
                     DropdownMenuItem(value: 1, child: Text('Пост 1')),
@@ -611,6 +688,8 @@ class _WashersPageState extends State<WashersPage> {
     final cs = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
 
+    final visibleToday = _plannedForDay(_selectedDay).length;
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -651,11 +730,18 @@ class _WashersPageState extends State<WashersPage> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Сегодня и неделя вперёд. Создавай смены, назначай мойщиков из списка, публикуй и редактируй график.',
+                  'Выбран день: ${_formatDayLong(_selectedDay)}',
                   style: textTheme.bodySmall?.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: cs.onSurface.withValues(alpha: 0.66),
-                    height: 1.3,
+                    fontWeight: FontWeight.w700,
+                    color: cs.onSurface.withValues(alpha: 0.72),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Смен в показе: $visibleToday',
+                  style: textTheme.bodySmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: cs.onSurface.withValues(alpha: 0.62),
                   ),
                 ),
               ],
@@ -666,13 +752,217 @@ class _WashersPageState extends State<WashersPage> {
     );
   }
 
-  Widget _emptyDayCard(BuildContext context, DateTime day) {
+  Widget _warningCard(
+    BuildContext context, {
+    required IconData icon,
+    required String text,
+  }) {
     final cs = Theme.of(context).colorScheme;
-    final weekday = DateFormat('EEEE', 'ru_RU').format(day);
-    final date = DateFormat('d MMMM', 'ru_RU').format(day);
 
     return Container(
       padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: cs.errorContainer.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: cs.error.withValues(alpha: 0.25)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: cs.onErrorContainer),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              text,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: cs.onErrorContainer,
+                    height: 1.35,
+                  ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _toolbarCard(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: () => _createOrEditPlannedShift(
+                    presetDay: _selectedDay,
+                  ),
+                  icon: const Icon(Icons.add),
+                  label: const Text('Новая смена'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              IconButton.filledTonal(
+                onPressed: loading ? null : load,
+                tooltip: 'Обновить',
+                icon: const Icon(Icons.refresh),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: FilterChip(
+                  selected: showCanceled,
+                  label: const Text('Показать отменённые'),
+                  onSelected: (v) => setState(() => showCanceled = v),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _dayTabs(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final days = _days();
+
+    return SizedBox(
+      height: 54,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: days.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (context, i) {
+          final day = days[i];
+          final selected = i == selectedDayIndex;
+          final count = _totalVisibleShiftsForDay(day);
+
+          return InkWell(
+            borderRadius: BorderRadius.circular(16),
+            onTap: () => setState(() => selectedDayIndex = i),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 160),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: selected
+                    ? cs.primary.withValues(alpha: 0.18)
+                    : cs.surfaceContainerHighest.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: selected
+                      ? cs.primary.withValues(alpha: 0.40)
+                      : cs.outlineVariant.withValues(alpha: 0.40),
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _formatDayShort(day),
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w900,
+                          color: selected
+                              ? cs.primary
+                              : cs.onSurface.withValues(alpha: 0.88),
+                        ),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: selected
+                          ? cs.primary.withValues(alpha: 0.15)
+                          : cs.surfaceContainerHighest.withValues(alpha: 0.24),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      '$count',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            fontWeight: FontWeight.w900,
+                            color: selected
+                                ? cs.primary
+                                : cs.onSurface.withValues(alpha: 0.82),
+                          ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _washersInfoCard(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    final text = washersError != null
+        ? 'Не удалось загрузить список мойщиков. Назначение временно отключено.'
+        : washers.isEmpty
+            ? 'Список мойщиков пуст. Сначала владелец должен добавить мойщиков.'
+            : 'Доступно мойщиков: ${washers.length}';
+
+    final icon = washersError != null
+        ? Icons.warning_amber_rounded
+        : Icons.people_alt_outlined;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: washersError != null
+            ? cs.errorContainer.withValues(alpha: 0.30)
+            : cs.surfaceContainerHighest.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: washersError != null
+              ? cs.error.withValues(alpha: 0.25)
+              : cs.outlineVariant.withValues(alpha: 0.45),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            icon,
+            color: washersError != null ? cs.onErrorContainer : cs.primary,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              text,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: washersError != null
+                        ? cs.onErrorContainer
+                        : cs.onSurface.withValues(alpha: 0.85),
+                  ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _emptySelectedDay(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return Container(
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(20),
@@ -682,27 +972,27 @@ class _WashersPageState extends State<WashersPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '${weekday[0].toUpperCase()}${weekday.substring(1)} • $date',
-            style: Theme.of(
-              context,
-            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900),
+            _formatDayLong(_selectedDay),
+            style: Theme.of(context)
+                .textTheme
+                .titleSmall
+                ?.copyWith(fontWeight: FontWeight.w900),
           ),
           const SizedBox(height: 10),
           Text(
-            'Смен пока нет.',
+            showCanceled
+                ? 'Для этого дня нет смен.'
+                : 'Для этого дня нет активных или черновых смен.',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              fontWeight: FontWeight.w700,
-              color: cs.onSurface.withValues(alpha: 0.70),
-            ),
+                  fontWeight: FontWeight.w700,
+                  color: cs.onSurface.withValues(alpha: 0.72),
+                ),
           ),
-          const SizedBox(height: 12),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: FilledButton.icon(
-              onPressed: () => _createOrEditPlannedShift(presetDay: day),
-              icon: const Icon(Icons.add),
-              label: const Text('Добавить смену'),
-            ),
+          const SizedBox(height: 14),
+          FilledButton.icon(
+            onPressed: () => _createOrEditPlannedShift(presetDay: _selectedDay),
+            icon: const Icon(Icons.add),
+            label: const Text('Добавить смену'),
           ),
         ],
       ),
@@ -719,9 +1009,9 @@ class _WashersPageState extends State<WashersPage> {
       child: Text(
         _statusText(raw),
         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-          color: _statusFg(context, raw),
-          fontWeight: FontWeight.w900,
-        ),
+              color: _statusFg(context, raw),
+              fontWeight: FontWeight.w900,
+            ),
       ),
     );
   }
@@ -729,9 +1019,10 @@ class _WashersPageState extends State<WashersPage> {
   Widget _assignedWashersBlock(BuildContext context, Map<String, dynamic> p) {
     final cs = Theme.of(context).colorScheme;
     final shiftId = (p['id'] ?? '').toString();
+
     final rows = ((p['washers'] as List?) ?? const [])
         .whereType<Map>()
-        .map((e) => e.cast<String, dynamic>())
+        .map((e) => Map<String, dynamic>.from(e))
         .toList();
 
     if (rows.isEmpty) {
@@ -744,20 +1035,19 @@ class _WashersPageState extends State<WashersPage> {
           border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.40)),
         ),
         child: Text(
-          'Мойщики пока не назначены.',
+          'Мойщики не назначены',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
-            color: cs.onSurface.withValues(alpha: 0.72),
-            fontWeight: FontWeight.w700,
-          ),
+                color: cs.onSurface.withValues(alpha: 0.72),
+                fontWeight: FontWeight.w700,
+              ),
         ),
       );
     }
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
       children: rows.map((w) {
         final washer = (w['washer'] is Map)
-            ? (w['washer'] as Map).cast<String, dynamic>()
+            ? Map<String, dynamic>.from(w['washer'] as Map)
             : <String, dynamic>{};
 
         final washerId = (w['washerId'] ?? washer['id'] ?? '').toString();
@@ -767,7 +1057,7 @@ class _WashersPageState extends State<WashersPage> {
         final note = (w['note'] ?? '').toString().trim();
 
         return Container(
-          margin: const EdgeInsets.only(bottom: 10),
+          margin: const EdgeInsets.only(bottom: 8),
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
             color: cs.surfaceContainerHighest.withValues(alpha: 0.12),
@@ -785,20 +1075,20 @@ class _WashersPageState extends State<WashersPage> {
                     Text(
                       washerTitle,
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.w900,
-                      ),
+                            fontWeight: FontWeight.w900,
+                          ),
                     ),
                     if (phone.isNotEmpty) ...[
                       const SizedBox(height: 2),
                       Text(
                         phone,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: cs.onSurface.withValues(alpha: 0.72),
-                          fontWeight: FontWeight.w700,
-                        ),
+                              color: cs.onSurface.withValues(alpha: 0.72),
+                              fontWeight: FontWeight.w700,
+                            ),
                       ),
                     ],
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 8),
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,
@@ -817,7 +1107,9 @@ class _WashersPageState extends State<WashersPage> {
                           ),
                           child: Text(
                             bayId == null ? 'Пост не указан' : 'Пост $bayId',
-                            style: Theme.of(context).textTheme.bodySmall
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
                                 ?.copyWith(fontWeight: FontWeight.w900),
                           ),
                         ),
@@ -828,9 +1120,8 @@ class _WashersPageState extends State<WashersPage> {
                               vertical: 6,
                             ),
                             decoration: BoxDecoration(
-                              color: cs.surfaceContainerHighest.withValues(
-                                alpha: 0.18,
-                              ),
+                              color: cs.surfaceContainerHighest
+                                  .withValues(alpha: 0.18),
                               borderRadius: BorderRadius.circular(999),
                               border: Border.all(
                                 color: cs.outlineVariant.withValues(
@@ -840,7 +1131,9 @@ class _WashersPageState extends State<WashersPage> {
                             ),
                             child: Text(
                               note,
-                              style: Theme.of(context).textTheme.bodySmall
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
                                   ?.copyWith(fontWeight: FontWeight.w800),
                             ),
                           ),
@@ -849,13 +1142,16 @@ class _WashersPageState extends State<WashersPage> {
                   ],
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
               IconButton(
                 tooltip: 'Снять мойщика',
                 onPressed: washerId.isEmpty
                     ? null
-                    : () =>
-                          _removeAssignedWasher(shiftId, washerId, washerTitle),
+                    : () => _removeAssignedWasher(
+                          shiftId,
+                          washerId,
+                          washerTitle,
+                        ),
                 icon: const Icon(Icons.person_remove_alt_1),
               ),
             ],
@@ -867,18 +1163,17 @@ class _WashersPageState extends State<WashersPage> {
 
   Widget _plannedCard(BuildContext context, Map<String, dynamic> p) {
     final cs = Theme.of(context).colorScheme;
-    final df = DateFormat('HH:mm');
 
-    final start = DateTime.parse((p['startAt'] ?? '').toString()).toLocal();
-    final end = DateTime.parse((p['endAt'] ?? '').toString()).toLocal();
     final note = (p['note'] ?? '').toString().trim();
     final id = (p['id'] ?? '').toString();
     final status = (p['status'] ?? '').toString();
 
     final isCanceled = status.toUpperCase().trim() == 'CANCELED';
     final isPublished = status.toUpperCase().trim() == 'PUBLISHED';
+    final canAssign = !isCanceled && washersError == null;
 
     return Container(
+      margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
@@ -899,13 +1194,32 @@ class _WashersPageState extends State<WashersPage> {
             children: [
               Expanded(
                 child: Text(
-                  '${df.format(start)} — ${df.format(end)}',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900),
+                  _formatShiftTime(p),
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleSmall
+                      ?.copyWith(fontWeight: FontWeight.w900),
                 ),
               ),
               _statusChip(context, status),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Icon(
+                Icons.person_outline,
+                size: 18,
+                color: cs.onSurface.withValues(alpha: 0.70),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                'Назначено: ${_assignedCount(p)}',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: cs.onSurface.withValues(alpha: 0.78),
+                    ),
+              ),
             ],
           ),
           if (note.isNotEmpty) ...[
@@ -923,52 +1237,32 @@ class _WashersPageState extends State<WashersPage> {
               child: Text(
                 'Примечание: $note',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: cs.onSurface.withValues(alpha: 0.75),
-                  fontWeight: FontWeight.w700,
-                ),
+                      color: cs.onSurface.withValues(alpha: 0.75),
+                      fontWeight: FontWeight.w700,
+                    ),
               ),
             ),
           ],
           const SizedBox(height: 12),
-          Text(
-            'Назначенные мойщики',
-            style: Theme.of(
-              context,
-            ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w900),
-          ),
-          const SizedBox(height: 10),
           _assignedWashersBlock(context, p),
           const SizedBox(height: 12),
           Wrap(
-            spacing: 10,
-            runSpacing: 10,
+            spacing: 8,
+            runSpacing: 8,
             children: [
               OutlinedButton.icon(
-                onPressed: isCanceled ? null : () => _assignWasher(p),
+                onPressed: canAssign ? () => _assignWasher(p) : null,
                 icon: const Icon(Icons.person_add_alt_1),
                 label: const Text('Назначить'),
-                style: OutlinedButton.styleFrom(
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                ),
               ),
               OutlinedButton.icon(
-                onPressed: isCanceled
-                    ? null
-                    : () => _createOrEditPlannedShift(existing: p),
+                onPressed:
+                    isCanceled ? null : () => _createOrEditPlannedShift(existing: p),
                 icon: const Icon(Icons.edit_outlined),
                 label: const Text('Изменить'),
-                style: OutlinedButton.styleFrom(
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                ),
               ),
               FilledButton.icon(
-                onPressed: isCanceled || isPublished
-                    ? null
-                    : () => _publish(id),
+                onPressed: isCanceled || isPublished ? null : () => _publish(id),
                 icon: const Icon(Icons.publish),
                 label: const Text('Опубликовать'),
               ),
@@ -976,11 +1270,6 @@ class _WashersPageState extends State<WashersPage> {
                 onPressed: isCanceled ? null : () => _deletePlanned(id),
                 icon: const Icon(Icons.delete_outline),
                 label: const Text('Удалить'),
-                style: TextButton.styleFrom(
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                ),
               ),
             ],
           ),
@@ -989,78 +1278,59 @@ class _WashersPageState extends State<WashersPage> {
     );
   }
 
-  Widget _daySection(BuildContext context, DateTime day) {
-    final rows = _plannedForDay(day);
-    final weekday = DateFormat('EEEE', 'ru_RU').format(day);
-    final date = DateFormat('d MMMM', 'ru_RU').format(day);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                '${weekday[0].toUpperCase()}${weekday.substring(1)} • $date',
-                style: Theme.of(
-                  context,
-                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
-              ),
-            ),
-            OutlinedButton.icon(
-              onPressed: () => _createOrEditPlannedShift(presetDay: day),
-              icon: const Icon(Icons.add),
-              label: const Text('Смена'),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        if (rows.isEmpty)
-          _emptyDayCard(context, day)
-        else
-          ...rows.map(
-            (p) => Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: _plannedCard(context, p),
-            ),
-          ),
-      ],
-    );
-  }
-
-  Widget _washersInfoCard(BuildContext context) {
+  Widget _plannedLoadFailedView(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: cs.surfaceContainerHighest.withValues(alpha: 0.14),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.45)),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.people_alt_outlined, color: cs.primary),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              washers.isEmpty
-                  ? 'Список мойщиков пуст. Сначала владелец должен добавить мойщиков.'
-                  : 'Доступно мойщиков: ${washers.length}',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                fontWeight: FontWeight.w800,
-                color: cs.onSurface.withValues(alpha: 0.85),
-              ),
-            ),
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: cs.errorContainer.withValues(alpha: 0.35),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: cs.error.withValues(alpha: 0.25)),
           ),
-        ],
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.error_outline, color: cs.onErrorContainer, size: 34),
+              const SizedBox(height: 12),
+              Text(
+                'Не удалось загрузить график смен.',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w900,
+                      color: cs.onErrorContainer,
+                    ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                plannedError ?? 'Неизвестная ошибка',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: cs.onErrorContainer,
+                      fontWeight: FontWeight.w700,
+                    ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 14),
+              FilledButton.icon(
+                onPressed: load,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Повторить'),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
+    final hasFatalPlannedError = plannedError != null && planned.isEmpty;
+    final selectedRows = _plannedForDay(_selectedDay);
 
     return Scaffold(
       appBar: AppBar(
@@ -1076,49 +1346,52 @@ class _WashersPageState extends State<WashersPage> {
       ),
       body: loading
           ? const Center(child: CircularProgressIndicator())
-          : (error != null)
-          ? Center(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.red.withValues(alpha: 0.10),
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(
-                      color: Colors.red.withValues(alpha: 0.30),
-                    ),
-                  ),
-                  child: Text(
-                    error!,
-                    style: TextStyle(
-                      color: cs.onSurface.withValues(alpha: 0.92),
-                      fontWeight: FontWeight.w700,
-                    ),
+          : hasFatalPlannedError
+              ? _plannedLoadFailedView(context)
+              : RefreshIndicator(
+                  onRefresh: load,
+                  child: ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                    children: [
+                      _headerCard(context),
+                      const SizedBox(height: 14),
+                      if (plannedError != null) ...[
+                        _warningCard(
+                          context,
+                          icon: Icons.warning_amber_rounded,
+                          text:
+                              'Не удалось обновить список смен. Показаны последние доступные данные.',
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                      _washersInfoCard(context),
+                      const SizedBox(height: 12),
+                      _toolbarCard(context),
+                      const SizedBox(height: 12),
+                      _dayTabs(context),
+                      const SizedBox(height: 14),
+                      Text(
+                        _formatDayLong(_selectedDay),
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w900),
+                      ),
+                      const SizedBox(height: 10),
+                      if (selectedRows.isEmpty)
+                        _emptySelectedDay(context)
+                      else
+                        ...selectedRows.map(
+                          (p) => _plannedCard(context, p),
+                        ),
+                    ],
                   ),
                 ),
-              ),
-            )
-          : RefreshIndicator(
-              onRefresh: load,
-              child: ListView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-                children: [
-                  _headerCard(context),
-                  const SizedBox(height: 14),
-                  _washersInfoCard(context),
-                  const SizedBox(height: 16),
-                  for (final day in _days()) ...[
-                    _daySection(context, day),
-                    const SizedBox(height: 14),
-                  ],
-                ],
-              ),
-            ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () =>
-            _createOrEditPlannedShift(presetDay: _todayOnly(DateTime.now())),
+        onPressed: () => _createOrEditPlannedShift(
+          presetDay: _selectedDay,
+        ),
         icon: const Icon(Icons.add),
         label: const Text('Смена'),
       ),

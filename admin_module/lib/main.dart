@@ -8,7 +8,9 @@ import 'features/shift/shift_gate_page.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await initializeDateFormatting('ru_RU', null);
+  await initializeDateFormatting('ru');
+  await initializeDateFormatting('ru_RU');
+
   runApp(const AdminApp());
 }
 
@@ -29,7 +31,6 @@ class _AdminAppState extends State<AdminApp> {
     const defined = String.fromEnvironment('BASE_URL', defaultValue: '');
     if (defined.trim().isNotEmpty) return defined.trim();
 
-    // Production default
     return 'http://95.174.95.1:3000';
   }
 

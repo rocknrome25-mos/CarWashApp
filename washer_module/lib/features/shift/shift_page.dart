@@ -23,6 +23,7 @@ class _ShiftPageState extends State<ShiftPage>
 
   String? error;
   bool noAssignment = false;
+  bool upcomingAssignment = false;
 
   Map<String, dynamic>? shift;
   Map<String, dynamic>? bookingsPayload;
@@ -35,6 +36,11 @@ class _ShiftPageState extends State<ShiftPage>
   late final AnimationController _introController;
   late final Animation<double> _fadeAnim;
   late final Animation<Offset> _slideAnim;
+
+  DateTime _startOfDay(DateTime d) => DateTime(d.year, d.month, d.day);
+
+  DateTime _endOfDay(DateTime d) =>
+      DateTime(d.year, d.month, d.day, 23, 59, 59, 999);
 
   @override
   void initState() {
@@ -50,10 +56,15 @@ class _ShiftPageState extends State<ShiftPage>
       curve: Curves.easeOut,
     );
 
-    _slideAnim = Tween<Offset>(begin: const Offset(0, 0.035), end: Offset.zero)
-        .animate(
-          CurvedAnimation(parent: _introController, curve: Curves.easeOutCubic),
-        );
+    _slideAnim = Tween<Offset>(
+      begin: const Offset(0, 0.035),
+      end: Offset.zero,
+    ).animate(
+      CurvedAnimation(
+        parent: _introController,
+        curve: Curves.easeOutCubic,
+      ),
+    );
 
     _load(initial: true).then((_) {
       if (mounted) _introController.forward();
@@ -75,6 +86,110 @@ class _ShiftPageState extends State<ShiftPage>
     super.dispose();
   }
 
+  Future<Map<String, dynamic>?> _findTodayAssignedShift() async {
+    final now = DateTime.now();
+    final from = _startOfDay(now);
+    final to = _endOfDay(now);
+
+    final res = await widget.api.schedule(from: from, to: to);
+    final list = (res['shifts'] as List? ?? [])
+        .cast<Map>()
+        .map((x) => x.cast<String, dynamic>())
+        .toList();
+
+    if (list.isEmpty) return null;
+
+    bool isToday(Map<String, dynamic> s) {
+      final start = DateTime.tryParse(
+        (s['startAt'] ?? '').toString(),
+      )?.toLocal();
+      if (start == null) return false;
+      return start.year == now.year &&
+          start.month == now.month &&
+          start.day == now.day;
+    }
+
+    int statusRank(String status) {
+      switch (status.toUpperCase().trim()) {
+        case 'PUBLISHED':
+          return 0;
+        case 'DRAFT':
+          return 1;
+        case 'ACTIVE':
+          return 2;
+        case 'PENDING_PAYMENT':
+          return 3;
+        case 'COMPLETED':
+          return 4;
+        case 'CANCELED':
+          return 9;
+        default:
+          return 8;
+      }
+    }
+
+    final candidates = list.where((s) {
+      if (!isToday(s)) return false;
+      final status = (s['status'] ?? '').toString().toUpperCase().trim();
+      return status != 'CANCELED';
+    }).toList();
+
+    if (candidates.isEmpty) return null;
+
+    candidates.sort((a, b) {
+      final sa = statusRank((a['status'] ?? '').toString());
+      final sb = statusRank((b['status'] ?? '').toString());
+      if (sa != sb) return sa.compareTo(sb);
+
+      final da =
+          DateTime.tryParse((a['startAt'] ?? '').toString())?.toLocal() ??
+          DateTime.fromMillisecondsSinceEpoch(0);
+      final db =
+          DateTime.tryParse((b['startAt'] ?? '').toString())?.toLocal() ??
+          DateTime.fromMillisecondsSinceEpoch(0);
+
+      final nowDiffA = da.difference(now).inMinutes.abs();
+      final nowDiffB = db.difference(now).inMinutes.abs();
+      if (nowDiffA != nowDiffB) return nowDiffA.compareTo(nowDiffB);
+
+      return da.compareTo(db);
+    });
+
+    return _normalizeScheduledShift(candidates.first);
+  }
+
+  Map<String, dynamic> _normalizeScheduledShift(Map<String, dynamic> raw) {
+    final start = DateTime.tryParse(
+      (raw['startAt'] ?? '').toString(),
+    )?.toLocal();
+    final end = DateTime.tryParse((raw['endAt'] ?? '').toString())?.toLocal();
+    final now = DateTime.now();
+
+    String shiftState;
+    if (start != null &&
+        end != null &&
+        now.isAfter(start) &&
+        now.isBefore(end)) {
+      shiftState = 'ACTIVE';
+    } else if (start != null && now.isBefore(start)) {
+      shiftState = 'SCHEDULED';
+    } else {
+      shiftState = (raw['status'] ?? 'PUBLISHED')
+          .toString()
+          .toUpperCase()
+          .trim();
+    }
+
+    return <String, dynamic>{
+      ...raw,
+      '_source': 'schedule',
+      '_upcoming': start != null && now.isBefore(start),
+      '_normalizedStatus': shiftState,
+      'bayId': raw['bayId'] ?? raw['plannedBayId'] ?? '—',
+      'totals': {'carsCompleted': 0, 'earningsRub': 0},
+    };
+  }
+
   Future<void> _load({bool initial = false, bool silent = false}) async {
     if (!mounted) return;
 
@@ -84,34 +199,70 @@ class _ShiftPageState extends State<ShiftPage>
       if (!silent) {
         error = null;
         noAssignment = false;
+        upcomingAssignment = false;
       }
     });
 
     try {
       final s = await widget.api.getCurrentShift();
-      final b = await widget.api.getCurrentShiftBookings();
+
+      Map<String, dynamic>? b;
+      try {
+        b = await widget.api.getCurrentShiftBookings();
+      } on WasherApiException catch (e) {
+        if (e.status != 404) rethrow;
+        b = {'bookings': <Map<String, dynamic>>[]};
+      }
 
       if (!mounted) return;
       setState(() {
         shift = s;
-        bookingsPayload = b;
+        bookingsPayload = b ?? {'bookings': <Map<String, dynamic>>[]};
         _lastUpdatedAt = DateTime.now();
         noAssignment = false;
+        upcomingAssignment = false;
         error = null;
       });
     } on WasherApiException catch (e) {
       if (!mounted) return;
 
       if (e.status == 404) {
-        setState(() {
-          noAssignment = true;
-          error = null;
-          shift = null;
-          bookingsPayload = null;
-          _lastUpdatedAt = DateTime.now();
-        });
+        try {
+          final fallbackShift = await _findTodayAssignedShift();
+
+          if (!mounted) return;
+
+          if (fallbackShift != null) {
+            setState(() {
+              shift = fallbackShift;
+              bookingsPayload = {'bookings': <Map<String, dynamic>>[]};
+              _lastUpdatedAt = DateTime.now();
+              noAssignment = false;
+              upcomingAssignment =
+                  (fallbackShift['_upcoming'] == true) ||
+                  ((fallbackShift['_normalizedStatus'] ?? '') == 'SCHEDULED');
+              error = null;
+            });
+          } else {
+            setState(() {
+              noAssignment = true;
+              upcomingAssignment = false;
+              error = null;
+              shift = null;
+              bookingsPayload = null;
+              _lastUpdatedAt = DateTime.now();
+            });
+          }
+        } catch (fallbackError) {
+          if (!mounted) return;
+          if (!silent) {
+            setState(() => error = fallbackError.toString());
+          }
+        }
       } else {
-        if (!silent) setState(() => error = e.toString());
+        if (!silent) {
+          setState(() => error = e.toString());
+        }
       }
     } catch (e) {
       if (!mounted) return;
@@ -137,6 +288,12 @@ class _ShiftPageState extends State<ShiftPage>
         return 2;
       case 'CANCELED':
         return 3;
+      case 'SCHEDULED':
+        return 4;
+      case 'PUBLISHED':
+        return 5;
+      case 'DRAFT':
+        return 6;
       default:
         return 9;
     }
@@ -173,6 +330,27 @@ class _ShiftPageState extends State<ShiftPage>
           bg: cs.errorContainer.withValues(alpha: 0.70),
           fg: cs.onErrorContainer,
         );
+      case 'SCHEDULED':
+        return _StatusUi(
+          label: 'Назначена',
+          icon: Icons.event_available_rounded,
+          bg: cs.secondaryContainer.withValues(alpha: 0.70),
+          fg: cs.onSecondaryContainer,
+        );
+      case 'PUBLISHED':
+        return _StatusUi(
+          label: 'Опубликована',
+          icon: Icons.verified_rounded,
+          bg: cs.secondaryContainer.withValues(alpha: 0.70),
+          fg: cs.onSecondaryContainer,
+        );
+      case 'DRAFT':
+        return _StatusUi(
+          label: 'Черновик',
+          icon: Icons.edit_note_rounded,
+          bg: cs.surfaceContainerHighest.withValues(alpha: 0.55),
+          fg: cs.onSurface,
+        );
       default:
         return _StatusUi(
           label: status,
@@ -203,20 +381,20 @@ class _ShiftPageState extends State<ShiftPage>
               if (error != null)
                 _YCard(
                   child: Padding(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(18),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Container(
-                          width: 52,
-                          height: 52,
+                          width: 56,
+                          height: 56,
                           decoration: BoxDecoration(
                             color: cs.error.withValues(alpha: 0.10),
-                            borderRadius: BorderRadius.circular(16),
+                            borderRadius: BorderRadius.circular(18),
                           ),
                           child: Icon(Icons.error_outline, color: cs.error),
                         ),
-                        const SizedBox(height: 10),
+                        const SizedBox(height: 12),
                         Text(
                           'Не удалось загрузить смену',
                           textAlign: TextAlign.center,
@@ -255,8 +433,8 @@ class _ShiftPageState extends State<ShiftPage>
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Container(
-                          width: 50,
-                          height: 50,
+                          width: 52,
+                          height: 52,
                           decoration: BoxDecoration(
                             color: cs.primary.withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(16),
@@ -302,8 +480,20 @@ class _ShiftPageState extends State<ShiftPage>
                     ),
                   ),
                 )
+              else if (shift != null)
+                ..._buildShift(context, cs)
               else
-                ..._buildShift(context, cs),
+                _YCard(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Text(
+                      'Нет данных по смене.',
+                      style: textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
             ],
           ),
         ),
@@ -314,7 +504,10 @@ class _ShiftPageState extends State<ShiftPage>
   List<Widget> _buildShift(BuildContext context, ColorScheme cs) {
     final textTheme = Theme.of(context).textTheme;
     final s = shift!;
-    final totals = (s['totals'] as Map).cast<String, dynamic>();
+
+    final totalsRaw = (s['totals'] as Map?)?.cast<String, dynamic>() ?? {};
+    final carsCompleted = totalsRaw['carsCompleted'] ?? 0;
+    final earningsRub = totalsRaw['earningsRub'] ?? 0;
 
     final rawBookings = (bookingsPayload?['bookings'] as List? ?? [])
         .cast<Map>()
@@ -338,19 +531,30 @@ class _ShiftPageState extends State<ShiftPage>
     final dfDate = DateFormat('dd.MM');
     final last = _lastUpdatedAt;
 
+    final start = DateTime.tryParse((s['startAt'] ?? '').toString())?.toLocal();
+    final end = DateTime.tryParse((s['endAt'] ?? '').toString())?.toLocal();
+    final bayId = s['bayId'] ?? s['plannedBayId'] ?? '—';
+    final normalizedStatus = (s['_normalizedStatus'] ?? s['status'] ?? '')
+        .toString();
+
+    final timeText = start == null
+        ? 'Время не указано'
+        : '${dfTime.format(start)}'
+              '${end != null ? '—${dfTime.format(end)}' : ''}';
+
     return [
       _YCard(
         child: Padding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(18),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                width: 52,
-                height: 52,
+                width: 54,
+                height: 54,
                 decoration: BoxDecoration(
                   color: cs.primary.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(18),
                 ),
                 child: Icon(Icons.work_outline_rounded, color: cs.primary),
               ),
@@ -360,34 +564,81 @@ class _ShiftPageState extends State<ShiftPage>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '${widget.store.name ?? 'Мойщик'} • Пост ${s['bayId']}',
+                      '${widget.store.name ?? 'Мойщик'} • Пост $bayId',
                       style: textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.w900,
                       ),
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      'Текущая рабочая смена и записи по вашему посту',
+                      upcomingAssignment
+                          ? 'Вам назначена смена на сегодня'
+                          : 'Текущая рабочая смена и записи по вашему посту',
                       style: textTheme.bodyMedium?.copyWith(
                         color: cs.onSurfaceVariant.withValues(alpha: 0.92),
                         fontWeight: FontWeight.w500,
                       ),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 14),
                     Wrap(
                       spacing: 10,
                       runSpacing: 10,
                       children: [
+                        _Pill(icon: Icons.schedule_rounded, text: timeText),
                         _Pill(
                           icon: Icons.local_car_wash_rounded,
-                          text: 'Помыл: ${totals['carsCompleted']}',
+                          text: 'Помыл: $carsCompleted',
                         ),
                         _Pill(
                           icon: Icons.payments_outlined,
-                          text: 'Заработал: ${totals['earningsRub']} ₽',
+                          text: 'Заработал: $earningsRub ₽',
                         ),
+                        _StatusBadge(statusUi: _statusUi(normalizedStatus, cs)),
                       ],
                     ),
+                    if (upcomingAssignment) ...[
+                      const SizedBox(height: 14),
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: cs.secondaryContainer.withValues(alpha: 0.42),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: cs.outlineVariant.withValues(alpha: 0.50),
+                          ),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              width: 34,
+                              height: 34,
+                              decoration: BoxDecoration(
+                                color: cs.onSecondaryContainer.withValues(
+                                  alpha: 0.10,
+                                ),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Icon(
+                                Icons.info_outline_rounded,
+                                size: 18,
+                                color: cs.onSecondaryContainer,
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                'Смена уже назначена на сегодня. Записи по посту появятся, когда смена станет текущей.',
+                                style: textTheme.bodyMedium?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                  color: cs.onSecondaryContainer,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 12),
                     Row(
                       children: [
@@ -446,8 +697,8 @@ class _ShiftPageState extends State<ShiftPage>
             child: Row(
               children: [
                 Container(
-                  width: 46,
-                  height: 46,
+                  width: 48,
+                  height: 48,
                   decoration: BoxDecoration(
                     color: cs.surfaceContainerHighest.withValues(alpha: 0.45),
                     borderRadius: BorderRadius.circular(14),
@@ -460,7 +711,9 @@ class _ShiftPageState extends State<ShiftPage>
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    'Пока нет записей по этому посту или смене.',
+                    upcomingAssignment
+                        ? 'Смена назначена, но записи появятся после начала текущей смены.'
+                        : 'Пока нет записей по этому посту или смене.',
                     style: textTheme.bodyMedium?.copyWith(
                       color: cs.onSurface.withValues(alpha: 0.78),
                       fontWeight: FontWeight.w700,
@@ -475,7 +728,7 @@ class _ShiftPageState extends State<ShiftPage>
         const SizedBox(height: 10),
         _YCard(
           child: Padding(
-            padding: const EdgeInsets.all(14),
+            padding: const EdgeInsets.all(16),
             child: _BookingTile(
               b: b,
               dfTime: dfTime,
@@ -503,6 +756,41 @@ class _StatusUi {
   });
 }
 
+class _StatusBadge extends StatelessWidget {
+  final _StatusUi statusUi;
+
+  const _StatusBadge({required this.statusUi});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: statusUi.bg,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.45)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(statusUi.icon, size: 16, color: statusUi.fg),
+          const SizedBox(width: 6),
+          Text(
+            statusUi.label,
+            style: textTheme.bodySmall?.copyWith(
+              color: statusUi.fg,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _BookingTile extends StatelessWidget {
   final Map<String, dynamic> b;
   final DateFormat dfTime;
@@ -521,17 +809,20 @@ class _BookingTile extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
 
-    final dt = DateTime.tryParse(b['dateTime'].toString())?.toLocal();
+    final dt = DateTime.tryParse((b['dateTime'] ?? '').toString())?.toLocal();
 
-    final car = (b['car'] as Map).cast<String, dynamic>();
-    final service = (b['service'] as Map).cast<String, dynamic>();
+    final car = (b['car'] as Map?)?.cast<String, dynamic>() ?? {};
+    final service = (b['service'] as Map?)?.cast<String, dynamic>() ?? {};
     final addons = (b['addons'] as List? ?? [])
         .cast<Map>()
         .map((x) => x.cast<String, dynamic>())
         .toList();
 
+    final plate = (car['plateDisplay'] ?? '').toString();
     final title =
-        '${dt != null ? dfTime.format(dt) : ''} • ${car['plateDisplay'] ?? ''}';
+        '${dt != null ? dfTime.format(dt) : ''}'
+        '${plate.isNotEmpty ? ' • $plate' : ''}';
+
     final subtitle = '${car['makeDisplay'] ?? ''} ${car['modelDisplay'] ?? ''}'
         .trim();
 
@@ -550,7 +841,7 @@ class _BookingTile extends StatelessWidget {
           children: [
             Expanded(
               child: Text(
-                title,
+                title.isEmpty ? 'Запись' : title,
                 style: textTheme.titleSmall?.copyWith(
                   fontWeight: FontWeight.w900,
                 ),
@@ -582,23 +873,26 @@ class _BookingTile extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: 6),
-        Text(
-          subtitle,
-          style: textTheme.bodyMedium?.copyWith(
-            color: cs.onSurface.withValues(alpha: 0.78),
-            fontWeight: FontWeight.w700,
+        if (subtitle.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Text(
+            subtitle,
+            style: textTheme.bodyMedium?.copyWith(
+              color: cs.onSurface.withValues(alpha: 0.78),
+              fontWeight: FontWeight.w700,
+            ),
           ),
-        ),
+        ],
         const SizedBox(height: 12),
         Wrap(
           spacing: 10,
           runSpacing: 10,
           children: [
-            _Pill(
-              icon: Icons.local_car_wash_rounded,
-              text: 'Услуга: ${service['name']}',
-            ),
+            if ((service['name'] ?? '').toString().isNotEmpty)
+              _Pill(
+                icon: Icons.local_car_wash_rounded,
+                text: 'Услуга: ${service['name']}',
+              ),
             if (addons.isNotEmpty)
               _Pill(
                 icon: Icons.add_circle_outline_rounded,
@@ -635,7 +929,19 @@ class _BookingTile extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(Icons.notes_rounded, color: cs.onSecondaryContainer),
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: cs.onSecondaryContainer.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    Icons.notes_rounded,
+                    size: 18,
+                    color: cs.onSecondaryContainer,
+                  ),
+                ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(

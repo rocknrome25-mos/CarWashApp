@@ -101,7 +101,7 @@ class _StatsPageState extends State<StatsPage>
 
     _introController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 500),
+      duration: const Duration(milliseconds: 520),
     );
 
     _fadeAnim = CurvedAnimation(
@@ -146,12 +146,12 @@ class _StatsPageState extends State<StatsPage>
             children: [
               _YCard(
                 child: Padding(
-                  padding: const EdgeInsets.all(14),
+                  padding: const EdgeInsets.all(16),
                   child: Row(
                     children: [
                       Container(
-                        width: 48,
-                        height: 48,
+                        width: 52,
+                        height: 52,
                         decoration: BoxDecoration(
                           color: cs.primary.withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(16),
@@ -274,6 +274,28 @@ class _StatsPageState extends State<StatsPage>
                 const SizedBox(height: 14),
               ],
 
+              Row(
+                children: [
+                  Expanded(
+                    child: _StatMiniCard(
+                      icon: Icons.local_car_wash_rounded,
+                      title: 'Помыл машин',
+                      value: '$cars',
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _StatMiniCard(
+                      icon: Icons.payments_outlined,
+                      title: 'Заработал',
+                      value: '$earn ₽',
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 14),
+
               _YCard(
                 child: Padding(
                   padding: const EdgeInsets.all(16),
@@ -331,6 +353,67 @@ class _StatsPageState extends State<StatsPage>
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _StatMiniCard extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String value;
+
+  const _StatMiniCard({
+    required this.icon,
+    required this.title,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
+        boxShadow: [
+          BoxShadow(
+            blurRadius: 16,
+            offset: const Offset(0, 8),
+            color: Colors.black.withValues(alpha: 0.05),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: cs.primary.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, size: 20, color: cs.primary),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            title,
+            style: textTheme.bodySmall?.copyWith(
+              color: cs.onSurface.withValues(alpha: 0.68),
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+          ),
+        ],
       ),
     );
   }

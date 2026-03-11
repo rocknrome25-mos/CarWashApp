@@ -47,28 +47,56 @@ class _ShellPageState extends State<ShellPage> {
     ];
 
     final titles = ['Часы', 'Моя смена', 'График', 'Статистика'];
+    final subtitles = [
+      'Табель и отметки смены',
+      'Текущая смена и записи',
+      'Предстоящие рабочие смены',
+      'Результаты и доход',
+    ];
 
     return Scaffold(
       appBar: AppBar(
+        toolbarHeight: 72,
         centerTitle: false,
+        titleSpacing: 16,
         title: AnimatedSwitcher(
           duration: const Duration(milliseconds: 180),
           transitionBuilder: (child, animation) {
             return FadeTransition(opacity: animation, child: child);
           },
-          child: Text(
-            titles[index],
-            key: ValueKey(titles[index]),
-            style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+          child: Column(
+            key: ValueKey(index),
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                titles[index],
+                style: textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                subtitles[index],
+                style: textTheme.bodySmall?.copyWith(
+                  color: cs.onSurface.withValues(alpha: 0.65),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
           ),
         ),
         actions: [
           Padding(
-            padding: const EdgeInsets.only(right: 8),
+            padding: const EdgeInsets.only(right: 10),
             child: IconButton.filledTonal(
               onPressed: _logout,
               icon: const Icon(Icons.logout_rounded),
               tooltip: 'Выйти',
+              style: IconButton.styleFrom(
+                backgroundColor: cs.errorContainer.withValues(alpha: 0.55),
+                foregroundColor: cs.onErrorContainer,
+              ),
             ),
           ),
         ],
@@ -101,42 +129,61 @@ class _ShellPageState extends State<ShellPage> {
           child: Container(
             decoration: BoxDecoration(
               color: Theme.of(context).cardColor,
-              borderRadius: BorderRadius.circular(24),
+              borderRadius: BorderRadius.circular(26),
               border: Border.all(
                 color: cs.outlineVariant.withValues(alpha: 0.55),
               ),
               boxShadow: [
                 BoxShadow(
-                  blurRadius: 18,
-                  offset: const Offset(0, 8),
+                  blurRadius: 20,
+                  offset: const Offset(0, 10),
                   color: Colors.black.withValues(alpha: 0.06),
                 ),
               ],
             ),
-            child: NavigationBar(
-              selectedIndex: index,
-              backgroundColor: Colors.transparent,
-              indicatorColor: cs.primary.withValues(alpha: 0.14),
-              labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-              onDestinationSelected: (v) => setState(() => index = v),
-              destinations: const [
-                NavigationDestination(
-                  icon: Icon(Icons.access_time_rounded),
-                  label: 'Часы',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.work_outline_rounded),
-                  label: 'Смена',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.calendar_month_outlined),
-                  label: 'График',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.bar_chart_outlined),
-                  label: 'Статистика',
-                ),
-              ],
+            child: NavigationBarTheme(
+              data: NavigationBarThemeData(
+                height: 74,
+                backgroundColor: Colors.transparent,
+                indicatorColor: cs.primary.withValues(alpha: 0.14),
+                labelTextStyle: WidgetStateProperty.resolveWith((states) {
+                  final selected = states.contains(WidgetState.selected);
+                  return textTheme.labelMedium?.copyWith(
+                    fontWeight: selected ? FontWeight.w800 : FontWeight.w700,
+                    color: selected
+                        ? cs.onSurface
+                        : cs.onSurface.withValues(alpha: 0.72),
+                  );
+                }),
+              ),
+              child: NavigationBar(
+                selectedIndex: index,
+                backgroundColor: Colors.transparent,
+                labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+                onDestinationSelected: (v) => setState(() => index = v),
+                destinations: const [
+                  NavigationDestination(
+                    icon: Icon(Icons.access_time_rounded),
+                    selectedIcon: Icon(Icons.access_time_filled_rounded),
+                    label: 'Часы',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.work_outline_rounded),
+                    selectedIcon: Icon(Icons.work_rounded),
+                    label: 'Смена',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.calendar_month_outlined),
+                    selectedIcon: Icon(Icons.calendar_month_rounded),
+                    label: 'График',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.bar_chart_outlined),
+                    selectedIcon: Icon(Icons.bar_chart_rounded),
+                    label: 'Статистика',
+                  ),
+                ],
+              ),
             ),
           ),
         ),
