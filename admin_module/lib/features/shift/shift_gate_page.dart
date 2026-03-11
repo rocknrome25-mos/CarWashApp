@@ -40,29 +40,66 @@ class _ShiftGatePageState extends State<ShiftGatePage> {
 
   Future<int?> _askOpenFloat() async {
     final ctrl = TextEditingController(text: '0');
+
     return showDialog<int>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => AlertDialog(
-        title: const Text('Наличные в кассе на начало смены'),
-        content: TextField(
-          controller: ctrl,
-          keyboardType: TextInputType.number,
-          decoration: const InputDecoration(labelText: 'Сумма (₽)'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(null),
-            child: const Text('Отмена'),
+      builder: (ctx) {
+        final cs = Theme.of(ctx).colorScheme;
+
+        return AlertDialog(
+          title: const Text('Наличные на начало смены'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: cs.surfaceContainerHighest.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: cs.outlineVariant.withValues(alpha: 0.55),
+                  ),
+                ),
+                child: Text(
+                  'Укажи сумму наличных, которая остаётся в кассе на старте смены.',
+                  style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: cs.onSurface.withValues(alpha: 0.75),
+                    height: 1.3,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: ctrl,
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                  labelText: 'Сумма (₽)',
+                  hintText: 'Например: 1500',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  filled: true,
+                  fillColor: cs.surfaceContainerHighest.withValues(alpha: 0.10),
+                ),
+              ),
+            ],
           ),
-          ElevatedButton(
-            onPressed: () => Navigator.of(context).pop(
-              int.tryParse(ctrl.text.trim()),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(null),
+              child: const Text('Отмена'),
             ),
-            child: const Text('Сохранить'),
-          ),
-        ],
-      ),
+            FilledButton(
+              onPressed: () =>
+                  Navigator.of(ctx).pop(int.tryParse(ctrl.text.trim())),
+              child: const Text('Сохранить'),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -82,7 +119,9 @@ class _ShiftGatePageState extends State<ShiftGatePage> {
       if (_cashEnabled) {
         final openFloat = await _askOpenFloat();
         if (openFloat == null) {
-          throw Exception('Нужно указать сумму наличных в кассе на начало смены');
+          throw Exception(
+            'Нужно указать сумму наличных в кассе на начало смены',
+          );
         }
         await widget.api.cashOpenFloat(
           session.userId,
@@ -95,7 +134,8 @@ class _ShiftGatePageState extends State<ShiftGatePage> {
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
-          builder: (_) => ShellPage(api: widget.api, store: widget.store, session: session),
+          builder: (_) =>
+              ShellPage(api: widget.api, store: widget.store, session: session),
         ),
       );
     } catch (e) {
@@ -106,6 +146,67 @@ class _ShiftGatePageState extends State<ShiftGatePage> {
     }
   }
 
+  Widget _infoCard({
+    required BuildContext context,
+    required IconData icon,
+    required String title,
+    required String value,
+  }) {
+    final cs = Theme.of(context).colorScheme;
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
+        boxShadow: [
+          BoxShadow(
+            blurRadius: 10,
+            offset: const Offset(0, 6),
+            color: Colors.black.withValues(alpha: 0.04),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: cs.primary.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(icon, color: cs.primary),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: cs.onSurface.withValues(alpha: 0.65),
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  value,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    color: cs.onSurface.withValues(alpha: 0.95),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final shiftId = session.activeShiftId;
@@ -114,33 +215,195 @@ class _ShiftGatePageState extends State<ShiftGatePage> {
       return ShellPage(api: widget.api, store: widget.store, session: session);
     }
 
-    final locationTitle =
-        (session.locationName ?? '').trim().isNotEmpty ? session.locationName!.trim() : session.locationId;
+    final cs = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final bottomInset = MediaQuery.of(context).padding.bottom;
+
+    final locationTitle = (session.locationName ?? '').trim().isNotEmpty
+        ? session.locationName!.trim()
+        : session.locationId;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Смена'),
         actions: [
-          IconButton(onPressed: _logout, icon: const Icon(Icons.logout)),
+          IconButton(
+            tooltip: 'Выйти',
+            onPressed: loading ? null : _logout,
+            icon: const Icon(Icons.logout),
+          ),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+      body: SafeArea(
+        child: ListView(
+          padding: EdgeInsets.fromLTRB(16, 12, 16, 16 + bottomInset + 8),
           children: [
-            Text('Админ: ${session.phone}'),
-            Text('Локация: $locationTitle'),
-            const SizedBox(height: 12),
-            if (error != null) Text(error!, style: const TextStyle(color: Colors.red)),
-            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: cs.surfaceContainerHighest.withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(
+                  color: cs.outlineVariant.withValues(alpha: 0.45),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    blurRadius: 16,
+                    offset: const Offset(0, 6),
+                    color: Colors.black.withValues(alpha: 0.04),
+                  ),
+                ],
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: cs.primary.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: cs.primary.withValues(alpha: 0.18),
+                      ),
+                    ),
+                    child: Icon(Icons.schedule_rounded, color: cs.primary),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Открытие смены',
+                          style: textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w900,
+                            color: cs.onSurface.withValues(alpha: 0.96),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          _cashEnabled
+                              ? 'После открытия смены система попросит указать наличные на начало работы.'
+                              : 'Смена откроется сразу после подтверждения.',
+                          style: textTheme.bodySmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                            color: cs.onSurface.withValues(alpha: 0.66),
+                            height: 1.3,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 14),
+
+            _infoCard(
+              context: context,
+              icon: Icons.phone_iphone,
+              title: 'Администратор',
+              value: session.phone,
+            ),
+
+            const SizedBox(height: 10),
+
+            _infoCard(
+              context: context,
+              icon: Icons.location_on_outlined,
+              title: 'Локация',
+              value: locationTitle,
+            ),
+
+            const SizedBox(height: 14),
+
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: cs.surface,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(
+                  color: cs.outlineVariant.withValues(alpha: 0.55),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    _cashEnabled ? Icons.payments_outlined : Icons.info_outline,
+                    color: cs.primary,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      _cashEnabled
+                          ? 'Кассовый режим включён'
+                          : 'Кассовый режим отключён',
+                      style: textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: cs.onSurface.withValues(alpha: 0.90),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            if (error != null) ...[
+              const SizedBox(height: 14),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Colors.red.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: Colors.red.withValues(alpha: 0.35)),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(Icons.error_outline_rounded, color: Colors.red),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        error!,
+                        style: textTheme.bodyMedium?.copyWith(
+                          color: cs.onSurface.withValues(alpha: 0.90),
+                          fontWeight: FontWeight.w700,
+                          height: 1.3,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
+            const SizedBox(height: 18),
+
             SizedBox(
               width: double.infinity,
-              child: ElevatedButton(
+              height: 54,
+              child: FilledButton.icon(
                 onPressed: loading ? null : _openShift,
-                child: loading
-                    ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator())
-                    : const Text('Открыть смену'),
+                style: FilledButton.styleFrom(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                ),
+                icon: loading
+                    ? const SizedBox(
+                        height: 18,
+                        width: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.play_arrow_rounded),
+                label: Text(
+                  loading ? 'Открываем...' : 'Открыть смену',
+                  style: textTheme.labelLarge?.copyWith(
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
               ),
             ),
           ],

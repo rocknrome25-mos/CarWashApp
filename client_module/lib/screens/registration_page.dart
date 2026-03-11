@@ -33,7 +33,6 @@ class _RegistrationPageState extends State<RegistrationPage> {
     final s = raw.trim();
     final digits = s.replaceAll(RegExp(r'\D'), '');
 
-    // нормализуем к +7XXXXXXXXXX (как на бэке)
     if (digits.length == 10) return '+7$digits';
     if (digits.length == 11 && digits.startsWith('8')) {
       return '+7${digits.substring(1)}';
@@ -116,7 +115,7 @@ class _RegistrationPageState extends State<RegistrationPage> {
       );
 
       if (!mounted) return;
-      Navigator.of(context).pop(true); // ✅ успех (авторизация для демо)
+      Navigator.of(context).pop(true);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -139,22 +138,29 @@ class _RegistrationPageState extends State<RegistrationPage> {
     required IconData icon,
     required String label,
   }) {
+    final cs = Theme.of(context).colorScheme;
     final selected = _gender == value;
 
     return Expanded(
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 140),
+        duration: const Duration(milliseconds: 160),
         child: OutlinedButton.icon(
-          onPressed: () => setState(() => _gender = value),
+          onPressed: _saving ? null : () => setState(() => _gender = value),
           icon: Icon(icon),
           label: Text(label),
           style: OutlinedButton.styleFrom(
-            minimumSize: const Size(0, 48),
+            minimumSize: const Size(0, 52),
+            backgroundColor: selected
+                ? cs.primary.withValues(alpha: 0.08)
+                : Theme.of(context).cardColor,
             side: BorderSide(
-              width: selected ? 2 : 1,
+              width: selected ? 1.8 : 1,
               color: selected
-                  ? Theme.of(context).colorScheme.primary
-                  : Colors.black.withValues(alpha: 0.18),
+                  ? cs.primary
+                  : cs.outlineVariant.withValues(alpha: 0.65),
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
             ),
           ),
         ),
@@ -164,24 +170,98 @@ class _RegistrationPageState extends State<RegistrationPage> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
     final birthText = _birthDate == null ? 'Не указана' : _fmtDate(_birthDate!);
+    final bottomInset = MediaQuery.of(context).padding.bottom;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Регистрация')),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
+      body: SafeArea(
         child: Form(
           key: _formKey,
-          child: Column(
+          child: ListView(
+            padding: EdgeInsets.fromLTRB(16, 12, 16, 16 + bottomInset + 8),
             children: [
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: cs.surfaceContainerHighest.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(22),
+                  border: Border.all(
+                    color: cs.outlineVariant.withValues(alpha: 0.45),
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      blurRadius: 18,
+                      offset: const Offset(0, 8),
+                      color: Colors.black.withValues(alpha: 0.06),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 46,
+                      height: 46,
+                      decoration: BoxDecoration(
+                        color: cs.primary.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(15),
+                        border: Border.all(
+                          color: cs.primary.withValues(alpha: 0.18),
+                        ),
+                      ),
+                      child: Icon(
+                        Icons.person_add_alt_1_rounded,
+                        color: cs.primary,
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.only(top: 1),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Создать профиль',
+                              style: textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w900,
+                                color: cs.onSurface.withValues(alpha: 0.96),
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Укажи основные данные, чтобы продолжить и записываться на услуги.',
+                              style: textTheme.bodySmall?.copyWith(
+                                color: cs.onSurface.withValues(alpha: 0.66),
+                                fontWeight: FontWeight.w600,
+                                height: 1.3,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 16),
+
               TextFormField(
                 controller: _phoneCtrl,
                 keyboardType: TextInputType.phone,
                 textInputAction: TextInputAction.next,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Телефон',
                   hintText: '+7 999 123-45-67',
-                  border: OutlineInputBorder(),
+                  border: const OutlineInputBorder(),
+                  filled: true,
+                  fillColor: Theme.of(
+                    context,
+                  ).cardColor.withValues(alpha: 0.92),
                 ),
                 validator: (v) {
                   final s = (v ?? '').trim();
@@ -189,119 +269,181 @@ class _RegistrationPageState extends State<RegistrationPage> {
                   return null;
                 },
               ),
+
               const SizedBox(height: 12),
+
               TextFormField(
                 controller: _nameCtrl,
                 textInputAction: TextInputAction.done,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Имя (необязательно)',
-                  border: OutlineInputBorder(),
+                  border: const OutlineInputBorder(),
+                  filled: true,
+                  fillColor: Theme.of(
+                    context,
+                  ).cardColor.withValues(alpha: 0.92),
                 ),
               ),
-              const SizedBox(height: 12),
 
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  'Пол',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w900,
-                    color: Colors.black.withValues(alpha: 0.85),
-                  ),
+              const SizedBox(height: 16),
+
+              Text(
+                'Пол',
+                style: textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w900,
+                  color: cs.onSurface.withValues(alpha: 0.92),
                 ),
               ),
-              const SizedBox(height: 8),
+
+              const SizedBox(height: 10),
+
               Row(
                 children: [
                   _genderButton(
                     value: Gender.male,
-                    icon: Icons.male,
+                    icon: Icons.male_rounded,
                     label: 'Муж',
                   ),
                   const SizedBox(width: 10),
                   _genderButton(
                     value: Gender.female,
-                    icon: Icons.female,
+                    icon: Icons.female_rounded,
                     label: 'Жен',
                   ),
                 ],
               ),
 
-              const SizedBox(height: 12),
+              const SizedBox(height: 16),
 
-              InkWell(
-                onTap: _saving ? null : _pickBirthDate,
-                borderRadius: BorderRadius.circular(12),
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 14,
-                  ),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: Colors.black.withValues(alpha: 0.20),
+              Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: _saving ? null : _pickBirthDate,
+                  borderRadius: BorderRadius.circular(18),
+                  child: Ink(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 14,
                     ),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.cake_outlined),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          'Дата рождения: $birthText',
-                          style: const TextStyle(fontWeight: FontWeight.w700),
-                        ),
+                    decoration: BoxDecoration(
+                      color: Theme.of(
+                        context,
+                      ).cardColor.withValues(alpha: 0.92),
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(
+                        color: cs.outlineVariant.withValues(alpha: 0.55),
                       ),
-                      const Icon(Icons.chevron_right),
-                    ],
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 42,
+                          height: 42,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(14),
+                            color: cs.surfaceContainerHighest.withValues(
+                              alpha: 0.22,
+                            ),
+                          ),
+                          child: Icon(
+                            Icons.cake_outlined,
+                            color: cs.onSurface.withValues(alpha: 0.82),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Дата рождения',
+                                style: textTheme.bodySmall?.copyWith(
+                                  color: cs.onSurface.withValues(alpha: 0.65),
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                birthText,
+                                style: textTheme.bodyLarge?.copyWith(
+                                  fontWeight: FontWeight.w800,
+                                  color: cs.onSurface.withValues(alpha: 0.94),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Icon(
+                          Icons.chevron_right_rounded,
+                          color: cs.onSurface.withValues(alpha: 0.55),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
 
-              const SizedBox(height: 12),
+              const SizedBox(height: 16),
 
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Checkbox(
-                    value: _agree,
-                    onChanged: _saving
-                        ? null
-                        : (v) => setState(() => _agree = v ?? false),
+              Container(
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                decoration: BoxDecoration(
+                  color: cs.surfaceContainerHighest.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                    color: cs.outlineVariant.withValues(alpha: 0.45),
                   ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: _saving
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Checkbox(
+                      value: _agree,
+                      onChanged: _saving
                           ? null
-                          : () => setState(() => _agree = !_agree),
-                      child: const Padding(
-                        padding: EdgeInsets.only(top: 12),
-                        child: Text(
-                          'Я согласен(на) с условиями использования приложения и обработкой персональных данных.',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            height: 1.2,
+                          : (v) => setState(() => _agree = v ?? false),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: _saving
+                            ? null
+                            : () => setState(() => _agree = !_agree),
+                        child: Padding(
+                          padding: const EdgeInsets.only(top: 11),
+                          child: Text(
+                            'Я согласен(на) с условиями использования приложения и обработкой персональных данных.',
+                            style: textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.w700,
+                              height: 1.3,
+                              color: cs.onSurface.withValues(alpha: 0.88),
+                            ),
                           ),
                         ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
 
-              const Spacer(),
+              const SizedBox(height: 22),
 
               SizedBox(
                 width: double.infinity,
-                height: 52,
+                height: 54,
                 child: FilledButton.icon(
                   onPressed: _saving ? null : _submit,
-                  icon: const Icon(Icons.check_circle_outline),
+                  icon: const Icon(Icons.check_circle_outline_rounded),
                   label: Text(
                     _saving ? 'Сохраняю...' : 'Зарегистрироваться / Продолжить',
+                    style: textTheme.labelLarge?.copyWith(
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  style: FilledButton.styleFrom(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(18),
+                    ),
                   ),
                 ),
               ),

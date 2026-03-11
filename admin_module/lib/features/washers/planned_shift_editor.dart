@@ -42,6 +42,7 @@ class PlannedShiftEditor {
       if (d == null) return null;
 
       final t = await showTimePicker(
+        // ignore: use_build_context_synchronously
         context: ctx,
         initialTime: TimeOfDay.fromDateTime(initial),
         helpText: title,

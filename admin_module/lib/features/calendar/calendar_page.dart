@@ -230,7 +230,6 @@ class _CalendarPageState extends State<CalendarPage> {
     final shiftId = widget.session.activeShiftId ?? '';
     if (shiftId.isEmpty) return;
 
-    // capture messenger BEFORE async gap
     final messenger = ScaffoldMessenger.of(context);
 
     try {
@@ -255,7 +254,6 @@ class _CalendarPageState extends State<CalendarPage> {
     final shiftId = widget.session.activeShiftId ?? '';
     if (shiftId.isEmpty) return;
 
-    // capture messenger BEFORE async gap
     final messenger = ScaffoldMessenger.of(context);
 
     try {
@@ -269,7 +267,7 @@ class _CalendarPageState extends State<CalendarPage> {
       final handoverCtrl = TextEditingController(text: '0');
       final noteCtrl = TextEditingController(text: '');
 
-      String lastEdited = 'keep'; // 'keep' or 'handover'
+      String lastEdited = 'keep';
 
       void recalcFromKeep() {
         final counted = int.tryParse(countedCtrl.text.trim()) ?? 0;
@@ -299,6 +297,24 @@ class _CalendarPageState extends State<CalendarPage> {
             builder: (ctx, setStateDialog) {
               final counted = int.tryParse(countedCtrl.text.trim()) ?? 0;
               final diff = counted - expectedRub;
+              final cs = Theme.of(ctx).colorScheme;
+
+              InputDecoration input(String label) {
+                return InputDecoration(
+                  labelText: label,
+                  filled: true,
+                  fillColor: cs.surfaceContainerHighest.withValues(alpha: 0.12),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide(
+                      color: cs.outlineVariant.withValues(alpha: 0.55),
+                    ),
+                  ),
+                );
+              }
 
               return AlertDialog(
                 title: const Text('Закрытие кассы'),
@@ -312,7 +328,7 @@ class _CalendarPageState extends State<CalendarPage> {
                           ),
                           Text(
                             '$expectedRub ₽',
-                            style: const TextStyle(fontWeight: FontWeight.w600),
+                            style: const TextStyle(fontWeight: FontWeight.w700),
                           ),
                         ],
                       ),
@@ -325,19 +341,17 @@ class _CalendarPageState extends State<CalendarPage> {
                           Text(
                             '${diff >= 0 ? '+' : ''}$diff ₽',
                             style: TextStyle(
-                              fontWeight: FontWeight.w600,
+                              fontWeight: FontWeight.w700,
                               color: diff == 0 ? Colors.green : Colors.red,
                             ),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 14),
                       TextField(
                         controller: countedCtrl,
                         keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Фактически в кассе (₽)',
-                        ),
+                        decoration: input('Фактически в кассе (₽)'),
                         onChanged: (_) {
                           if (lastEdited == 'handover') {
                             recalcFromHandover();
@@ -351,32 +365,28 @@ class _CalendarPageState extends State<CalendarPage> {
                       TextField(
                         controller: keepCtrl,
                         keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Оставить в кассе (перенос) (₽)',
-                        ),
+                        decoration: input('Оставить в кассе (перенос) (₽)'),
                         onChanged: (_) {
                           lastEdited = 'keep';
                           recalcFromKeep();
                           setStateDialog(() {});
                         },
                       ),
+                      const SizedBox(height: 10),
                       TextField(
                         controller: handoverCtrl,
                         keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Сдать инкассатору/владельцу (₽)',
-                        ),
+                        decoration: input('Сдать инкассатору/владельцу (₽)'),
                         onChanged: (_) {
                           lastEdited = 'handover';
                           recalcFromHandover();
                           setStateDialog(() {});
                         },
                       ),
+                      const SizedBox(height: 10),
                       TextField(
                         controller: noteCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'Комментарий (необязательно)',
-                        ),
+                        decoration: input('Комментарий (необязательно)'),
                       ),
                     ],
                   ),
@@ -515,6 +525,7 @@ class _CalendarPageState extends State<CalendarPage> {
   }
 
   Widget _bayCard(int bayNumber) {
+    final cs = Theme.of(context).colorScheme;
     final isOpen = bayIsActive[bayNumber] ?? true;
 
     final statusText = isOpen ? 'ОТКРЫТ' : 'ЗАКРЫТ';
@@ -522,39 +533,62 @@ class _CalendarPageState extends State<CalendarPage> {
     final statusColor = isOpen ? Colors.green : Colors.red;
 
     final btnText = isOpen ? 'Закрыть пост' : 'Открыть пост';
-    final btnIcon = isOpen ? Icons.lock : Icons.lock_open;
+    final btnIcon = isOpen ? Icons.lock_outline : Icons.lock_open;
 
     final button = isOpen
         ? OutlinedButton.icon(
             onPressed: loading ? null : () => _toggleBayCard(bayNumber),
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size.fromHeight(46),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+            ),
             icon: Icon(btnIcon),
             label: Text(btnText),
           )
         : FilledButton.icon(
             onPressed: loading ? null : () => _toggleBayCard(bayNumber),
+            style: FilledButton.styleFrom(
+              minimumSize: const Size.fromHeight(46),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+            ),
             icon: Icon(btnIcon),
             label: Text(btnText),
           );
 
     return Expanded(
       child: Container(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
+          borderRadius: BorderRadius.circular(20),
+          color: cs.surfaceContainerHighest.withValues(alpha: 0.18),
+          border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
+          boxShadow: [
+            BoxShadow(
+              blurRadius: 14,
+              offset: const Offset(0, 6),
+              color: Colors.black.withValues(alpha: 0.05),
+            ),
+          ],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               'Пост $bayNumber',
-              style: const TextStyle(fontWeight: FontWeight.w900),
+              style: const TextStyle(
+                fontWeight: FontWeight.w900,
+                fontSize: 15,
+              ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             Row(
               children: [
                 Icon(statusIcon, color: statusColor),
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
                 Text(
                   statusText,
                   style: TextStyle(
@@ -564,7 +598,7 @@ class _CalendarPageState extends State<CalendarPage> {
                 ),
               ],
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
             SizedBox(width: double.infinity, child: button),
           ],
         ),
@@ -573,7 +607,13 @@ class _CalendarPageState extends State<CalendarPage> {
   }
 
   Widget _baysRow() {
-    return Row(children: [_bayCard(1), const SizedBox(width: 10), _bayCard(2)]);
+    return Row(
+      children: [
+        _bayCard(1),
+        const SizedBox(width: 10),
+        _bayCard(2),
+      ],
+    );
   }
 
   // ---------------- booking row ----------------
@@ -612,7 +652,7 @@ class _CalendarPageState extends State<CalendarPage> {
 
     Widget statusPill() {
       return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
           color: statusColor.withValues(alpha: 0.14),
           borderRadius: BorderRadius.circular(999),
@@ -630,6 +670,7 @@ class _CalendarPageState extends State<CalendarPage> {
     }
 
     return InkWell(
+      borderRadius: BorderRadius.circular(20),
       onTap: () async {
         await showModalBottomSheet(
           context: context,
@@ -643,12 +684,19 @@ class _CalendarPageState extends State<CalendarPage> {
         );
       },
       child: Container(
-        margin: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-        padding: const EdgeInsets.all(14),
+        margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: cs.surface.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
+          borderRadius: BorderRadius.circular(20),
+          color: cs.surface,
+          border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
+          boxShadow: [
+            BoxShadow(
+              blurRadius: 12,
+              offset: const Offset(0, 5),
+              color: Colors.black.withValues(alpha: 0.05),
+            ),
+          ],
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -662,12 +710,12 @@ class _CalendarPageState extends State<CalendarPage> {
                     time,
                     style: const TextStyle(fontWeight: FontWeight.w900),
                   ),
-                  const SizedBox(height: 2),
+                  const SizedBox(height: 4),
                   Text(
                     serviceName,
                     style: const TextStyle(fontWeight: FontWeight.w800),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 10),
                   Text(
                     clientTitle,
                     style: const TextStyle(fontWeight: FontWeight.w800),
@@ -691,7 +739,7 @@ class _CalendarPageState extends State<CalendarPage> {
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   _postWithRequestedDot(b),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 8),
                   statusPill(),
                 ],
               ),
@@ -813,7 +861,7 @@ class _CalendarPageState extends State<CalendarPage> {
                 if (!mounted) return;
 
                 final time = await showTimePicker(
-                  context: context, // ✅ вместо ctx
+                  context: context,
                   initialTime: TimeOfDay.fromDateTime(selectedLocal),
                 );
                 if (time == null) return;
@@ -833,7 +881,6 @@ class _CalendarPageState extends State<CalendarPage> {
                 if (converting) return;
                 setSheet(() => converting = true);
 
-                // capture messenger BEFORE async gap (fix lint)
                 final messenger = ScaffoldMessenger.of(context);
 
                 try {
@@ -889,14 +936,14 @@ class _CalendarPageState extends State<CalendarPage> {
                     const SizedBox(height: 10),
                     Container(
                       width: double.infinity,
-                      padding: const EdgeInsets.all(12),
+                      padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(14),
+                        borderRadius: BorderRadius.circular(18),
                         border: Border.all(
-                          color: cs.outlineVariant.withValues(alpha: 0.6),
+                          color: cs.outlineVariant.withValues(alpha: 0.5),
                         ),
                         color: cs.surfaceContainerHighest.withValues(
-                          alpha: 0.18,
+                          alpha: 0.16,
                         ),
                       ),
                       child: Column(
@@ -939,6 +986,12 @@ class _CalendarPageState extends State<CalendarPage> {
                         Expanded(
                           child: OutlinedButton.icon(
                             onPressed: converting ? null : pickDateTime,
+                            style: OutlinedButton.styleFrom(
+                              minimumSize: const Size.fromHeight(50),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                            ),
                             icon: const Icon(Icons.schedule),
                             label: Text(dtLabel()),
                           ),
@@ -970,6 +1023,12 @@ class _CalendarPageState extends State<CalendarPage> {
                       width: double.infinity,
                       child: FilledButton.icon(
                         onPressed: converting ? null : convert,
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size.fromHeight(50),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                        ),
                         icon: converting
                             ? const SizedBox(
                                 width: 18,
@@ -996,14 +1055,17 @@ class _CalendarPageState extends State<CalendarPage> {
   }
 
   Widget _waitlistSection() {
+    final cs = Theme.of(context).colorScheme;
+
     if (waitlist.isEmpty) return const SizedBox.shrink();
 
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 12, 12, 6),
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
+        borderRadius: BorderRadius.circular(20),
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.12),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.5)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1013,16 +1075,30 @@ class _CalendarPageState extends State<CalendarPage> {
               const Expanded(
                 child: Text(
                   'Ожидание',
-                  style: TextStyle(fontWeight: FontWeight.w900),
+                  style: TextStyle(
+                    fontWeight: FontWeight.w900,
+                    fontSize: 15,
+                  ),
                 ),
               ),
-              Text(
-                '${waitlist.length}',
-                style: const TextStyle(fontWeight: FontWeight.w900),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(999),
+                  color: cs.surface,
+                  border: Border.all(
+                    color: cs.outlineVariant.withValues(alpha: 0.45),
+                  ),
+                ),
+                child: Text(
+                  '${waitlist.length}',
+                  style: const TextStyle(fontWeight: FontWeight.w900),
+                ),
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           ...waitlist.map((x) {
             final w = x as Map<String, dynamic>;
 
@@ -1042,11 +1118,13 @@ class _CalendarPageState extends State<CalendarPage> {
 
             return Container(
               margin: const EdgeInsets.only(bottom: 10),
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(13),
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
-                color: Colors.black.withValues(alpha: 0.02),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: cs.outlineVariant.withValues(alpha: 0.45),
+                ),
+                color: cs.surface,
               ),
               child: Row(
                 children: [
@@ -1068,7 +1146,7 @@ class _CalendarPageState extends State<CalendarPage> {
                           carLine,
                           style: TextStyle(
                             fontSize: 12,
-                            color: Colors.black.withValues(alpha: 0.70),
+                            color: cs.onSurface.withValues(alpha: 0.70),
                             fontWeight: FontWeight.w700,
                           ),
                         ),
@@ -1085,6 +1163,11 @@ class _CalendarPageState extends State<CalendarPage> {
                     onPressed: loading
                         ? null
                         : () => _openWaitlistConvertSheet(w),
+                    style: FilledButton.styleFrom(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
                     child: const Text('В очередь'),
                   ),
                 ],
@@ -1096,67 +1179,158 @@ class _CalendarPageState extends State<CalendarPage> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final shiftId = widget.session.activeShiftId ?? '';
+  Widget _headerCard() {
+    final cs = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(_ruTitle()),
-        actions: [
-          IconButton(
-            tooltip: 'Вчера',
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.5)),
+        boxShadow: [
+          BoxShadow(
+            blurRadius: 14,
+            offset: const Offset(0, 6),
+            color: Colors.black.withValues(alpha: 0.04),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: cs.primary.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: cs.primary.withValues(alpha: 0.18)),
+            ),
+            child: Icon(Icons.calendar_month_rounded, color: cs.primary),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _ruTitle(),
+                  style: textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    color: cs.onSurface.withValues(alpha: 0.96),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Управление сменой, постами и записями клиентов.',
+                  style: textTheme.bodySmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: cs.onSurface.withValues(alpha: 0.66),
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _toolbarCard() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          OutlinedButton.icon(
             onPressed: () => _shiftDay(-1),
             icon: const Icon(Icons.chevron_left),
+            label: const Text('Вчера'),
           ),
-          IconButton(
-            tooltip: 'Сегодня',
+          OutlinedButton.icon(
             onPressed: () {
               setState(() => selectedDay = DateTime.now());
               _loadAll();
             },
             icon: const Icon(Icons.today),
+            label: const Text('Сегодня'),
           ),
-          IconButton(
-            tooltip: 'Завтра',
+          OutlinedButton.icon(
             onPressed: () => _shiftDay(1),
             icon: const Icon(Icons.chevron_right),
+            label: const Text('Завтра'),
           ),
-          IconButton(icon: const Icon(Icons.refresh), onPressed: _loadAll),
-          TextButton(
+          IconButton(
+            tooltip: 'Обновить',
+            onPressed: _loadAll,
+            icon: const Icon(Icons.refresh),
+          ),
+          FilledButton(
             onPressed: _closeShift,
             child: const Text('Закрыть смену'),
           ),
-          const SizedBox(width: 8),
         ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final shiftId = widget.session.activeShiftId ?? '';
+    final cs = Theme.of(context).colorScheme;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Календарь'),
       ),
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : error != null
-          ? Center(
-              child: Text(error!, style: const TextStyle(color: Colors.red)),
-            )
-          : Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-                  child: _baysRow(),
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Text(
+                      error!,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.red),
+                    ),
+                  ),
+                )
+              : Column(
+                  children: [
+                    _headerCard(),
+                    _toolbarCard(),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+                      child: _baysRow(),
+                    ),
+                    _waitlistSection(),
+                    const SizedBox(height: 6),
+                    Expanded(
+                      child: bookings.isEmpty
+                          ? Center(
+                              child: Text(
+                                'Нет записей',
+                                style: TextStyle(
+                                  color: cs.onSurface.withValues(alpha: 0.70),
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            )
+                          : ListView.builder(
+                              itemCount: bookings.length,
+                              itemBuilder: (context, i) {
+                                final b = bookings[i] as Map<String, dynamic>;
+                                return _bookingRow(b);
+                              },
+                            ),
+                    ),
+                  ],
                 ),
-                _waitlistSection(),
-                const SizedBox(height: 6),
-                Expanded(
-                  child: bookings.isEmpty
-                      ? const Center(child: Text('Нет записей'))
-                      : ListView.builder(
-                          itemCount: bookings.length,
-                          itemBuilder: (context, i) {
-                            final b = bookings[i] as Map<String, dynamic>;
-                            return _bookingRow(b);
-                          },
-                        ),
-                ),
-              ],
-            ),
       bottomNavigationBar: Padding(
         padding: const EdgeInsets.all(8),
         child: Text(

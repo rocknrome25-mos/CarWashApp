@@ -1,5 +1,3 @@
-import 'dart:io' show Platform;
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:intl/date_symbol_data_local.dart';
 
@@ -25,20 +23,14 @@ class _AdminAppState extends State<AdminApp> {
   late final AdminApiClient api;
   final store = SessionStore();
 
-  // Акцент “тиффани” (можно поменять потом)
   static const _seed = Color(0xFF2DD4BF);
 
   String _resolveBaseUrl() {
     const defined = String.fromEnvironment('BASE_URL', defaultValue: '');
     if (defined.trim().isNotEmpty) return defined.trim();
 
-    if (kIsWeb) return 'http://localhost:3000';
-
-    // Android emulator default
-    if (!kIsWeb && Platform.isAndroid) return 'http://10.0.2.2:3000';
-
-    // Для реального устройства / других платформ задаём явный placeholder
-    return 'http://CHANGE_ME:3000';
+    // Production default
+    return 'http://95.174.95.1:3000';
   }
 
   @override
@@ -49,7 +41,6 @@ class _AdminAppState extends State<AdminApp> {
 
   @override
   Widget build(BuildContext context) {
-    // “Яндекс-подобный” тёмный минимализм: мягкие поверхности + яркий акцент
     final colorScheme = ColorScheme.fromSeed(
       seedColor: _seed,
       brightness: Brightness.dark,
@@ -58,11 +49,7 @@ class _AdminAppState extends State<AdminApp> {
     final theme = ThemeData(
       useMaterial3: true,
       colorScheme: colorScheme,
-
-      // Фон как у “приложений-кошельков/заправок”: темный, но не черный.
       scaffoldBackgroundColor: const Color(0xFF0B0F14),
-
-      // Карточки: крупные скругления + лёгкая обводка
       cardTheme: const CardThemeData(
         elevation: 0,
         margin: EdgeInsets.zero,
@@ -70,8 +57,6 @@ class _AdminAppState extends State<AdminApp> {
           borderRadius: BorderRadius.all(Radius.circular(20)),
         ),
       ),
-
-      // AppBar: “плоский”, без лишней заливки
       appBarTheme: const AppBarTheme(
         centerTitle: false,
         elevation: 0,
@@ -79,8 +64,6 @@ class _AdminAppState extends State<AdminApp> {
         backgroundColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,
       ),
-
-      // Input: как “брендовый” интерфейс — мягкий outline
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: colorScheme.surfaceContainerHighest.withValues(alpha: 0.22),
@@ -97,8 +80,6 @@ class _AdminAppState extends State<AdminApp> {
           borderSide: BorderSide(color: colorScheme.primary, width: 1.2),
         ),
       ),
-
-      // NavigationBar: темная панель + “пилюля” индикатора
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor: const Color(0xFF0B0F14),
         indicatorColor: colorScheme.primary.withValues(alpha: 0.18),
@@ -112,8 +93,6 @@ class _AdminAppState extends State<AdminApp> {
           IconThemeData(color: colorScheme.onSurface.withValues(alpha: 0.75)),
         ),
       ),
-
-      // Chips: компактные, как у Яндекс
       chipTheme: ChipThemeData(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         labelStyle: TextStyle(
@@ -125,7 +104,7 @@ class _AdminAppState extends State<AdminApp> {
     );
 
     return MaterialApp(
-      title: 'Carwash Admin',
+      title: 'Мойка Админ',
       debugShowCheckedModeBanner: false,
       theme: theme,
       home: FutureBuilder(

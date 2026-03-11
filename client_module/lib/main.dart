@@ -12,6 +12,7 @@ import 'core/theme/app_theme.dart' as theme;
 import 'screens/start_page.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const _Root());
 }
 
@@ -24,49 +25,54 @@ class _Root extends StatefulWidget {
 
 class _RootState extends State<_Root> {
   bool _authed = false;
-  late final AppRepository repo;
+  AppRepository? repo;
+  String? _startupError;
 
-  /// ✅ One source of truth:
-  /// - web: defaults to http://localhost:3000
-  /// - android emulator: http://10.0.2.2:3000
-  /// - real device / others: MUST be provided via --dart-define=BASE_URL=...
-  ///
-  /// Examples:
-  /// flutter run -d chrome --dart-define=BASE_URL=http://localhost:3000
-  /// flutter run -d emulator-5554 --dart-define=BASE_URL=http://10.0.2.2:3000
-  /// flutter run -d <your_phone> --dart-define=BASE_URL=http://192.168.1.10:3000
   String _resolveBaseUrl() {
     const defined = String.fromEnvironment('BASE_URL', defaultValue: '');
-    if (defined.trim().isNotEmpty) return defined.trim();
+    if (defined.trim().isNotEmpty) {
+      return defined.trim();
+    }
 
-    if (kIsWeb) return 'http://localhost:3000';
+    if (kIsWeb) {
+      return 'http://localhost:3000';
+    }
 
-    // Android emulator default
-    if (!kIsWeb && Platform.isAndroid) return 'http://10.0.2.2:3000';
+    if (Platform.isAndroid) {
+      return 'http://95.174.95.1:3000';
+    }
 
-    // ✅ Do NOT guess localhost on real devices — it will not work
-    // Put a clear default so the problem is obvious during testing
-    return 'http://CHANGE_ME:3000';
+    return 'http://95.174.95.1:3000';
   }
 
   @override
   void initState() {
     super.initState();
+    _initApp();
+  }
 
-    final baseUrl = _resolveBaseUrl();
+  void _initApp() {
+    try {
+      final baseUrl = _resolveBaseUrl();
+      final rt = RealtimeClient.fromBaseUrl(baseUrl);
 
-    final rt = RealtimeClient.fromBaseUrl(baseUrl);
-
-    repo = ApiRepository(
-      api: ApiClient(baseUrl: baseUrl),
-      cache: MemoryCache(),
-      realtime: rt,
-    );
+      repo = ApiRepository(
+        api: ApiClient(baseUrl: baseUrl),
+        cache: MemoryCache(),
+        realtime: rt,
+      );
+    } catch (e, st) {
+      debugPrint('APP START ERROR: $e');
+      debugPrintStack(stackTrace: st);
+      setState(() {
+        _startupError = e.toString();
+      });
+    }
   }
 
   @override
   void dispose() {
-    repo.dispose();
+    repo?.dispose();
     super.dispose();
   }
 
@@ -75,15 +81,42 @@ class _RootState extends State<_Root> {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       theme: theme.AppTheme.dark(),
-      home: _authed
-          ? ClientModuleApp(
-              repo: repo,
-              onLogout: () => setState(() => _authed = false),
-            )
-          : StartPage(
-              repo: repo,
-              onAuthed: () => setState(() => _authed = true),
-            ),
+      home: _startupError != null
+          ? _StartupErrorPage(error: _startupError!)
+          : (repo == null
+              ? const Scaffold(
+                  body: Center(child: CircularProgressIndicator()),
+                )
+              : (_authed
+                  ? ClientModuleApp(
+                      repo: repo!,
+                      onLogout: () => setState(() => _authed = false),
+                    )
+                  : StartPage(
+                      repo: repo!,
+                      onAuthed: () => setState(() => _authed = true),
+                    ))),
+    );
+  }
+}
+
+class _StartupErrorPage extends StatelessWidget {
+  final String error;
+
+  const _StartupErrorPage({required this.error});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Ошибка запуска'),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: SelectableText(
+          'Приложение не смогло запуститься.\n\n$error',
+        ),
+      ),
     );
   }
 }

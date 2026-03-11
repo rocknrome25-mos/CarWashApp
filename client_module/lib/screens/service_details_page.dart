@@ -13,11 +13,6 @@ class ServiceDetailsPage extends StatelessWidget {
     required this.service,
   });
 
-  String _priceLine(Service s) {
-    final dur = s.durationMin ?? 30;
-    return '${s.priceRub} ₽  •  $dur мин';
-  }
-
   ImageProvider _heroImageProvider() {
     final url = service.imageUrl;
     if (url != null && url.isNotEmpty) {
@@ -51,36 +46,55 @@ class ServiceDetailsPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
     final bottomInset = MediaQuery.of(context).padding.bottom;
-    final heroH = MediaQuery.of(context).size.width * 0.72;
+    final heroH = MediaQuery.of(context).size.width * 0.78;
 
     return Scaffold(
       body: Stack(
         children: [
           ListView(
-            padding: EdgeInsets.only(bottom: 92 + bottomInset),
+            padding: EdgeInsets.only(bottom: 104 + bottomInset),
             children: [
               Stack(
                 children: [
                   ClipRRect(
                     borderRadius: const BorderRadius.only(
-                      bottomLeft: Radius.circular(26),
-                      bottomRight: Radius.circular(26),
+                      bottomLeft: Radius.circular(30),
+                      bottomRight: Radius.circular(30),
                     ),
-                    child: Image(
-                      image: _heroImageProvider(),
+                    child: SizedBox(
                       height: heroH,
                       width: double.infinity,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Container(
-                        height: heroH,
-                        width: double.infinity,
-                        color: cs.surfaceContainerHighest.withValues(
-                          alpha: 0.22,
-                        ),
-                        child: const Center(
-                          child: Icon(Icons.local_car_wash, size: 54),
-                        ),
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          Image(
+                            image: _heroImageProvider(),
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => Container(
+                              color: cs.surfaceContainerHighest.withValues(
+                                alpha: 0.22,
+                              ),
+                              child: const Center(
+                                child: Icon(Icons.local_car_wash, size: 54),
+                              ),
+                            ),
+                          ),
+                          DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [
+                                  Colors.black.withValues(alpha: 0.22),
+                                  Colors.transparent,
+                                  Colors.black.withValues(alpha: 0.28),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
@@ -90,10 +104,9 @@ class ServiceDetailsPage extends StatelessWidget {
                       child: Align(
                         alignment: Alignment.topLeft,
                         child: Material(
-                          color: cs.surfaceContainerHighest.withValues(
-                            alpha: 0.70,
-                          ),
+                          color: cs.surface.withValues(alpha: 0.72),
                           shape: const CircleBorder(),
+                          elevation: 0,
                           child: IconButton(
                             onPressed: () => Navigator.of(context).pop(false),
                             icon: Icon(Icons.arrow_back, color: cs.onSurface),
@@ -104,70 +117,88 @@ class ServiceDetailsPage extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: 14),
-
+              const SizedBox(height: 18),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Text(
                   service.name,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Text(
-                  _priceLine(service),
-                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    color: cs.onSurface.withValues(alpha: 0.75),
-                    fontWeight: FontWeight.w800,
+                  style: textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    color: cs.onSurface.withValues(alpha: 0.97),
+                    height: 1.08,
                   ),
                 ),
               ),
+              const SizedBox(height: 10),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _PrimaryPill(text: '${service.priceRub} ₽'),
+                    _SoftPill(
+                      icon: Icons.schedule_rounded,
+                      text: '${service.durationMin ?? 30} мин',
+                    ),
+                  ],
+                ),
+              ),
               const SizedBox(height: 18),
-
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Container(
-                  padding: const EdgeInsets.all(14),
+                  padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: cs.surfaceContainerHighest.withValues(alpha: 0.22),
-                    borderRadius: BorderRadius.circular(18),
+                    color: cs.surfaceContainerHighest.withValues(alpha: 0.18),
+                    borderRadius: BorderRadius.circular(22),
                     border: Border.all(
-                      color: cs.outlineVariant.withValues(alpha: 0.6),
+                      color: cs.outlineVariant.withValues(alpha: 0.45),
                     ),
+                    boxShadow: [
+                      BoxShadow(
+                        blurRadius: 18,
+                        offset: const Offset(0, 8),
+                        color: Colors.black.withValues(alpha: 0.06),
+                      ),
+                    ],
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Описание',
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        'Об услуге',
+                        style: textTheme.titleMedium?.copyWith(
                           fontWeight: FontWeight.w900,
+                          color: cs.onSurface.withValues(alpha: 0.96),
                         ),
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        'Описание услуги будет здесь. Что входит, ограничения, рекомендации.',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: cs.onSurface.withValues(alpha: 0.75),
+                        'Описание услуги будет здесь. Что входит, ограничения, рекомендации и важные детали перед записью.',
+                        style: textTheme.bodyMedium?.copyWith(
+                          color: cs.onSurface.withValues(alpha: 0.74),
                           fontWeight: FontWeight.w600,
-                          height: 1.35,
+                          height: 1.4,
                         ),
                       ),
-                      const SizedBox(height: 14),
+                      const SizedBox(height: 16),
                       Row(
                         children: [
-                          _InfoChip(
-                            label: 'Длительность',
-                            value: '${service.durationMin ?? 30} мин',
+                          Expanded(
+                            child: _InfoCard(
+                              icon: Icons.schedule_rounded,
+                              label: 'Длительность',
+                              value: '${service.durationMin ?? 30} мин',
+                            ),
                           ),
                           const SizedBox(width: 10),
-                          _InfoChip(
-                            label: 'Стоимость',
-                            value: '${service.priceRub} ₽',
+                          Expanded(
+                            child: _InfoCard(
+                              icon: Icons.payments_rounded,
+                              label: 'Стоимость',
+                              value: '${service.priceRub} ₽',
+                            ),
                           ),
                         ],
                       ),
@@ -175,29 +206,102 @@ class ServiceDetailsPage extends StatelessWidget {
                   ),
                 ),
               ),
+              const SizedBox(height: 16),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).cardColor.withValues(alpha: 0.94),
+                    borderRadius: BorderRadius.circular(22),
+                    border: Border.all(
+                      color: cs.outlineVariant.withValues(alpha: 0.45),
+                    ),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        width: 42,
+                        height: 42,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(14),
+                          color: cs.primary.withValues(alpha: 0.12),
+                          border: Border.all(
+                            color: cs.primary.withValues(alpha: 0.16),
+                          ),
+                        ),
+                        child: Icon(
+                          Icons.info_outline_rounded,
+                          color: cs.primary,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Как записаться',
+                              style: textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w900,
+                                color: cs.onSurface.withValues(alpha: 0.96),
+                              ),
+                            ),
+                            const SizedBox(height: 5),
+                            Text(
+                              'Нажми кнопку “Записаться”, выбери автомобиль, дату и удобный слот.',
+                              style: textTheme.bodySmall?.copyWith(
+                                color: cs.onSurface.withValues(alpha: 0.70),
+                                fontWeight: FontWeight.w600,
+                                height: 1.35,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ],
           ),
-
           Positioned(
             left: 16,
             right: 16,
             bottom: 12 + bottomInset,
-            child: SizedBox(
-              height: 54,
-              child: FilledButton(
-                onPressed: () async {
-                  final res = await _bookNow(context);
-                  if (!context.mounted) return;
+            child: SafeArea(
+              top: false,
+              child: SizedBox(
+                height: 56,
+                child: FilledButton(
+                  onPressed: () async {
+                    final res = await _bookNow(context);
+                    if (!context.mounted) return;
 
-                  if (res == true || res == 'waitlisted') {
-                    Navigator.of(context).pop(res);
-                  }
-                },
-                child: Text(
-                  'Записаться',
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w900,
+                    if (res == true || res == 'waitlisted') {
+                      Navigator.of(context).pop(res);
+                    }
+                  },
+                  style: FilledButton.styleFrom(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                    elevation: 0,
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.calendar_month_rounded),
+                      const SizedBox(width: 10),
+                      Text(
+                        'Записаться',
+                        style: textTheme.labelLarge?.copyWith(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -209,43 +313,128 @@ class ServiceDetailsPage extends StatelessWidget {
   }
 }
 
-class _InfoChip extends StatelessWidget {
-  final String label;
-  final String value;
+class _PrimaryPill extends StatelessWidget {
+  final String text;
 
-  const _InfoChip({required this.label, required this.value});
+  const _PrimaryPill({required this.text});
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
 
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-        decoration: BoxDecoration(
-          color: cs.surfaceContainerHigh.withValues(alpha: 0.55),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: cs.primary.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: cs.primary.withValues(alpha: 0.18),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              label,
-              style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                color: cs.onSurface.withValues(alpha: 0.65),
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              value,
-              style: Theme.of(
-                context,
-              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900),
-            ),
-          ],
+      ),
+      child: Text(
+        text,
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+          fontWeight: FontWeight.w900,
+          color: cs.onSurface.withValues(alpha: 0.94),
         ),
+      ),
+    );
+  }
+}
+
+class _SoftPill extends StatelessWidget {
+  final IconData icon;
+  final String text;
+
+  const _SoftPill({
+    required this.icon,
+    required this.text,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.16),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: cs.outlineVariant.withValues(alpha: 0.45),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            size: 15,
+            color: cs.onSurface.withValues(alpha: 0.68),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            text,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              fontWeight: FontWeight.w800,
+              color: cs.onSurface.withValues(alpha: 0.78),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _InfoCard extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+
+  const _InfoCard({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHigh.withValues(alpha: 0.48),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: cs.outlineVariant.withValues(alpha: 0.50),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            icon,
+            size: 18,
+            color: cs.onSurface.withValues(alpha: 0.72),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            label,
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              color: cs.onSurface.withValues(alpha: 0.64),
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 5),
+          Text(
+            value,
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w900,
+              color: cs.onSurface.withValues(alpha: 0.95),
+            ),
+          ),
+        ],
       ),
     );
   }

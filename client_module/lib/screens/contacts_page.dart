@@ -14,6 +14,16 @@ class ContactsPage extends StatefulWidget {
 }
 
 class _ContactsPageState extends State<ContactsPage> {
+  static const String _fallbackPhone = '+79661580404';
+  static const String _fallbackTelegram = '@avtotark10';
+  static const String _fallbackWhatsApp = '+79661580404';
+  static const String _fallbackNavigatorLink =
+      'https://yandex.com/maps/213/moscow/house/bulvar_andreya_tarkovskogo_10/Z04YdQNgSUcOQFtvfXpzdHplbQ==/?ll=37.341503%2C55.624996&z=17.65';
+
+  static const String _phoneAsset = 'assets/images/social/phone.png';
+  static const String _telegramAsset = 'assets/images/social/telegram.png';
+  static const String _whatsAppAsset = 'assets/images/social/whatsapp.png';
+
   bool loading = true;
   String? error;
   Map<String, dynamic> cfg = const {};
@@ -33,6 +43,7 @@ class _ContactsPageState extends State<ContactsPage> {
     try {
       final loc = widget.repo.currentLocation;
       final locId = (loc?.id ?? '').trim();
+
       if (locId.isEmpty) {
         throw Exception('Локация не выбрана. Зайди в “Услуги” и выбери мойку.');
       }
@@ -48,14 +59,18 @@ class _ContactsPageState extends State<ContactsPage> {
       if (!mounted) return;
       setState(() => error = e.toString());
     } finally {
-      if (mounted) setState(() => loading = false);
+      if (mounted) {
+        setState(() => loading = false);
+      }
     }
   }
 
   Future<void> _openUrl(Uri uri) async {
     final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+
     if (!ok) {
       if (!mounted) return;
+
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Не удалось открыть: $uri')));
@@ -64,7 +79,9 @@ class _ContactsPageState extends State<ContactsPage> {
 
   Future<void> _openPreferAppThenWeb(Uri appUri, Uri webUri) async {
     final ok = await launchUrl(appUri, mode: LaunchMode.externalApplication);
+
     if (ok) return;
+
     await _openUrl(webUri);
   }
 
@@ -73,6 +90,7 @@ class _ContactsPageState extends State<ContactsPage> {
     if (v.isEmpty) return;
 
     await Clipboard.setData(ClipboardData(text: v));
+
     if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
@@ -86,6 +104,7 @@ class _ContactsPageState extends State<ContactsPage> {
   String _str(String key, {String fallback = ''}) {
     final v = cfg[key];
     if (v == null) return fallback;
+
     final s = v.toString().trim();
     return s.isEmpty ? fallback : s;
   }
@@ -93,28 +112,59 @@ class _ContactsPageState extends State<ContactsPage> {
   String _normalizeTelegram(String t) {
     final x = t.trim();
     if (x.isEmpty) return '';
+
     return x.startsWith('@') ? x.substring(1) : x;
   }
 
   String _digitsPhone(String p) {
     final sb = StringBuffer();
+
     for (final ch in p.trim().split('')) {
       final code = ch.codeUnitAt(0);
       final isDigit = code >= 48 && code <= 57;
-      if (ch == '+' || isDigit) sb.write(ch);
+
+      if (ch == '+' || isDigit) {
+        sb.write(ch);
+      }
     }
+
     return sb.toString();
   }
 
   String _waPhone(String phoneDigits) {
     final x = phoneDigits.trim();
     if (x.isEmpty) return '';
+
     return x.startsWith('+') ? x.substring(1) : x;
+  }
+
+  Widget _assetIcon(String assetPath, {IconData fallbackIcon = Icons.chat}) {
+    final cs = Theme.of(context).colorScheme;
+
+    return Container(
+      width: 46,
+      height: 46,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.28),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.35)),
+      ),
+      alignment: Alignment.center,
+      child: Image.asset(
+        assetPath,
+        width: 30,
+        height: 30,
+        fit: BoxFit.contain,
+        filterQuality: FilterQuality.high,
+        errorBuilder: (_, __, ___) => Icon(fallbackIcon, color: cs.onSurface),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
 
     final loc = widget.repo.currentLocation;
     final title = _str('title', fallback: loc?.name ?? 'Контакты');
@@ -149,10 +199,13 @@ class _ContactsPageState extends State<ContactsPage> {
     }
 
     final address = _str('address', fallback: loc?.address ?? '');
-    final phone = _str('phone');
-    final whatsapp = _str('whatsapp', fallback: phone);
-    final telegramRaw = _str('telegram');
-    final navigatorLink = _str('navigatorLink', fallback: _str('mapsLink'));
+    final phone = _str('phone', fallback: _fallbackPhone);
+    final whatsapp = _str('whatsapp', fallback: _fallbackWhatsApp);
+    final telegramRaw = _str('telegram', fallback: _fallbackTelegram);
+    final navigatorLink = _str(
+      'navigatorLink',
+      fallback: _str('mapsLink', fallback: _fallbackNavigatorLink),
+    );
 
     final tgUser = _normalizeTelegram(telegramRaw);
     final phoneDigits = _digitsPhone(phone);
@@ -176,13 +229,14 @@ class _ContactsPageState extends State<ContactsPage> {
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
         children: [
           _CardSection(
             title: 'Связь',
+            subtitle: 'Телефон и мессенджеры для быстрого контакта',
             children: [
               _ActionTile(
-                icon: Icons.phone,
+                leading: _assetIcon(_phoneAsset, fallbackIcon: Icons.phone),
                 title: hasPhone ? phone : 'Телефон не указан',
                 subtitle: hasPhone ? 'Нажми, чтобы позвонить' : null,
                 onTap: hasPhone
@@ -193,13 +247,13 @@ class _ContactsPageState extends State<ContactsPage> {
                     ? IconButton(
                         tooltip: 'Копировать',
                         onPressed: () => _copy('Телефон', phone),
-                        icon: const Icon(Icons.copy),
+                        icon: const Icon(Icons.copy_rounded),
                       )
                     : null,
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
               _ActionTile(
-                icon: Icons.telegram,
+                leading: _assetIcon(_telegramAsset),
                 title: hasTg ? '@$tgUser' : 'Telegram не указан',
                 subtitle: hasTg ? 'Открыть чат в Telegram' : null,
                 onTap: hasTg
@@ -214,13 +268,13 @@ class _ContactsPageState extends State<ContactsPage> {
                         tooltip: 'Открыть в браузере',
                         onPressed: () =>
                             _openUrl(Uri.parse('https://t.me/$tgUser')),
-                        icon: const Icon(Icons.open_in_new),
+                        icon: const Icon(Icons.open_in_new_rounded),
                       )
                     : null,
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
               _ActionTile(
-                icon: Icons.chat_bubble,
+                leading: _assetIcon(_whatsAppAsset),
                 title: hasWa
                     ? (whatsapp.isNotEmpty ? whatsapp : phone)
                     : 'WhatsApp не указан',
@@ -242,18 +296,19 @@ class _ContactsPageState extends State<ContactsPage> {
                         tooltip: 'Открыть в браузере',
                         onPressed: () =>
                             _openUrl(Uri.parse('https://wa.me/$waDigits')),
-                        icon: const Icon(Icons.open_in_new),
+                        icon: const Icon(Icons.open_in_new_rounded),
                       )
                     : null,
               ),
             ],
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 16),
           _CardSection(
             title: 'Адрес',
+            subtitle: 'Построить маршрут или быстро скопировать адрес',
             children: [
               _ActionTile(
-                icon: Icons.location_on,
+                leading: _buildDefaultIcon(context, Icons.location_on_rounded),
                 title: hasAddr ? address : 'Адрес не указан',
                 subtitle: (hasAddr && hasNav)
                     ? 'Нажми, чтобы открыть навигатор'
@@ -261,7 +316,7 @@ class _ContactsPageState extends State<ContactsPage> {
                 onTap: hasNav ? () => _openUrl(Uri.parse(navigatorLink)) : null,
                 onLongPress: hasAddr ? () => _copy('Адрес', address) : null,
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
               _SmallButtonsRow(
                 onCopy: hasAddr ? () => _copy('Адрес', address) : null,
                 onMaps: hasNav
@@ -272,12 +327,12 @@ class _ContactsPageState extends State<ContactsPage> {
           ),
           const SizedBox(height: 18),
           Text(
-            'Подсказка: долгое нажатие копирует телефон/ссылку/адрес.',
-            style: (Theme.of(context).textTheme.bodySmall ?? const TextStyle())
-                .copyWith(
-                  color: cs.onSurface.withValues(alpha: 0.65),
-                  fontWeight: FontWeight.w600,
-                ),
+            'Подсказка: долгое нажатие копирует телефон, мессенджер или адрес.',
+            style: (textTheme.bodySmall ?? const TextStyle()).copyWith(
+              color: cs.onSurface.withValues(alpha: 0.62),
+              fontWeight: FontWeight.w600,
+              height: 1.35,
+            ),
           ),
         ],
       ),
@@ -285,35 +340,75 @@ class _ContactsPageState extends State<ContactsPage> {
   }
 }
 
+Widget _buildDefaultIcon(BuildContext context, IconData icon) {
+  final cs = Theme.of(context).colorScheme;
+
+  return Container(
+    width: 46,
+    height: 46,
+    decoration: BoxDecoration(
+      borderRadius: BorderRadius.circular(14),
+      color: cs.surfaceContainerHighest.withValues(alpha: 0.28),
+      border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.35)),
+    ),
+    alignment: Alignment.center,
+    child: Icon(icon, color: cs.onSurface),
+  );
+}
+
 class _CardSection extends StatelessWidget {
   final String title;
+  final String? subtitle;
   final List<Widget> children;
 
-  const _CardSection({required this.title, required this.children});
+  const _CardSection({
+    required this.title,
+    this.subtitle,
+    required this.children,
+  });
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
 
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
-        color: cs.surfaceContainerHighest.withValues(alpha: 0.22),
-        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
+        borderRadius: BorderRadius.circular(22),
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.18),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.45)),
+        boxShadow: [
+          BoxShadow(
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+            color: Colors.black.withValues(alpha: 0.06),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             title,
-            style: (Theme.of(context).textTheme.titleSmall ?? const TextStyle())
-                .copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: cs.onSurface.withValues(alpha: 0.95),
-                ),
+            style: (textTheme.titleMedium ?? const TextStyle()).copyWith(
+              fontWeight: FontWeight.w900,
+              color: cs.onSurface.withValues(alpha: 0.96),
+              letterSpacing: 0.1,
+            ),
           ),
-          const SizedBox(height: 10),
+          if (subtitle != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              subtitle!,
+              style: (textTheme.bodySmall ?? const TextStyle()).copyWith(
+                color: cs.onSurface.withValues(alpha: 0.64),
+                fontWeight: FontWeight.w600,
+                height: 1.3,
+              ),
+            ),
+          ],
+          const SizedBox(height: 12),
           ...children,
         ],
       ),
@@ -322,7 +417,7 @@ class _CardSection extends StatelessWidget {
 }
 
 class _ActionTile extends StatelessWidget {
-  final IconData icon;
+  final Widget leading;
   final String title;
   final String? subtitle;
   final VoidCallback? onTap;
@@ -330,7 +425,7 @@ class _ActionTile extends StatelessWidget {
   final Widget? trailing;
 
   const _ActionTile({
-    required this.icon,
+    required this.leading,
     required this.title,
     this.subtitle,
     this.onTap,
@@ -341,69 +436,70 @@ class _ActionTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
 
-    return InkWell(
-      borderRadius: BorderRadius.circular(14),
-      onTap: onTap,
-      onLongPress: onLongPress,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(14),
-          color: Theme.of(context).cardColor,
-          border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                color: cs.surfaceContainerHighest.withValues(alpha: 0.22),
-              ),
-              child: Icon(icon, color: cs.onSurface),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: onTap,
+        onLongPress: onLongPress,
+        child: Ink(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            color: Theme.of(context).cardColor.withValues(alpha: 0.92),
+            border: Border.all(
+              color: cs.outlineVariant.withValues(alpha: 0.50),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style:
-                        (Theme.of(context).textTheme.bodyLarge ??
-                                const TextStyle())
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              leading,
+              const SizedBox(width: 14),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: (textTheme.bodyLarge ?? const TextStyle())
                             .copyWith(
-                              fontWeight: FontWeight.w900,
-                              color: cs.onSurface.withValues(alpha: 0.95),
+                              fontWeight: FontWeight.w800,
+                              color: cs.onSurface.withValues(alpha: 0.96),
+                              height: 1.15,
                             ),
-                  ),
-                  if (subtitle != null) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      subtitle!,
-                      style:
-                          (Theme.of(context).textTheme.bodySmall ??
-                                  const TextStyle())
+                      ),
+                      if (subtitle != null) ...[
+                        const SizedBox(height: 5),
+                        Text(
+                          subtitle!,
+                          style: (textTheme.bodySmall ?? const TextStyle())
                               .copyWith(
-                                color: cs.onSurface.withValues(alpha: 0.70),
+                                color: cs.onSurface.withValues(alpha: 0.68),
                                 fontWeight: FontWeight.w600,
+                                height: 1.3,
                               ),
-                    ),
-                  ],
-                ],
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
               ),
-            ),
-            if (trailing != null) ...[
-              const SizedBox(width: 10),
-              IconTheme(
-                data: IconThemeData(color: cs.onSurface.withValues(alpha: 0.9)),
-                child: trailing!,
-              ),
+              if (trailing != null) ...[
+                const SizedBox(width: 8),
+                IconTheme(
+                  data: IconThemeData(
+                    color: cs.onSurface.withValues(alpha: 0.88),
+                  ),
+                  child: trailing!,
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -423,16 +519,28 @@ class _SmallButtonsRow extends StatelessWidget {
         Expanded(
           child: OutlinedButton.icon(
             onPressed: onCopy,
-            icon: const Icon(Icons.copy),
+            icon: const Icon(Icons.copy_rounded),
             label: const Text('Копировать'),
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size.fromHeight(48),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
           ),
         ),
         const SizedBox(width: 10),
         Expanded(
           child: FilledButton.icon(
             onPressed: onMaps,
-            icon: const Icon(Icons.navigation),
+            icon: const Icon(Icons.navigation_rounded),
             label: const Text('Навигатор'),
+            style: FilledButton.styleFrom(
+              minimumSize: const Size.fromHeight(48),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
           ),
         ),
       ],

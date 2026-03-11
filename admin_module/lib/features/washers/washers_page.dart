@@ -37,20 +37,16 @@ class _WashersPageState extends State<WashersPage> {
     load();
   }
 
-  // ✅ Normalize phone so backend can find washer by `phone` exactly
   String _normalizePhoneForDb(String raw) {
     var s = raw.trim();
     if (s.isEmpty) return s;
 
-    // keep only + and digits
     s = s.replaceAll(RegExp(r'[^\d\+]'), '');
 
-    // 8XXXXXXXXXX -> +7XXXXXXXXXX
     if (s.startsWith('8') && s.length == 11) {
       s = '+7${s.substring(1)}';
     }
 
-    // 7XXXXXXXXXX -> +7XXXXXXXXXX
     if (!s.startsWith('+') && s.startsWith('7') && s.length == 11) {
       s = '+$s';
     }
@@ -80,9 +76,11 @@ class _WashersPageState extends State<WashersPage> {
 
       list.sort((a, b) {
         final da =
-            DateTime.tryParse((a['startAt'] ?? '').toString()) ?? DateTime(1970);
+            DateTime.tryParse((a['startAt'] ?? '').toString()) ??
+            DateTime(1970);
         final db =
-            DateTime.tryParse((b['startAt'] ?? '').toString()) ?? DateTime(1970);
+            DateTime.tryParse((b['startAt'] ?? '').toString()) ??
+            DateTime(1970);
         return da.compareTo(db);
       });
 
@@ -92,6 +90,7 @@ class _WashersPageState extends State<WashersPage> {
       if (!mounted) return;
       setState(() => error = e.toString());
     } finally {
+      // ignore: control_flow_in_finally
       if (!mounted) return;
       setState(() => loading = false);
     }
@@ -99,18 +98,30 @@ class _WashersPageState extends State<WashersPage> {
 
   Future<void> _createPlannedShift() async {
     final messenger = ScaffoldMessenger.of(context);
-
     final now = DateTime.now().toLocal();
-    final startDefault =
-        DateTime(now.year, now.month, now.day, 8, 0).add(const Duration(days: 1));
-    final endDefault =
-        DateTime(now.year, now.month, now.day, 20, 0).add(const Duration(days: 1));
+    final startDefault = DateTime(
+      now.year,
+      now.month,
+      now.day,
+      8,
+      0,
+    ).add(const Duration(days: 1));
+    final endDefault = DateTime(
+      now.year,
+      now.month,
+      now.day,
+      20,
+      0,
+    ).add(const Duration(days: 1));
 
     DateTime startAt = startDefault;
     DateTime endAt = endDefault;
     final noteCtrl = TextEditingController(text: 'Дневная смена');
 
-    Future<void> pickStart(BuildContext dialogCtx, void Function(void Function()) setD) async {
+    Future<void> pickStart(
+      BuildContext dialogCtx,
+      void Function(void Function()) setD,
+    ) async {
       final d = await showDatePicker(
         context: dialogCtx,
         initialDate: startAt,
@@ -120,6 +131,7 @@ class _WashersPageState extends State<WashersPage> {
       if (d == null) return;
 
       final t = await showTimePicker(
+        // ignore: use_build_context_synchronously
         context: dialogCtx,
         initialTime: TimeOfDay.fromDateTime(startAt),
       );
@@ -132,7 +144,10 @@ class _WashersPageState extends State<WashersPage> {
       setD(() {});
     }
 
-    Future<void> pickEnd(BuildContext dialogCtx, void Function(void Function()) setD) async {
+    Future<void> pickEnd(
+      BuildContext dialogCtx,
+      void Function(void Function()) setD,
+    ) async {
       final d = await showDatePicker(
         context: dialogCtx,
         initialDate: endAt,
@@ -142,6 +157,7 @@ class _WashersPageState extends State<WashersPage> {
       if (d == null) return;
 
       final t = await showTimePicker(
+        // ignore: use_build_context_synchronously
         context: dialogCtx,
         initialTime: TimeOfDay.fromDateTime(endAt),
       );
@@ -159,36 +175,73 @@ class _WashersPageState extends State<WashersPage> {
       barrierDismissible: false,
       builder: (dialogCtx) => StatefulBuilder(
         builder: (dialogCtx, setD) {
+          final cs = Theme.of(dialogCtx).colorScheme;
           final df = DateFormat('dd.MM HH:mm');
+
+          InputDecoration deco(String label) => InputDecoration(
+            labelText: label,
+            filled: true,
+            fillColor: cs.surfaceContainerHighest.withValues(alpha: 0.10),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+          );
+
           return AlertDialog(
             title: const Text('Новая смена'),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Row(
-                  children: [
-                    Expanded(child: Text('Старт: ${df.format(startAt)}')),
-                    TextButton(
-                      onPressed: () => pickStart(dialogCtx, setD),
-                      child: const Text('Изменить'),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: cs.surfaceContainerHighest.withValues(alpha: 0.16),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: cs.outlineVariant.withValues(alpha: 0.5),
                     ),
-                  ],
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Старт: ${df.format(startAt)}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: () => pickStart(dialogCtx, setD),
+                            child: const Text('Изменить'),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Конец: ${df.format(endAt)}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: () => pickEnd(dialogCtx, setD),
+                            child: const Text('Изменить'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
-                Row(
-                  children: [
-                    Expanded(child: Text('Конец: ${df.format(endAt)}')),
-                    TextButton(
-                      onPressed: () => pickEnd(dialogCtx, setD),
-                      child: const Text('Изменить'),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 12),
                 TextField(
                   controller: noteCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Примечание (необязательно)',
-                  ),
+                  decoration: deco('Примечание (необязательно)'),
                 ),
               ],
             ),
@@ -220,7 +273,6 @@ class _WashersPageState extends State<WashersPage> {
       if (!mounted) return;
       await load();
     } catch (e) {
-      // no context use after await; messenger is captured before
       messenger.showSnackBar(SnackBar(content: Text('Ошибка: $e')));
     }
   }
@@ -236,44 +288,55 @@ class _WashersPageState extends State<WashersPage> {
       context: context,
       barrierDismissible: false,
       builder: (dialogCtx) => StatefulBuilder(
-        builder: (dialogCtx, setD) => AlertDialog(
-          title: const Text('Приписать мойщика'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: phoneCtrl,
-                keyboardType: TextInputType.phone,
-                decoration: const InputDecoration(labelText: 'Телефон мойщика'),
+        builder: (dialogCtx, setD) {
+          final cs = Theme.of(dialogCtx).colorScheme;
+
+          InputDecoration deco(String label) => InputDecoration(
+            labelText: label,
+            filled: true,
+            fillColor: cs.surfaceContainerHighest.withValues(alpha: 0.10),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+          );
+
+          return AlertDialog(
+            title: const Text('Приписать мойщика'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: phoneCtrl,
+                  keyboardType: TextInputType.phone,
+                  decoration: deco('Телефон мойщика'),
+                ),
+                const SizedBox(height: 10),
+                DropdownButtonFormField<int>(
+                  initialValue: bay,
+                  decoration: deco('Пост'),
+                  items: const [
+                    DropdownMenuItem(value: 1, child: Text('Пост 1')),
+                    DropdownMenuItem(value: 2, child: Text('Пост 2')),
+                  ],
+                  onChanged: (v) => setD(() => bay = v ?? 1),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: noteCtrl,
+                  decoration: deco('Примечание (опц.)'),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogCtx).pop(false),
+                child: const Text('Отмена'),
               ),
-              const SizedBox(height: 10),
-              DropdownButtonFormField<int>(
-                initialValue: bay,
-                decoration: const InputDecoration(labelText: 'Пост'),
-                items: const [
-                  DropdownMenuItem(value: 1, child: Text('Пост 1')),
-                  DropdownMenuItem(value: 2, child: Text('Пост 2')),
-                ],
-                onChanged: (v) => setD(() => bay = v ?? 1),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: noteCtrl,
-                decoration: const InputDecoration(labelText: 'Примечание (опц.)'),
+              FilledButton(
+                onPressed: () => Navigator.of(dialogCtx).pop(true),
+                child: const Text('Добавить'),
               ),
             ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogCtx).pop(false),
-              child: const Text('Отмена'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(dialogCtx).pop(true),
-              child: const Text('Добавить'),
-            ),
-          ],
-        ),
+          );
+        },
       ),
     );
 
@@ -299,7 +362,10 @@ class _WashersPageState extends State<WashersPage> {
     final messenger = ScaffoldMessenger.of(context);
 
     try {
-      await widget.api.publishPlannedShift(widget.session.userId, plannedShiftId);
+      await widget.api.publishPlannedShift(
+        widget.session.userId,
+        plannedShiftId,
+      );
       if (!mounted) return;
       await load();
     } catch (e) {
@@ -331,12 +397,224 @@ class _WashersPageState extends State<WashersPage> {
     if (ok != true) return;
 
     try {
-      await widget.api.deletePlannedShift(widget.session.userId, plannedShiftId);
+      await widget.api.deletePlannedShift(
+        widget.session.userId,
+        plannedShiftId,
+      );
       if (!mounted) return;
       await load();
     } catch (e) {
       messenger.showSnackBar(SnackBar(content: Text('Ошибка: $e')));
     }
+  }
+
+  Widget _headerCard(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.45)),
+        boxShadow: [
+          BoxShadow(
+            blurRadius: 14,
+            offset: const Offset(0, 6),
+            color: Colors.black.withValues(alpha: 0.04),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: cs.primary.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: cs.primary.withValues(alpha: 0.18)),
+            ),
+            child: Icon(Icons.groups_2_outlined, color: cs.primary),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'График мойщиков',
+                  style: textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    color: cs.onSurface.withValues(alpha: 0.96),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Создавай смены, приписывай мойщиков и публикуй расписание.',
+                  style: textTheme.bodySmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: cs.onSurface.withValues(alpha: 0.66),
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _emptyCard(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
+        boxShadow: [
+          BoxShadow(
+            blurRadius: 10,
+            offset: const Offset(0, 6),
+            color: Colors.black.withValues(alpha: 0.04),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: cs.surfaceContainerHighest.withValues(alpha: 0.18),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(
+              Icons.inbox_outlined,
+              color: cs.onSurface.withValues(alpha: 0.65),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              'Пока нет плановых смен на ближайшую неделю.',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: cs.onSurface.withValues(alpha: 0.75),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _plannedCard(
+    BuildContext context,
+    Map<String, dynamic> p,
+    DateFormat df,
+  ) {
+    final cs = Theme.of(context).colorScheme;
+
+    final start = DateTime.parse((p['startAt'] ?? '').toString()).toLocal();
+    final end = DateTime.parse((p['endAt'] ?? '').toString()).toLocal();
+    final note = (p['note'] ?? '').toString().trim();
+    final id = (p['id'] ?? '').toString();
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
+        boxShadow: [
+          BoxShadow(
+            blurRadius: 10,
+            offset: const Offset(0, 6),
+            color: Colors.black.withValues(alpha: 0.04),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '${df.format(start)} — ${df.format(end)}',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900),
+                ),
+              ),
+              _StatusChip(status: (p['status'] ?? '').toString()),
+            ],
+          ),
+          const SizedBox(height: 10),
+          if (note.isNotEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: cs.surfaceContainerHighest.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: cs.outlineVariant.withValues(alpha: 0.40),
+                ),
+              ),
+              child: Text(
+                'Примечание: $note',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: cs.onSurface.withValues(alpha: 0.75),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          if (note.isNotEmpty) const SizedBox(height: 12),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              OutlinedButton.icon(
+                onPressed: () => _assignWasher(id),
+                icon: const Icon(Icons.person_add_alt_1),
+                label: const Text('Приписать'),
+                style: OutlinedButton.styleFrom(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+              ),
+              OutlinedButton.icon(
+                onPressed: () => _publish(id),
+                icon: const Icon(Icons.publish),
+                label: const Text('Опубликовать'),
+                style: OutlinedButton.styleFrom(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: () => _deletePlanned(id),
+                icon: const Icon(Icons.delete_outline),
+                label: const Text('Удалить'),
+                style: TextButton.styleFrom(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -364,166 +642,44 @@ class _WashersPageState extends State<WashersPage> {
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : (error != null)
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Text(error!),
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(
+                      color: Colors.red.withValues(alpha: 0.30),
+                    ),
                   ),
-                )
-              : RefreshIndicator(
-                  onRefresh: load,
-                  child: ListView(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: cs.surfaceContainerHighest.withValues(alpha: 0.18),
-                          borderRadius: BorderRadius.circular(18),
-                          border: Border.all(
-                            color: cs.outlineVariant.withValues(alpha: 0.6),
-                          ),
-                        ),
-                        child: Row(
-                          children: [
-                            Container(
-                              width: 44,
-                              height: 44,
-                              decoration: BoxDecoration(
-                                color: cs.primary.withValues(alpha: 0.12),
-                                borderRadius: BorderRadius.circular(14),
-                              ),
-                              child: Icon(Icons.calendar_month, color: cs.primary),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'График на неделю',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .titleMedium
-                                        ?.copyWith(fontWeight: FontWeight.w900),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    'Создавай смены и приписывай мойщиков по постам.',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .bodySmall
-                                        ?.copyWith(
-                                          color: cs.onSurface.withValues(alpha: 0.70),
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-
-                      if (planned.isEmpty)
-                        Container(
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: Theme.of(context).cardColor,
-                            borderRadius: BorderRadius.circular(18),
-                            border: Border.all(
-                              color: cs.outlineVariant.withValues(alpha: 0.6),
-                            ),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                Icons.inbox_outlined,
-                                color: cs.onSurface.withValues(alpha: 0.65),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text(
-                                  'Пока нет плановых смен на ближайшую неделю.',
-                                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                        fontWeight: FontWeight.w700,
-                                        color: cs.onSurface.withValues(alpha: 0.75),
-                                      ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-
-                      for (final p in planned) ...[
-                        const SizedBox(height: 12),
-                        Container(
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: Theme.of(context).cardColor,
-                            borderRadius: BorderRadius.circular(18),
-                            border: Border.all(
-                              color: cs.outlineVariant.withValues(alpha: 0.6),
-                            ),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      '${df.format(DateTime.parse((p['startAt'] ?? '').toString()).toLocal())}'
-                                      ' — ${df.format(DateTime.parse((p['endAt'] ?? '').toString()).toLocal())}',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .titleSmall
-                                          ?.copyWith(fontWeight: FontWeight.w900),
-                                    ),
-                                  ),
-                                  _StatusChip(status: (p['status'] ?? '').toString()),
-                                ],
-                              ),
-                              const SizedBox(height: 10),
-                              if ((p['note'] ?? '').toString().trim().isNotEmpty)
-                                Text(
-                                  'Примечание: ${(p['note'] ?? '').toString().trim()}',
-                                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                        color: cs.onSurface.withValues(alpha: 0.75),
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                ),
-                              const SizedBox(height: 10),
-                              Wrap(
-                                spacing: 10,
-                                runSpacing: 10,
-                                children: [
-                                  OutlinedButton.icon(
-                                    onPressed: () => _assignWasher((p['id'] ?? '').toString()),
-                                    icon: const Icon(Icons.person_add_alt_1),
-                                    label: const Text('Приписать'),
-                                  ),
-                                  OutlinedButton.icon(
-                                    onPressed: () => _publish((p['id'] ?? '').toString()),
-                                    icon: const Icon(Icons.publish),
-                                    label: const Text('Опубликовать'),
-                                  ),
-                                  TextButton.icon(
-                                    onPressed: () => _deletePlanned((p['id'] ?? '').toString()),
-                                    icon: const Icon(Icons.delete_outline),
-                                    label: const Text('Удалить'),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ],
+                  child: Text(
+                    error!,
+                    style: TextStyle(
+                      color: cs.onSurface.withValues(alpha: 0.92),
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
+              ),
+            )
+          : RefreshIndicator(
+              onRefresh: load,
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                children: [
+                  _headerCard(context),
+                  const SizedBox(height: 14),
+                  if (planned.isEmpty) _emptyCard(context),
+                  for (final p in planned) ...[
+                    const SizedBox(height: 12),
+                    _plannedCard(context, p, df),
+                  ],
+                ],
+              ),
+            ),
     );
   }
 }
@@ -583,9 +739,9 @@ class _StatusChip extends StatelessWidget {
           Text(
             label,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: fg,
-                  fontWeight: FontWeight.w900,
-                ),
+              color: fg,
+              fontWeight: FontWeight.w900,
+            ),
           ),
         ],
       ),

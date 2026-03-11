@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart'; // kIsWeb, kDebugMode
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
@@ -30,10 +30,8 @@ class BookingActionsSheet extends StatefulWidget {
 class _BookingActionsSheetState extends State<BookingActionsSheet> {
   bool loading = false;
 
-  // Sticky note (admin note)
   final noteCtrl = TextEditingController();
 
-  // Move
   static const _moveReasons = <String>[
     'Задержка',
     'Сбой',
@@ -47,21 +45,17 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
   int selectedBay = 1;
   DateTime? selectedDateTimeLocal;
 
-  // Pay
-  String paymentMethod = 'CARD'; // CARD / CASH / CONTRACT
+  String paymentMethod = 'CARD';
 
-  // Discount
   final discountCtrl = TextEditingController(text: '0');
   final discountReasonCtrl = TextEditingController(text: '');
 
-  // Addons
   List<Map<String, dynamic>> addons = [];
   final addonServiceIdCtrl = TextEditingController();
   final addonQtyCtrl = TextEditingController(text: '1');
 
-  // Photos
   List<Map<String, dynamic>> photos = [];
-  String photoKind = 'BEFORE'; // BEFORE/AFTER/DAMAGE/OTHER (server enums)
+  String photoKind = 'BEFORE';
   final photoNoteCtrl = TextEditingController();
 
   final _picker = ImagePicker();
@@ -82,7 +76,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
 
   static const _timeout = Duration(seconds: 25);
 
-  // ✅ fixed colors (same as client)
   static const Color _greenLine = Color(0xFF2DBD6E);
   static const Color _blueLine = Color(0xFF2D9CDB);
 
@@ -138,16 +131,11 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     moveCommentCtrl.dispose();
     discountCtrl.dispose();
     discountReasonCtrl.dispose();
-
     addonServiceIdCtrl.dispose();
     addonQtyCtrl.dispose();
-
     photoNoteCtrl.dispose();
-
     super.dispose();
   }
-
-  // ---------------- helpers ----------------
 
   Uri _u(String path, [Map<String, String>? q]) {
     final uri = Uri.parse(widget.api.baseUrl + path);
@@ -215,11 +203,9 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     ).toString();
   }
 
-  // ---------------- requested dot (IMPORTANT) ----------------
-
   int? _requestedBayId(Map<String, dynamic> b) {
     final v = b['requestedBayId'];
-    if (v == null) return null; // any => no dot
+    if (v == null) return null;
     if (v is num) return v.toInt();
     return int.tryParse(v.toString());
   }
@@ -232,7 +218,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
 
   InlineSpan _requestedDotSpan(Map<String, dynamic> b) {
     final id = _requestedBayId(b);
-    if (id == null) return const TextSpan(text: ''); // Любая линия => нет точки
+    if (id == null) return const TextSpan(text: '');
 
     final c = _requestedBayColor(id);
 
@@ -259,8 +245,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
       ),
     );
   }
-
-  // ---------------- status helpers ----------------
 
   String _rawStatus() => (widget.booking['status'] ?? '').toString();
   String? _startedAtIso() => widget.booking['startedAt']?.toString();
@@ -303,8 +287,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     return Colors.orange;
   }
 
-  // ---------------- payment helpers ----------------
-
   List<String> _paymentBadges() {
     final b = widget.booking['paymentBadges'];
     if (b is List) return b.map((x) => x.toString()).toList();
@@ -338,7 +320,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     }
   }
 
-  // auto string (no model)
   String _buildCarLine(Map<String, dynamic> b) {
     final plate = (b['car']?['plateDisplay'] ?? '').toString().trim();
     final make = (b['car']?['makeDisplay'] ?? '').toString().trim();
@@ -355,8 +336,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
 
     return parts.isEmpty ? '—' : parts.join(' • ');
   }
-
-  // ---------------- low-level http ----------------
 
   Future<List<dynamic>> _getList(String path, {Map<String, String>? q}) async {
     final res = await http
@@ -397,8 +376,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     }
   }
 
-  // ---------------- refresh ----------------
-
   Future<void> _refreshAddonsAndPhotos({bool showErrors = true}) async {
     try {
       final a = await _getList('/admin/bookings/$_bookingId/addons');
@@ -420,8 +397,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     }
   }
 
-  // ---------------- unified runner ----------------
-
   Future<void> _run(
     Future<void> Function() fn, {
     bool closeAfter = true,
@@ -440,8 +415,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
       if (mounted) setState(() => loading = false);
     }
   }
-
-  // ---------------- actions: start/finish ----------------
 
   Future<void> _start() async {
     if (!_canStart) return;
@@ -490,8 +463,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
       );
     });
   }
-
-  // ---------------- actions: move ----------------
 
   Future<void> _pickMoveDateTime() async {
     final initial = selectedDateTimeLocal ?? DateTime.now();
@@ -556,8 +527,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     });
   }
 
-  // ---------------- actions: pay ----------------
-
   Future<void> _payFully() async {
     final toPay = _toPayRub();
     if (toPay <= 0) return;
@@ -585,8 +554,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     });
   }
 
-  // ---------------- actions: discount ----------------
-
   Future<void> _applyDiscount() async {
     if (!_discountEnabled) return;
 
@@ -612,8 +579,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
       );
     });
   }
-
-  // ---------------- actions: addons ----------------
 
   int _addonsTotalPrice() {
     var sum = 0;
@@ -663,8 +628,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     }, closeAfter: false);
   }
 
-  // ---------------- PAY breakdown (NEW) ----------------
-
   int _baseServicePriceRub() {
     final s = widget.booking['service'];
     if (s is Map) {
@@ -675,7 +638,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
       final parsed = int.tryParse('${m['priceRub']}');
       if (parsed != null) return parsed;
     }
-    // fallback: derive from effective + discount - addons
     final eff = _effectivePriceRub();
     final disc = _discountRub();
     final addonsSum = _addonsTotalPrice();
@@ -694,7 +656,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
   }
 
   List<Map<String, dynamic>> _chargeLines() {
-    // line: { title, qty, unit, sum }
     final lines = <Map<String, dynamic>>[];
 
     final baseName = _baseServiceName();
@@ -789,9 +750,9 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: cs.surfaceContainerHighest.withValues(alpha: 0.18),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
+          color: cs.surfaceContainerHighest.withValues(alpha: 0.16),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.5)),
         ),
         child: Row(
           children: [
@@ -808,15 +769,15 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
               isAddon ? 'x$qty' : '',
               style: TextStyle(
                 fontWeight: FontWeight.w900,
-                color: cs.onSurface.withValues(alpha: 0.75),
+                color: cs.onSurface.withValues(alpha: 0.72),
               ),
             ),
             const SizedBox(width: 10),
             Text(
-              qty > 1 ? '${_fmtRub(unit)}' : '',
+              qty > 1 ? _fmtRub(unit) : '',
               style: TextStyle(
                 fontWeight: FontWeight.w800,
-                color: cs.onSurface.withValues(alpha: 0.70),
+                color: cs.onSurface.withValues(alpha: 0.68),
               ),
             ),
             const SizedBox(width: 10),
@@ -838,14 +799,13 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
         row('Скидка', discount > 0 ? '-${_fmtRub(discount)}' : _fmtRub(0)),
         const Divider(height: 18),
         row('Итого', _fmtRub(totalByItems), strong: true),
-
         if (mismatch) ...[
           const SizedBox(height: 10),
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
               color: Colors.amber.withValues(alpha: 0.16),
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(16),
               border: Border.all(color: Colors.amber.withValues(alpha: 0.7)),
             ),
             child: Text(
@@ -856,15 +816,12 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
             ),
           ),
         ],
-
         const SizedBox(height: 12),
         row('Оплачено', _fmtRub(paid), strong: true),
         row('Остаток', _fmtRub(remaining), strong: true),
       ],
     );
   }
-
-  // ---------------- photos ----------------
 
   ImageSource _bestImageSource() {
     if (kIsWeb) return ImageSource.gallery;
@@ -887,7 +844,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     final note = photoNoteCtrl.text.trim();
     final bytes = await file.readAsBytes();
 
-    // optimistic preview
     final tempId = 'local_${DateTime.now().millisecondsSinceEpoch}';
     setState(() {
       _localPreviewByTempId[tempId] = bytes;
@@ -1083,14 +1039,14 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
 
     return InkWell(
       onTap: () => _openPhotoFull(p),
-      borderRadius: BorderRadius.circular(14),
+      borderRadius: BorderRadius.circular(16),
       child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
+        margin: const EdgeInsets.only(bottom: 10),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: cs.surfaceContainerHighest.withValues(alpha: 0.18),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
+          color: cs.surfaceContainerHighest.withValues(alpha: 0.16),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.5)),
         ),
         child: Row(
           children: [
@@ -1154,7 +1110,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                       vertical: 7,
                     ),
                     decoration: BoxDecoration(
-                      color: cs.surfaceContainerHighest.withValues(alpha: 0.20),
+                      color: cs.surfaceContainerHighest.withValues(alpha: 0.2),
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
                         color: cs.outlineVariant.withValues(alpha: 0.55),
@@ -1189,16 +1145,14 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     );
   }
 
-  // ---------------- UI helpers ----------------
-
   Widget _statusPill(String text) {
     final c = _statusColor();
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: c.withValues(alpha: 0.16),
+        color: c.withValues(alpha: 0.14),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: c.withValues(alpha: 0.7)),
+        border: Border.all(color: c.withValues(alpha: 0.6)),
       ),
       child: Text(
         text,
@@ -1211,39 +1165,61 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     required String title,
     required Widget child,
     Widget? trailing,
+    String? subtitle,
   }) {
     final cs = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 10),
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: cs.surface,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    title,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w900,
-                      fontSize: 14,
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor.withValues(alpha: 0.96),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.45)),
+        boxShadow: [
+          BoxShadow(
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+            color: Colors.black.withValues(alpha: 0.05),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        color: cs.onSurface.withValues(alpha: 0.96),
+                      ),
                     ),
-                  ),
+                    if (subtitle != null) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        subtitle,
+                        style: textTheme.bodySmall?.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: cs.onSurface.withValues(alpha: 0.64),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
-                if (trailing != null) trailing,
-              ],
-            ),
-            const SizedBox(height: 12),
-            child,
-          ],
-        ),
+              ),
+              if (trailing != null) trailing,
+            ],
+          ),
+          const SizedBox(height: 14),
+          child,
+        ],
       ),
     );
   }
@@ -1295,7 +1271,24 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     );
   }
 
-  // ---------------- build ----------------
+  InputDecoration _input(String label) {
+    return InputDecoration(
+      labelText: label,
+      filled: true,
+      fillColor: Theme.of(
+        context,
+      ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.12),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: BorderSide(
+          color: Theme.of(
+            context,
+          ).colorScheme.outlineVariant.withValues(alpha: 0.55),
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1339,27 +1332,39 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
           color: Theme.of(context).scaffoldBackgroundColor,
           child: Column(
             children: [
-              // Sticky header
               Container(
-                padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
                 decoration: BoxDecoration(
-                  color: cs.surfaceContainerHighest.withValues(alpha: 0.20),
+                  color: cs.surfaceContainerHighest.withValues(alpha: 0.16),
                   border: Border(
                     bottom: BorderSide(
-                      color: cs.outlineVariant.withValues(alpha: 0.6),
+                      color: cs.outlineVariant.withValues(alpha: 0.45),
                     ),
                   ),
                 ),
                 child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    IconButton(
-                      tooltip: 'Назад',
-                      onPressed: loading
-                          ? null
-                          : () => Navigator.of(context).pop(),
-                      icon: const Icon(Icons.arrow_back),
+                    Container(
+                      width: 42,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(14),
+                        color: cs.surface.withValues(alpha: 0.85),
+                        border: Border.all(
+                          color: cs.outlineVariant.withValues(alpha: 0.4),
+                        ),
+                      ),
+                      child: IconButton(
+                        tooltip: 'Назад',
+                        onPressed: loading
+                            ? null
+                            : () => Navigator.of(context).pop(),
+                        icon: const Icon(Icons.arrow_back),
+                        padding: EdgeInsets.zero,
+                      ),
                     ),
-                    const SizedBox(width: 6),
+                    const SizedBox(width: 10),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1381,33 +1386,44 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                               fontSize: 14,
                             ),
                           ),
-                          const SizedBox(height: 3),
+                          const SizedBox(height: 4),
                           Text(
-                            'Клиент: $clientTitle • Авто: $carLine',
+                            'Клиент: $clientTitle',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               fontWeight: FontWeight.w700,
-                              color: cs.onSurface.withValues(alpha: 0.7),
+                              color: cs.onSurface.withValues(alpha: 0.74),
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Авто: $carLine',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              color: cs.onSurface.withValues(alpha: 0.62),
                             ),
                           ),
                         ],
                       ),
                     ),
+                    const SizedBox(width: 8),
                     _statusPill(_statusRu),
                   ],
                 ),
               ),
-
-              // Tabs bar
               Material(
                 color: cs.surface,
                 child: TabBar(
                   isScrollable: true,
                   tabAlignment: TabAlignment.start,
                   labelColor: cs.onSurface,
-                  unselectedLabelColor: cs.onSurface.withValues(alpha: 0.65),
+                  unselectedLabelColor: cs.onSurface.withValues(alpha: 0.62),
                   indicatorColor: cs.primary,
+                  indicatorWeight: 3,
+                  dividerColor: cs.outlineVariant.withValues(alpha: 0.35),
                   tabs: [
                     _tabLabel('Сервис'),
                     _tabLabel('Оплата'),
@@ -1417,11 +1433,9 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                   ],
                 ),
               ),
-
               Expanded(
                 child: TabBarView(
                   children: [
-                    // TAB: SERVICE
                     SingleChildScrollView(
                       padding: EdgeInsets.only(
                         left: 12,
@@ -1463,7 +1477,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                                 ),
                               ),
                             ),
-
                           _sectionCard(
                             title: 'Информация',
                             child: Column(
@@ -1501,7 +1514,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                               ],
                             ),
                           ),
-
                           _sectionCard(
                             title: 'Действия',
                             child: Row(
@@ -1511,6 +1523,12 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                                     onPressed: loading || !_canStart
                                         ? null
                                         : _start,
+                                    style: FilledButton.styleFrom(
+                                      minimumSize: const Size.fromHeight(50),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(16),
+                                      ),
+                                    ),
                                     child: loading
                                         ? const SizedBox(
                                             height: 18,
@@ -1526,25 +1544,27 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                                     onPressed: loading || !_canFinish
                                         ? null
                                         : _finish,
+                                    style: OutlinedButton.styleFrom(
+                                      minimumSize: const Size.fromHeight(50),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(16),
+                                      ),
+                                    ),
                                     child: const Text('Завершить'),
                                   ),
                                 ),
                               ],
                             ),
                           ),
-
                           _sectionCard(
                             title: 'Заметка администратора',
                             child: TextField(
                               controller: noteCtrl,
                               minLines: 1,
                               maxLines: 4,
-                              decoration: const InputDecoration(
-                                labelText: 'Комментарий администратора',
-                              ),
+                              decoration: _input('Комментарий администратора'),
                             ),
                           ),
-
                           _sectionCard(
                             title: 'Доп. услуги (upsale)',
                             trailing: (addonsSumRub > 0 || addonsDur > 0)
@@ -1581,13 +1601,13 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                                           padding: const EdgeInsets.all(12),
                                           decoration: BoxDecoration(
                                             color: cs.surfaceContainerHighest
-                                                .withValues(alpha: 0.18),
+                                                .withValues(alpha: 0.16),
                                             borderRadius: BorderRadius.circular(
-                                              14,
+                                              16,
                                             ),
                                             border: Border.all(
                                               color: cs.outlineVariant
-                                                  .withValues(alpha: 0.55),
+                                                  .withValues(alpha: 0.5),
                                             ),
                                           ),
                                           child: Row(
@@ -1643,9 +1663,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                                     Expanded(
                                       child: TextField(
                                         controller: addonServiceIdCtrl,
-                                        decoration: const InputDecoration(
-                                          labelText: 'serviceId',
-                                        ),
+                                        decoration: _input('serviceId'),
                                       ),
                                     ),
                                     const SizedBox(width: 10),
@@ -1654,9 +1672,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                                       child: TextField(
                                         controller: addonQtyCtrl,
                                         keyboardType: TextInputType.number,
-                                        decoration: const InputDecoration(
-                                          labelText: 'qty',
-                                        ),
+                                        decoration: _input('qty'),
                                       ),
                                     ),
                                   ],
@@ -1666,6 +1682,12 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                                   width: double.infinity,
                                   child: FilledButton.icon(
                                     onPressed: loading ? null : _addAddon,
+                                    style: FilledButton.styleFrom(
+                                      minimumSize: const Size.fromHeight(50),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(16),
+                                      ),
+                                    ),
                                     icon: const Icon(Icons.add),
                                     label: const Text('Добавить'),
                                   ),
@@ -1676,8 +1698,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                         ],
                       ),
                     ),
-
-                    // TAB: PAY (UPDATED)
                     SingleChildScrollView(
                       padding: EdgeInsets.only(
                         left: 12,
@@ -1687,7 +1707,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                       ),
                       child: Column(
                         children: [
-                          // ✅ NEW: Breakdown of charges for admin
                           _sectionCard(
                             title: 'Состав заказа',
                             trailing: IconButton(
@@ -1701,7 +1720,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                             ),
                             child: _chargesTable(),
                           ),
-
                           _sectionCard(
                             title: 'Статус оплаты',
                             trailing: Container(
@@ -1711,12 +1729,12 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                               ),
                               decoration: BoxDecoration(
                                 color: cs.surfaceContainerHighest.withValues(
-                                  alpha: 0.20,
+                                  alpha: 0.18,
                                 ),
                                 borderRadius: BorderRadius.circular(14),
                                 border: Border.all(
                                   color: cs.outlineVariant.withValues(
-                                    alpha: 0.55,
+                                    alpha: 0.5,
                                   ),
                                 ),
                               ),
@@ -1769,7 +1787,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                               ],
                             ),
                           ),
-
                           if (toPay > 0)
                             _sectionCard(
                               title: 'Оплатить остаток',
@@ -1789,6 +1806,14 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                                     width: double.infinity,
                                     child: FilledButton.icon(
                                       onPressed: loading ? null : _payFully,
+                                      style: FilledButton.styleFrom(
+                                        minimumSize: const Size.fromHeight(50),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            16,
+                                          ),
+                                        ),
+                                      ),
                                       icon: const Icon(Icons.payments),
                                       label: const Text('Оплачено полностью'),
                                     ),
@@ -1809,8 +1834,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                         ],
                       ),
                     ),
-
-                    // TAB: DISCOUNT
                     SingleChildScrollView(
                       padding: EdgeInsets.only(
                         left: 12,
@@ -1838,15 +1861,13 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                                   TextField(
                                     controller: discountCtrl,
                                     keyboardType: TextInputType.number,
-                                    decoration: const InputDecoration(
-                                      labelText: 'Скидка (₽)',
-                                    ),
+                                    decoration: _input('Скидка (₽)'),
                                   ),
                                   const SizedBox(height: 10),
                                   TextField(
                                     controller: discountReasonCtrl,
-                                    decoration: const InputDecoration(
-                                      labelText: 'Причина скидки (обязательно)',
+                                    decoration: _input(
+                                      'Причина скидки (обязательно)',
                                     ),
                                   ),
                                   const SizedBox(height: 12),
@@ -1856,6 +1877,14 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                                       onPressed: loading
                                           ? null
                                           : _applyDiscount,
+                                      style: FilledButton.styleFrom(
+                                        minimumSize: const Size.fromHeight(50),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            16,
+                                          ),
+                                        ),
+                                      ),
                                       child: const Text('Применить скидку'),
                                     ),
                                   ),
@@ -1865,8 +1894,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                         ],
                       ),
                     ),
-
-                    // TAB: MOVE
                     SingleChildScrollView(
                       padding: EdgeInsets.only(
                         left: 12,
@@ -1899,6 +1926,15 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                                           onPressed: loading || !_canMove
                                               ? null
                                               : _pickMoveDateTime,
+                                          style: OutlinedButton.styleFrom(
+                                            minimumSize: const Size.fromHeight(
+                                              52,
+                                            ),
+                                            shape: RoundedRectangleBorder(
+                                              borderRadius:
+                                                  BorderRadius.circular(16),
+                                            ),
+                                          ),
                                           child: Text(
                                             selectedDateTimeLocal == null
                                                 ? 'Выбрать дату/время'
@@ -1913,9 +1949,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                                         width: 130,
                                         child: DropdownButtonFormField<int>(
                                           initialValue: selectedBay,
-                                          decoration: const InputDecoration(
-                                            labelText: 'Пост',
-                                          ),
+                                          decoration: _input('Пост'),
                                           items: const [
                                             DropdownMenuItem(
                                               value: 1,
@@ -1968,15 +2002,13 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                                             () => moveReasonKind =
                                                 v ?? _moveReasons.first,
                                           ),
-                                    decoration: const InputDecoration(
-                                      labelText: 'Причина',
-                                    ),
+                                    decoration: _input('Причина'),
                                   ),
                                   const SizedBox(height: 10),
                                   TextField(
                                     controller: moveCommentCtrl,
-                                    decoration: const InputDecoration(
-                                      labelText: 'Комментарий (обязательно)',
+                                    decoration: _input(
+                                      'Комментарий (обязательно)',
                                     ),
                                   ),
                                   const SizedBox(height: 12),
@@ -1986,6 +2018,14 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                                       onPressed: loading || !_canMove
                                           ? null
                                           : _move,
+                                      style: FilledButton.styleFrom(
+                                        minimumSize: const Size.fromHeight(50),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            16,
+                                          ),
+                                        ),
+                                      ),
                                       child: const Text('Перенести'),
                                     ),
                                   ),
@@ -1995,8 +2035,6 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                         ],
                       ),
                     ),
-
-                    // TAB: PHOTOS
                     SingleChildScrollView(
                       padding: EdgeInsets.only(
                         left: 12,
@@ -2022,9 +2060,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                               children: [
                                 DropdownButtonFormField<String>(
                                   initialValue: photoKind,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Тип',
-                                  ),
+                                  decoration: _input('Тип'),
                                   items: const [
                                     DropdownMenuItem(
                                       value: 'BEFORE',
@@ -2052,8 +2088,8 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                                 const SizedBox(height: 10),
                                 TextField(
                                   controller: photoNoteCtrl,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Комментарий (необязательно)',
+                                  decoration: _input(
+                                    'Комментарий (необязательно)',
                                   ),
                                 ),
                                 const SizedBox(height: 12),
@@ -2064,6 +2100,12 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
                                         ? null
                                         : () =>
                                               _uploadPhotoFile(kind: photoKind),
+                                    style: FilledButton.styleFrom(
+                                      minimumSize: const Size.fromHeight(50),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(16),
+                                      ),
+                                    ),
                                     icon: const Icon(Icons.photo_camera),
                                     label: const Text(
                                       'Снять/выбрать и загрузить',

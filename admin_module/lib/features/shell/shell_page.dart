@@ -117,6 +117,13 @@ class _ShellPageState extends State<ShellPage> {
               decoration: BoxDecoration(
                 color: Colors.red,
                 borderRadius: BorderRadius.circular(999),
+                boxShadow: [
+                  BoxShadow(
+                    blurRadius: 6,
+                    offset: const Offset(0, 2),
+                    color: Colors.black.withValues(alpha: 0.25),
+                  ),
+                ],
               ),
               constraints: const BoxConstraints(minWidth: 18),
               child: Text(
@@ -136,7 +143,6 @@ class _ShellPageState extends State<ShellPage> {
 
   void _goShiftAndRefresh() {
     setState(() => idx = 0);
-    // дать кадр переключиться
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _shiftKey.currentState?.load();
     });
@@ -150,12 +156,6 @@ class _ShellPageState extends State<ShellPage> {
     });
   }
 
-  //////////////////////////////////////////////////////////////////////
-  ///
-  ///
-  ///
-  ///
-  ///
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -194,6 +194,8 @@ class _ShellPageState extends State<ShellPage> {
         ],
       ),
       bottomNavigationBar: NavigationBar(
+        height: 70,
+        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         selectedIndex: idx,
         onDestinationSelected: (v) {
           setState(() => idx = v);
@@ -201,20 +203,28 @@ class _ShellPageState extends State<ShellPage> {
         },
         destinations: [
           const NavigationDestination(
-            icon: Icon(Icons.event_note),
+            icon: Icon(Icons.event_note_outlined),
+            selectedIcon: Icon(Icons.event_note),
             label: 'Смена',
           ),
           const NavigationDestination(
-            icon: Icon(Icons.car_repair),
+            icon: Icon(Icons.car_repair_outlined),
+            selectedIcon: Icon(Icons.car_repair),
             label: 'Посты',
           ),
-          NavigationDestination(icon: _queueIconWithBadge(), label: 'Ожидание'),
+          NavigationDestination(
+            icon: _queueIconWithBadge(),
+            selectedIcon: _queueIconWithBadge(),
+            label: 'Ожидание',
+          ),
           const NavigationDestination(
             icon: Icon(Icons.add_box_outlined),
+            selectedIcon: Icon(Icons.add_box),
             label: 'Записать',
           ),
           const NavigationDestination(
             icon: Icon(Icons.people_alt_outlined),
+            selectedIcon: Icon(Icons.people_alt),
             label: 'Мойщики',
           ),
         ],
@@ -230,7 +240,6 @@ class RecordTab extends StatefulWidget {
   final SessionStore store;
   final AdminSession session;
 
-  // ✅ new: navigate+refresh after creation
   final VoidCallback onCreatedBooking;
   final VoidCallback onCreatedWaitlist;
 
@@ -283,8 +292,6 @@ class _RecordTabState extends State<RecordTab> {
 
   String get _locId => widget.session.locationId.trim();
 
-  // ---- helpers ----
-
   int _durationOf(Map<String, dynamic> s) {
     final v = s['durationMin'];
     if (v is int) return v;
@@ -299,6 +306,12 @@ class _RecordTabState extends State<RecordTab> {
     );
     final name = (s['name'] ?? '').toString().trim();
     return name.isEmpty ? id : name;
+  }
+
+  String _baseServiceLabel(Map<String, dynamic> s) {
+    final name = (s['name'] ?? '').toString().trim();
+    final dur = _durationOf(s);
+    return '$name ($dur мин)';
   }
 
   List<String> get _selectedAddonNames {
@@ -359,20 +372,17 @@ class _RecordTabState extends State<RecordTab> {
         composing: TextRange.empty,
       );
       _nameFormatting = false;
-      if (mounted) setState(() {}); // enables button
+      if (mounted) setState(() {});
     });
   }
 
   String _normalizePhoneForDb(String raw) {
     var s = raw.trim();
     if (s.isEmpty) return s;
-    // keep only + and digits
     s = s.replaceAll(RegExp(r'[^\d\+]'), '');
-    // if starts with 8XXXXXXXXXX -> +7XXXXXXXXXX
     if (s.startsWith('8') && s.length == 11) {
       s = '+7${s.substring(1)}';
     }
-    // if starts with 7XXXXXXXXXX -> +7XXXXXXXXXX
     if (!s.startsWith('+') && s.startsWith('7') && s.length == 11) {
       s = '+$s';
     }
@@ -420,34 +430,56 @@ class _RecordTabState extends State<RecordTab> {
 
     try {
       final sid = widget.session.activeShiftId ?? '';
-      if (sid.isEmpty) throw Exception('Нет активной смены. Перезайди.');
-      final loc = _locId;
-      if (loc.isEmpty) throw Exception('Нет locationId в сессии. Перезайди.');
+      if (sid.isEmpty) {
+        throw Exception('Нет активной смены. Перезайди.');
+      }
 
-      final bays = await widget.api.listBays(widget.session.userId, sid);
-      final act = <int>[];
-      for (final x in bays) {
-        if (x is Map<String, dynamic>) {
-          final n = (x['number'] as num?)?.toInt();
-          final a = x['isActive'] == true;
-          if (n != null && a && (n == 1 || n == 2)) act.add(n);
+      final loc = _locId;
+      if (loc.isEmpty) {
+        throw Exception('Нет locationId в сессии. Перезайди.');
+      }
+
+      final baysResponse = await widget.api.listBays(
+        widget.session.userId,
+        sid,
+      );
+      final active = <int>[];
+
+      for (final item in baysResponse) {
+        if (item is Map<String, dynamic>) {
+          final n = (item['number'] as num?)?.toInt();
+          final isActive = item['isActive'] == true;
+          if (n != null && isActive && (n == 1 || n == 2)) {
+            active.add(n);
+          }
         }
       }
-      if (act.isNotEmpty) {
-        activeBays = act;
-        if (!activeBays.contains(selectedBay)) selectedBay = activeBays.first;
+
+      if (active.isNotEmpty) {
+        activeBays = active;
+        if (!activeBays.contains(selectedBay)) {
+          selectedBay = activeBays.first;
+        }
       }
 
-      final base = await widget.api.services(locationId: loc, kind: 'BASE');
-      final add = await widget.api.services(locationId: loc, kind: 'ADDON');
+      final baseResponse = await widget.api.services(
+        locationId: loc,
+        kind: 'BASE',
+      );
 
-      baseServices = base
+      final addonResponse = await widget.api.services(
+        locationId: loc,
+        kind: 'ADDON',
+      );
+
+      baseServices = baseResponse
           .whereType<Map>()
-          .map((e) => e.cast<String, dynamic>())
+          .map((e) => Map<String, dynamic>.from(e))
           .toList();
-      addonServices = add
+
+      addonServices = addonResponse
           .whereType<Map>()
-          .map((e) => e.cast<String, dynamic>())
+          .map((e) => Map<String, dynamic>.from(e))
           .toList();
 
       if (baseServices.isNotEmpty) {
@@ -461,7 +493,9 @@ class _RecordTabState extends State<RecordTab> {
     } catch (e) {
       error = e.toString();
     } finally {
-      if (mounted) setState(() => loading = false);
+      if (mounted) {
+        setState(() => loading = false);
+      }
     }
   }
 
@@ -557,30 +591,199 @@ class _RecordTabState extends State<RecordTab> {
   Widget _sectionBox(
     BuildContext ctx, {
     required String title,
+    String? subtitle,
+    Widget? trailing,
     required Widget child,
   }) {
     final cs = Theme.of(ctx).colorScheme;
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: cs.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
+        boxShadow: [
+          BoxShadow(
+            blurRadius: 12,
+            offset: const Offset(0, 6),
+            color: Colors.black.withValues(alpha: 0.04),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            title,
-            style: TextStyle(
-              fontWeight: FontWeight.w900,
-              color: cs.onSurface.withValues(alpha: 0.9),
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w900,
+                        fontSize: 14,
+                        color: cs.onSurface.withValues(alpha: 0.92),
+                      ),
+                    ),
+                    if (subtitle != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        subtitle,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: cs.onSurface.withValues(alpha: 0.64),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              if (trailing != null) trailing,
+            ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           child,
         ],
+      ),
+    );
+  }
+
+  Widget _summaryRow(
+    BuildContext context, {
+    required IconData icon,
+    required String label,
+    required String value,
+  }) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.14),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.45)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: cs.primary),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                color: cs.onSurface.withValues(alpha: 0.72),
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Flexible(
+            child: Text(
+              value,
+              textAlign: TextAlign.right,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontWeight: FontWeight.w900,
+                color: cs.onSurface.withValues(alpha: 0.92),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _addonTile(Map<String, dynamic> s) {
+    final cs = Theme.of(context).colorScheme;
+    final id = (s['id'] ?? '').toString();
+    final name = (s['name'] ?? '').toString().trim();
+    final dur = _durationOf(s);
+    final selected = selectedAddonIds.contains(id);
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: () {
+        setState(() {
+          if (selected) {
+            selectedAddonIds.remove(id);
+          } else {
+            selectedAddonIds.add(id);
+          }
+          if (selectedSlot != null && !_isFree(selectedSlot!)) {
+            selectedSlot = null;
+          }
+        });
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: selected
+              ? cs.primary.withValues(alpha: 0.12)
+              : cs.surface.withValues(alpha: 0.60),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: selected
+                ? cs.primary.withValues(alpha: 0.65)
+                : cs.outlineVariant.withValues(alpha: 0.50),
+            width: selected ? 1.3 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 160),
+              width: 22,
+              height: 22,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: selected ? cs.primary : Colors.transparent,
+                border: Border.all(
+                  color: selected ? cs.primary : cs.outlineVariant,
+                  width: 1.4,
+                ),
+              ),
+              child: selected
+                  ? Icon(Icons.check, size: 14, color: cs.onPrimary)
+                  : null,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                name,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  color: cs.onSurface.withValues(alpha: 0.94),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(999),
+                color: cs.surfaceContainerHighest.withValues(alpha: 0.20),
+                border: Border.all(
+                  color: cs.outlineVariant.withValues(alpha: 0.50),
+                ),
+              ),
+              child: Text(
+                '+$dur мин',
+                style: TextStyle(
+                  fontWeight: FontWeight.w900,
+                  fontSize: 12,
+                  color: cs.onSurface.withValues(alpha: 0.88),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -644,7 +847,6 @@ class _RecordTabState extends State<RecordTab> {
 
       if (!mounted) return;
 
-      // reset
       setState(() {
         selectedAddonIds.clear();
         selectedSlot = null;
@@ -660,7 +862,6 @@ class _RecordTabState extends State<RecordTab> {
         ),
       );
 
-      // ✅ navigate based on backend resultType (BOOKING vs WAITLIST)
       final rt = (res['resultType'] ?? '').toString().toUpperCase();
       if (rt == 'WAITLIST') {
         widget.onCreatedWaitlist();
@@ -691,13 +892,8 @@ class _RecordTabState extends State<RecordTab> {
     );
     final slots = _freeSlots();
 
-    final addonNames = _selectedAddonNames;
-    final addonLine = addonNames.isEmpty
-        ? 'Доп. услуги: —'
-        : 'Доп. услуги: ${addonNames.join(', ')}';
-    final totalLine = 'Основная: ${selectedServiceName ?? '—'} • $addonLine';
-    final calcLine =
-        'Итого: ${baseMin + extraMin} мин + буфер $_bufferMin = блок $blockMin мин';
+    final selectedAddons = _selectedAddonNames;
+    final addonsCount = selectedAddons.length;
 
     return Scaffold(
       appBar: AppBar(
@@ -726,77 +922,135 @@ class _RecordTabState extends State<RecordTab> {
                 _sectionBox(
                   context,
                   title: 'Пост и услуга',
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: DropdownButtonFormField<int>(
-                          key: ValueKey('bay_$selectedBay'),
-                          initialValue: selectedBay,
-                          decoration: const InputDecoration(labelText: 'Пост'),
-                          items: [
-                            for (final b in activeBays)
-                              DropdownMenuItem(
-                                value: b,
-                                child: Text('Пост $b'),
+                  subtitle: 'Выбери пост и основную услугу для записи',
+                  child: LayoutBuilder(
+                    builder: (context, c) {
+                      final isNarrow = c.maxWidth < 640;
+                      final bayField = DropdownButtonFormField<int>(
+                        key: ValueKey('bay_$selectedBay'),
+                        initialValue: selectedBay,
+                        isExpanded: true,
+                        decoration: const InputDecoration(labelText: 'Пост'),
+                        items: [
+                          for (final b in activeBays)
+                            DropdownMenuItem(
+                              value: b,
+                              child: Text(
+                                'Пост $b',
+                                overflow: TextOverflow.ellipsis,
                               ),
-                          ],
-                          onChanged: (v) async {
-                            final next = v ?? activeBays.first;
-                            if (next == selectedBay) return;
-                            setState(() {
-                              selectedBay = next;
-                              selectedSlot = null;
-                            });
-                            await _refresh();
-                          },
+                            ),
+                        ],
+                        onChanged: (v) async {
+                          final next = v ?? activeBays.first;
+                          if (next == selectedBay) return;
+                          setState(() {
+                            selectedBay = next;
+                            selectedSlot = null;
+                          });
+                          await _refresh();
+                        },
+                      );
+
+                      final serviceField = DropdownButtonFormField<String>(
+                        key: ValueKey('svc_${selectedServiceId ?? ''}'),
+                        initialValue: selectedServiceId,
+                        isExpanded: true,
+                        menuMaxHeight: 360,
+                        decoration: const InputDecoration(
+                          labelText: 'Основная услуга',
                         ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: DropdownButtonFormField<String>(
-                          key: ValueKey('svc_${selectedServiceId ?? ''}'),
-                          initialValue: selectedServiceId,
-                          decoration: const InputDecoration(
-                            labelText: 'Основная услуга',
-                          ),
-                          items: [
-                            for (final s in baseServices)
-                              DropdownMenuItem(
-                                value: (s['id'] ?? '').toString(),
-                                child: Text(
-                                  '${(s['name'] ?? '').toString()} (${_durationOf(s)} мин)',
-                                ),
+                        selectedItemBuilder: (context) {
+                          return baseServices.map((s) {
+                            return Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                _baseServiceLabel(s),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                               ),
-                          ],
-                          onChanged: (v) {
-                            final id = (v ?? '').toString();
-                            if (id.isEmpty) return;
-                            final sel = baseServices.firstWhere(
-                              (x) => (x['id'] ?? '').toString() == id,
-                              orElse: () => baseServices.first,
                             );
-                            setState(() {
-                              selectedServiceId = id;
-                              selectedServiceName = (sel['name'] ?? '')
-                                  .toString();
-                              baseMin = _durationOf(sel);
-                              if (selectedSlot != null &&
-                                  !_isFree(selectedSlot!)) {
-                                selectedSlot = null;
-                              }
-                            });
-                          },
-                        ),
-                      ),
-                    ],
+                          }).toList();
+                        },
+                        items: [
+                          for (final s in baseServices)
+                            DropdownMenuItem(
+                              value: (s['id'] ?? '').toString(),
+                              child: Text(
+                                _baseServiceLabel(s),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                        ],
+                        onChanged: (v) {
+                          final id = (v ?? '').toString();
+                          if (id.isEmpty) return;
+                          final sel = baseServices.firstWhere(
+                            (x) => (x['id'] ?? '').toString() == id,
+                            orElse: () => baseServices.first,
+                          );
+                          setState(() {
+                            selectedServiceId = id;
+                            selectedServiceName = (sel['name'] ?? '')
+                                .toString();
+                            baseMin = _durationOf(sel);
+                            if (selectedSlot != null &&
+                                !_isFree(selectedSlot!)) {
+                              selectedSlot = null;
+                            }
+                          });
+                        },
+                      );
+
+                      if (isNarrow) {
+                        return Column(
+                          children: [
+                            bayField,
+                            const SizedBox(height: 10),
+                            serviceField,
+                          ],
+                        );
+                      }
+
+                      return Row(
+                        children: [
+                          Expanded(child: bayField),
+                          const SizedBox(width: 10),
+                          Expanded(flex: 2, child: serviceField),
+                        ],
+                      );
+                    },
                   ),
                 ),
-
                 const SizedBox(height: 12),
-
                 _sectionBox(
                   context,
                   title: 'Доп. услуги',
+                  subtitle: 'Можно добавить несколько опций к основной мойке',
+                  trailing: addonsCount > 0
+                      ? Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 7,
+                          ),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(999),
+                            color: cs.primary.withValues(alpha: 0.14),
+                            border: Border.all(
+                              color: cs.primary.withValues(alpha: 0.35),
+                            ),
+                          ),
+                          child: Text(
+                            '$addonsCount выбрано',
+                            style: TextStyle(
+                              color: cs.primary,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        )
+                      : null,
                   child: addonServices.isEmpty
                       ? Text(
                           'Доп. услуги не настроены',
@@ -805,70 +1059,93 @@ class _RecordTabState extends State<RecordTab> {
                             fontWeight: FontWeight.w700,
                           ),
                         )
-                      : Wrap(
-                          spacing: 10,
-                          runSpacing: 10,
+                      : Column(
                           children: [
-                            for (final s in addonServices)
-                              FilterChip(
-                                label: Text(
-                                  '${(s['name'] ?? '').toString()} (+${_durationOf(s)} мин)',
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w900,
-                                  ),
+                            for (final s in addonServices) ...[
+                              _addonTile(s),
+                              if (s != addonServices.last)
+                                const SizedBox(height: 10),
+                            ],
+                            if (selectedAddons.isNotEmpty) ...[
+                              const SizedBox(height: 12),
+                              Align(
+                                alignment: Alignment.centerLeft,
+                                child: Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: [
+                                    for (final name in selectedAddons)
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 10,
+                                          vertical: 7,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          borderRadius: BorderRadius.circular(
+                                            999,
+                                          ),
+                                          color: cs.surface.withValues(
+                                            alpha: 0.8,
+                                          ),
+                                          border: Border.all(
+                                            color: cs.outlineVariant.withValues(
+                                              alpha: 0.5,
+                                            ),
+                                          ),
+                                        ),
+                                        child: Text(
+                                          name,
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w800,
+                                            color: cs.onSurface.withValues(
+                                              alpha: 0.88,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                  ],
                                 ),
-                                selected: selectedAddonIds.contains(
-                                  (s['id'] ?? '').toString(),
-                                ),
-                                onSelected: (v) {
-                                  final id = (s['id'] ?? '').toString();
-                                  setState(() {
-                                    if (v) {
-                                      selectedAddonIds.add(id);
-                                    } else {
-                                      selectedAddonIds.remove(id);
-                                    }
-                                    if (selectedSlot != null &&
-                                        !_isFree(selectedSlot!)) {
-                                      selectedSlot = null;
-                                    }
-                                  });
-                                },
                               ),
+                            ],
                           ],
                         ),
                 ),
-
                 const SizedBox(height: 12),
-
                 _sectionBox(
                   context,
                   title: 'Итог',
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 10,
-                    ),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
-                        color: cs.outlineVariant.withValues(alpha: 0.6),
+                  subtitle:
+                      'Итоговая длительность с учётом доп. услуг и буфера',
+                  child: Column(
+                    children: [
+                      _summaryRow(
+                        context,
+                        icon: Icons.local_car_wash,
+                        label: 'Основная услуга',
+                        value: selectedServiceName ?? '—',
                       ),
-                      color: cs.surfaceContainerHighest.withValues(alpha: 0.14),
-                    ),
-                    child: Text(
-                      '$totalLine\n$calcLine',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w900,
-                        fontSize: 12,
+                      const SizedBox(height: 10),
+                      _summaryRow(
+                        context,
+                        icon: Icons.extension,
+                        label: 'Доп. услуги',
+                        value: selectedAddons.isEmpty
+                            ? '—'
+                            : selectedAddons.join(', '),
                       ),
-                    ),
+                      const SizedBox(height: 10),
+                      _summaryRow(
+                        context,
+                        icon: Icons.schedule,
+                        label: 'Длительность / блок',
+                        value:
+                            '${baseMin + extraMin} мин + буфер $_bufferMin = $blockMin мин',
+                      ),
+                    ],
                   ),
                 ),
-
                 const SizedBox(height: 12),
-
                 _sectionBox(
                   context,
                   title: 'Дата',
@@ -921,12 +1198,11 @@ class _RecordTabState extends State<RecordTab> {
                     ),
                   ),
                 ),
-
                 const SizedBox(height: 12),
-
                 _sectionBox(
                   context,
-                  title: 'Время (только свободные)',
+                  title: 'Время',
+                  subtitle: 'Показаны только свободные слоты',
                   child: slots.isEmpty
                       ? Text(
                           'Нет доступных слотов на выбранный день.',
@@ -944,6 +1220,13 @@ class _RecordTabState extends State<RecordTab> {
                                   ? FilledButton(
                                       onPressed: () =>
                                           setState(() => selectedSlot = s),
+                                      style: FilledButton.styleFrom(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 14,
+                                          vertical: 10,
+                                        ),
+                                        shape: const StadiumBorder(),
+                                      ),
                                       child: Text(
                                         DateFormat('HH:mm').format(s),
                                         style: const TextStyle(
@@ -954,6 +1237,13 @@ class _RecordTabState extends State<RecordTab> {
                                   : OutlinedButton(
                                       onPressed: () =>
                                           setState(() => selectedSlot = s),
+                                      style: OutlinedButton.styleFrom(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 14,
+                                          vertical: 10,
+                                        ),
+                                        shape: const StadiumBorder(),
+                                      ),
                                       child: Text(
                                         DateFormat('HH:mm').format(s),
                                         style: const TextStyle(
@@ -964,12 +1254,11 @@ class _RecordTabState extends State<RecordTab> {
                           ],
                         ),
                 ),
-
                 const SizedBox(height: 12),
-
                 _sectionBox(
                   context,
-                  title: 'Клиент (по звонку)',
+                  title: 'Клиент',
+                  subtitle: 'Данные для записи по звонку',
                   child: Column(
                     children: [
                       TextField(
@@ -999,6 +1288,7 @@ class _RecordTabState extends State<RecordTab> {
                       DropdownButtonFormField<String>(
                         key: ValueKey('body_$bodyType'),
                         initialValue: bodyType,
+                        isExpanded: true,
                         decoration: const InputDecoration(
                           labelText: 'Тип кузова',
                         ),
@@ -1031,9 +1321,7 @@ class _RecordTabState extends State<RecordTab> {
                     ],
                   ),
                 ),
-
                 const SizedBox(height: 14),
-
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton.icon(
@@ -1085,7 +1373,7 @@ class _ShiftTabState extends State<ShiftTab> {
   StreamSubscription<BookingRealtimeEvent>? _rtSub;
   Timer? _rtDebounce;
 
-  int bayTab = 0; // 0 => bay 1, 1 => bay 2
+  int bayTab = 0;
 
   bool get cashEnabled =>
       widget.session.featureOn('CASH_DRAWER', defaultValue: true);
@@ -1236,7 +1524,6 @@ class _ShiftTabState extends State<ShiftTab> {
     }
   }
 
-  // ✅ AUTOCALC: keep + handover = counted (two-way)
   Future<void> closeShiftWithCash() async {
     final userId = widget.session.userId;
     final shiftId = widget.session.activeShiftId ?? '';
@@ -1253,7 +1540,7 @@ class _ShiftTabState extends State<ShiftTab> {
       final handoverCtrl = TextEditingController(text: '0');
       final noteCtrl = TextEditingController(text: '');
 
-      String lastEdited = 'keep'; // 'keep' | 'handover'
+      String lastEdited = 'keep';
 
       void recalcFromKeep() {
         final counted = int.tryParse(countedCtrl.text.trim()) ?? 0;
@@ -1273,7 +1560,6 @@ class _ShiftTabState extends State<ShiftTab> {
         keepCtrl.text = keep.toString();
       }
 
-      // initial fill
       recalcFromKeep();
 
       final ok = await showDialog<bool>(
@@ -1284,6 +1570,18 @@ class _ShiftTabState extends State<ShiftTab> {
             builder: (ctx, setStateDialog) {
               final counted = int.tryParse(countedCtrl.text.trim()) ?? 0;
               final diff = counted - expectedRub;
+              final cs = Theme.of(ctx).colorScheme;
+
+              InputDecoration input(String label) {
+                return InputDecoration(
+                  labelText: label,
+                  filled: true,
+                  fillColor: cs.surfaceContainerHighest.withValues(alpha: 0.12),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                );
+              }
 
               return AlertDialog(
                 title: const Text('Закрытие кассы'),
@@ -1320,9 +1618,7 @@ class _ShiftTabState extends State<ShiftTab> {
                       TextField(
                         controller: countedCtrl,
                         keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Фактически в кассе (₽)',
-                        ),
+                        decoration: input('Фактически в кассе (₽)'),
                         onChanged: (_) {
                           if (lastEdited == 'handover') {
                             recalcFromHandover();
@@ -1336,32 +1632,28 @@ class _ShiftTabState extends State<ShiftTab> {
                       TextField(
                         controller: keepCtrl,
                         keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Оставить в кассе (₽)',
-                        ),
+                        decoration: input('Оставить в кассе (₽)'),
                         onChanged: (_) {
                           lastEdited = 'keep';
                           recalcFromKeep();
                           setStateDialog(() {});
                         },
                       ),
+                      const SizedBox(height: 10),
                       TextField(
                         controller: handoverCtrl,
                         keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Сдать владельцу (₽)',
-                        ),
+                        decoration: input('Сдать владельцу (₽)'),
                         onChanged: (_) {
                           lastEdited = 'handover';
                           recalcFromHandover();
                           setStateDialog(() {});
                         },
                       ),
+                      const SizedBox(height: 10),
                       TextField(
                         controller: noteCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'Комментарий (необязательно)',
-                        ),
+                        decoration: input('Комментарий (необязательно)'),
                       ),
                     ],
                   ),
@@ -1731,40 +2023,111 @@ class _ShiftTabState extends State<ShiftTab> {
     );
   }
 
+  Widget _headerCard(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.5)),
+        boxShadow: [
+          BoxShadow(
+            blurRadius: 14,
+            offset: const Offset(0, 6),
+            color: Colors.black.withValues(alpha: 0.04),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: cs.primary.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: cs.primary.withValues(alpha: 0.18)),
+            ),
+            child: Icon(Icons.event_note, color: cs.primary),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  ruTitle(),
+                  style: tt.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    color: cs.onSurface.withValues(alpha: 0.96),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Текущая смена и записи по постам.',
+                  style: tt.bodySmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: cs.onSurface.withValues(alpha: 0.66),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _toolbarCard(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          OutlinedButton.icon(
+            onPressed: () => shiftDay(-1),
+            icon: const Icon(Icons.chevron_left),
+            label: const Text('Вчера'),
+          ),
+          OutlinedButton.icon(
+            onPressed: () {
+              setState(() => selectedDay = DateTime.now());
+              load();
+            },
+            icon: const Icon(Icons.today),
+            label: const Text('Сегодня'),
+          ),
+          OutlinedButton.icon(
+            onPressed: () => shiftDay(1),
+            icon: const Icon(Icons.chevron_right),
+            label: const Text('Завтра'),
+          ),
+          IconButton(icon: const Icon(Icons.refresh), onPressed: load),
+          FilledButton(
+            onPressed: closeShift,
+            child: const Text('Закрыть смену'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final bayId = bayTab == 0 ? 1 : 2;
     final list = _bayBookings(bayId);
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(ruTitle()),
-        actions: [
-          IconButton(
-            tooltip: 'Вчера',
-            onPressed: () => shiftDay(-1),
-            icon: const Icon(Icons.chevron_left),
-          ),
-          IconButton(
-            tooltip: 'Сегодня',
-            onPressed: () {
-              setState(() => selectedDay = DateTime.now());
-              load();
-            },
-            icon: const Icon(Icons.today),
-          ),
-          IconButton(
-            tooltip: 'Завтра',
-            onPressed: () => shiftDay(1),
-            icon: const Icon(Icons.chevron_right),
-          ),
-          IconButton(icon: const Icon(Icons.refresh), onPressed: load),
-          TextButton(onPressed: closeShift, child: const Text('Закрыть смену')),
-          const SizedBox(width: 8),
-        ],
-      ),
+      appBar: AppBar(title: const Text('Смена')),
       body: Column(
         children: [
+          _headerCard(context),
+          _toolbarCard(context),
           _bayTabs(context),
           Expanded(
             child: loading
@@ -1800,7 +2163,6 @@ class _ShiftTabState extends State<ShiftTab> {
 }
 
 /* ========================= TAB 2: ПОСТЫ ========================= */
-/* Ниже — твой код BaysTab без изменений (как у тебя) */
 
 class BaysTab extends StatefulWidget {
   final AdminApiClient api;
@@ -1996,6 +2358,62 @@ class _BaysTabState extends State<BaysTab> {
     );
   }
 
+  Widget _headerCard() {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.5)),
+        boxShadow: [
+          BoxShadow(
+            blurRadius: 14,
+            offset: const Offset(0, 6),
+            color: Colors.black.withValues(alpha: 0.04),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: cs.primary.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: cs.primary.withValues(alpha: 0.18)),
+            ),
+            child: Icon(Icons.car_repair, color: cs.primary),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Посты',
+                  style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w900),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Открытие и закрытие постов для текущей смены.',
+                  style: tt.bodySmall?.copyWith(
+                    color: cs.onSurface.withValues(alpha: 0.66),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -2015,17 +2433,19 @@ class _BaysTabState extends State<BaysTab> {
                 child: Text(error!, style: const TextStyle(color: Colors.red)),
               ),
             )
-          : Padding(
-              padding: const EdgeInsets.all(12),
-              child: Row(
-                children: [bayCard(1), const SizedBox(width: 10), bayCard(2)],
-              ),
+          : ListView(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              children: [
+                _headerCard(),
+                const SizedBox(height: 12),
+                Row(
+                  children: [bayCard(1), const SizedBox(width: 10), bayCard(2)],
+                ),
+              ],
             ),
     );
   }
 }
-
-// ======================= SHELL_PAGE.dart — PART B (2/2) =======================
 
 /* ========================= TAB 3: ОЖИДАНИЕ ========================= */
 
@@ -2056,7 +2476,6 @@ class _WaitlistTabState extends State<WaitlistTab> {
   StreamSubscription<BookingRealtimeEvent>? _rtSub;
   Timer? _rtDebounce;
 
-  // slot rules (align with server)
   static const int _slotStepMin = 30;
   static const int _bufferMin = 15;
   static const int _openHour = 8;
@@ -2138,7 +2557,6 @@ class _WaitlistTabState extends State<WaitlistTab> {
     return DateFormat('HH:mm').format(dt);
   }
 
-  // ✅ new day chips + sections (Yandex-ish)
   String _weekdayShortRu(int weekday) {
     switch (weekday) {
       case DateTime.monday:
@@ -2167,11 +2585,18 @@ class _WaitlistTabState extends State<WaitlistTab> {
     final cs = Theme.of(ctx).colorScheme;
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: cs.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
+        boxShadow: [
+          BoxShadow(
+            blurRadius: 12,
+            offset: const Offset(0, 6),
+            color: Colors.black.withValues(alpha: 0.04),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2180,10 +2605,11 @@ class _WaitlistTabState extends State<WaitlistTab> {
             title,
             style: TextStyle(
               fontWeight: FontWeight.w900,
-              color: cs.onSurface.withValues(alpha: 0.9),
+              fontSize: 14,
+              color: cs.onSurface.withValues(alpha: 0.92),
             ),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           child,
         ],
       ),
@@ -2257,7 +2683,6 @@ class _WaitlistTabState extends State<WaitlistTab> {
     return q * stepMin;
   }
 
-  // ✅ FIX: TODAY => not show slots in the past
   List<DateTime> _buildSlotsForDay(DateTime day) {
     final now = DateTime.now();
 
@@ -2374,7 +2799,6 @@ class _WaitlistTabState extends State<WaitlistTab> {
     );
   }
 
-  // ✅ NEW: delete waitlist from UI (with reason + audit on backend)
   Future<void> _deleteWaitlist(
     Map<String, dynamic> w, {
     required BuildContext sheetCtx,
@@ -2421,6 +2845,7 @@ class _WaitlistTabState extends State<WaitlistTab> {
 
     final reason = reasonCtrl.text.trim();
     if (reason.isEmpty) {
+      // ignore: use_build_context_synchronously
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Причина обязательна'),
@@ -2442,9 +2867,11 @@ class _WaitlistTabState extends State<WaitlistTab> {
 
       if (!mounted) return;
 
+      // ignore: use_build_context_synchronously
       Navigator.of(sheetCtx).pop();
       await load();
 
+      // ignore: use_build_context_synchronously
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Удалено из ожидания'),
@@ -2464,8 +2891,6 @@ class _WaitlistTabState extends State<WaitlistTab> {
     }
   }
 
-  // ====== CONTINUATION: WaitlistTab (from _openConvertToQueueSheet to end) ======
-
   Future<void> _openConvertToQueueSheet(Map<String, dynamic> w) async {
     final sid = widget.session.activeShiftId ?? '';
     if (sid.isEmpty) {
@@ -2475,7 +2900,6 @@ class _WaitlistTabState extends State<WaitlistTab> {
       return;
     }
 
-    // запрет если все посты закрыты
     final bays = await widget.api.listBays(widget.session.userId, sid);
     final activeBays = <int>[];
     for (final x in bays) {
@@ -2487,6 +2911,7 @@ class _WaitlistTabState extends State<WaitlistTab> {
     }
 
     if (activeBays.isEmpty) {
+      // ignore: use_build_context_synchronously
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
@@ -2503,13 +2928,14 @@ class _WaitlistTabState extends State<WaitlistTab> {
 
     final locId = widget.session.locationId.trim();
     if (locId.isEmpty) {
+      // ignore: use_build_context_synchronously
       ScaffoldMessenger.of(
+        // ignore: use_build_context_synchronously
         context,
       ).showSnackBar(const SnackBar(content: Text('Нет locationId в сессии.')));
       return;
     }
 
-    // длительность слота: service.duration + buffer, округляем вверх до 30
     final dur = (w['service']?['durationMin'] as num?)?.toInt() ?? 30;
     final blockMin = _roundUpToStepMin(dur + _bufferMin, _slotStepMin);
 
@@ -2561,6 +2987,7 @@ class _WaitlistTabState extends State<WaitlistTab> {
     await loadBusy();
 
     await showModalBottomSheet(
+      // ignore: use_build_context_synchronously
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
@@ -2603,7 +3030,8 @@ class _WaitlistTabState extends State<WaitlistTab> {
             );
 
             if (!mounted) return;
-            Navigator.of(ctx).pop(); // close convert sheet
+            // ignore: use_build_context_synchronously
+            Navigator.of(ctx).pop();
             await load();
           } catch (e) {
             if (!mounted) return;
@@ -3075,52 +3503,129 @@ class _WaitlistTabState extends State<WaitlistTab> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(ruTitle()),
-        actions: [
-          IconButton(
-            tooltip: 'Вчера',
+  Widget _headerCard() {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.5)),
+        boxShadow: [
+          BoxShadow(
+            blurRadius: 14,
+            offset: const Offset(0, 6),
+            color: Colors.black.withValues(alpha: 0.04),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: cs.primary.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: cs.primary.withValues(alpha: 0.18)),
+            ),
+            child: Icon(Icons.queue, color: cs.primary),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  ruTitle(),
+                  style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w900),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Очередь ожидания на выбранный день.',
+                  style: tt.bodySmall?.copyWith(
+                    color: cs.onSurface.withValues(alpha: 0.66),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _toolbarCard() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          OutlinedButton.icon(
             onPressed: () => shiftDay(-1),
             icon: const Icon(Icons.chevron_left),
+            label: const Text('Вчера'),
           ),
-          IconButton(
-            tooltip: 'Сегодня',
+          OutlinedButton.icon(
             onPressed: () {
               setState(() => selectedDay = DateTime.now());
               load();
             },
             icon: const Icon(Icons.today),
+            label: const Text('Сегодня'),
           ),
-          IconButton(
-            tooltip: 'Завтра',
+          OutlinedButton.icon(
             onPressed: () => shiftDay(1),
             icon: const Icon(Icons.chevron_right),
+            label: const Text('Завтра'),
           ),
           IconButton(icon: const Icon(Icons.refresh), onPressed: load),
           const SizedBox(width: 8),
         ],
       ),
-      body: loading
-          ? const Center(child: CircularProgressIndicator())
-          : (error != null)
-          ? Center(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Text(error!, style: const TextStyle(color: Colors.red)),
-              ),
-            )
-          : waitlist.isEmpty
-          ? const Center(child: Text('Очередь пуста'))
-          : ListView.separated(
-              padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-              itemCount: waitlist.length,
-              separatorBuilder: (_, _) => const SizedBox(height: 10),
-              itemBuilder: (context, i) =>
-                  _waitlistCard(context, waitlist[i] as Map<String, dynamic>),
-            ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Ожидание')),
+      body: Column(
+        children: [
+          _headerCard(),
+          _toolbarCard(),
+          Expanded(
+            child: loading
+                ? const Center(child: CircularProgressIndicator())
+                : (error != null)
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Text(
+                        error!,
+                        style: const TextStyle(color: Colors.red),
+                      ),
+                    ),
+                  )
+                : waitlist.isEmpty
+                ? const Center(child: Text('Очередь пуста'))
+                : ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+                    itemCount: waitlist.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 10),
+                    itemBuilder: (context, i) => _waitlistCard(
+                      context,
+                      waitlist[i] as Map<String, dynamic>,
+                    ),
+                  ),
+          ),
+        ],
+      ),
     );
   }
 }

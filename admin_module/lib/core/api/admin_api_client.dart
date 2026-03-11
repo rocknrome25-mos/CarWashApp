@@ -1,11 +1,13 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 class AdminApiClient {
   final String baseUrl;
+
   AdminApiClient({required this.baseUrl});
 
-  static const _timeout = Duration(seconds: 12);
+  static const _timeout = Duration(seconds: 20);
 
   Uri _u(String path, [Map<String, String>? q]) {
     final uri = Uri.parse(baseUrl + path);
@@ -21,10 +23,37 @@ class AdminApiClient {
     return h;
   }
 
+  Future<http.Response> _withTimeout(
+    Future<http.Response> future,
+    String opName,
+  ) async {
+    try {
+      return await future.timeout(_timeout);
+    } on TimeoutException {
+      throw Exception('$opName timeout after ${_timeout.inSeconds}s');
+    }
+  }
+
+  Future<http.StreamedResponse> _withStreamTimeout(
+    Future<http.StreamedResponse> future,
+    String opName,
+  ) async {
+    try {
+      return await future.timeout(_timeout);
+    } on TimeoutException {
+      throw Exception('$opName timeout after ${_timeout.inSeconds}s');
+    }
+  }
+
   Map<String, dynamic> _decodeMap(http.Response res, String opName) {
     if (res.statusCode >= 400) {
       throw Exception('$opName failed: ${res.statusCode} ${res.body}');
     }
+
+    if (res.body.trim().isEmpty) {
+      return <String, dynamic>{};
+    }
+
     final d = jsonDecode(res.body);
     if (d is Map<String, dynamic>) return d;
     if (d is Map) return d.cast<String, dynamic>();
@@ -35,6 +64,11 @@ class AdminApiClient {
     if (res.statusCode >= 400) {
       throw Exception('$opName failed: ${res.statusCode} ${res.body}');
     }
+
+    if (res.body.trim().isEmpty) {
+      return const [];
+    }
+
     final d = jsonDecode(res.body);
     if (d is List) return d;
     if (d is Map<String, dynamic>) return [d];
@@ -45,65 +79,85 @@ class AdminApiClient {
   // ===== CONFIG =====
 
   Future<Map<String, dynamic>> getConfig(String locationId) async {
-    final res = await http
-        .get(_u('/config', {'locationId': locationId}), headers: _jsonHeaders())
-        .timeout(_timeout);
+    final res = await _withTimeout(
+      http.get(
+        _u('/config', {'locationId': locationId}),
+        headers: _jsonHeaders(),
+      ),
+      'config',
+    );
     return _decodeMap(res, 'config');
   }
 
   // ===== AUTH =====
 
   Future<Map<String, dynamic>> adminLogin(String phone) async {
-    final res = await http
-        .post(
-          _u('/admin/login'),
-          headers: _jsonHeaders(),
-          body: jsonEncode({'phone': phone}),
-        )
-        .timeout(_timeout);
+    final res = await _withTimeout(
+      http.post(
+        _u('/admin/login'),
+        headers: _jsonHeaders(),
+        body: jsonEncode({'phone': phone}),
+      ),
+      'login',
+    );
     return _decodeMap(res, 'login');
   }
 
   // ===== SHIFT =====
 
   Future<Map<String, dynamic>> openShift(String userId) async {
-    final res = await http
-        .post(_u('/admin/shifts/open'), headers: _jsonHeaders(userId: userId))
-        .timeout(_timeout);
+    final res = await _withTimeout(
+      http.post(
+        _u('/admin/shifts/open'),
+        headers: _jsonHeaders(userId: userId),
+      ),
+      'open shift',
+    );
     return _decodeMap(res, 'open shift');
   }
 
   Future<Map<String, dynamic>> closeShift(String userId, String shiftId) async {
-    final res = await http
-        .post(
-          _u('/admin/shifts/close'),
-          headers: _jsonHeaders(userId: userId, shiftId: shiftId),
-        )
-        .timeout(_timeout);
+    final res = await _withTimeout(
+      http.post(
+        _u('/admin/shifts/close'),
+        headers: _jsonHeaders(userId: userId, shiftId: shiftId),
+      ),
+      'close shift',
+    );
     return _decodeMap(res, 'close shift');
   }
 
   // ===== CALENDAR =====
 
-  Future<List<dynamic>> calendarDay(String userId, String shiftId, String ymd) async {
-    final res = await http
-        .get(
-          _u('/admin/calendar/day', {'date': ymd}),
-          headers: _jsonHeaders(userId: userId, shiftId: shiftId),
-        )
-        .timeout(_timeout);
+  Future<List<dynamic>> calendarDay(
+    String userId,
+    String shiftId,
+    String ymd,
+  ) async {
+    final res = await _withTimeout(
+      http.get(
+        _u('/admin/calendar/day', {'date': ymd}),
+        headers: _jsonHeaders(userId: userId, shiftId: shiftId),
+      ),
+      'calendar',
+    );
     return _decodeList(res, 'calendar');
   }
 
   // ===== WAITLIST =====
 
-  Future<List<dynamic>> waitlistDay(String userId, String shiftId, String ymd) async {
-    final res = await http
-        .get(
-          _u('/admin/waitlist/day', {'date': ymd}),
-          headers: _jsonHeaders(userId: userId, shiftId: shiftId),
-        )
-        .timeout(_timeout);
+  Future<List<dynamic>> waitlistDay(
+    String userId,
+    String shiftId,
+    String ymd,
+  ) async {
+    final res = await _withTimeout(
+      http.get(
+        _u('/admin/waitlist/day', {'date': ymd}),
+        headers: _jsonHeaders(userId: userId, shiftId: shiftId),
+      ),
+      'waitlist',
+    );
     return _decodeList(res, 'waitlist');
   }
 
@@ -120,13 +174,14 @@ class AdminApiClient {
         'dateTime': dateTimeIso.trim(),
     };
 
-    final res = await http
-        .post(
-          _u('/admin/waitlist/$waitlistId/convert'),
-          headers: _jsonHeaders(userId: userId, shiftId: shiftId),
-          body: jsonEncode(payload),
-        )
-        .timeout(_timeout);
+    final res = await _withTimeout(
+      http.post(
+        _u('/admin/waitlist/$waitlistId/convert'),
+        headers: _jsonHeaders(userId: userId, shiftId: shiftId),
+        body: jsonEncode(payload),
+      ),
+      'waitlist convert',
+    );
 
     return _decodeMap(res, 'waitlist convert');
   }
@@ -148,7 +203,7 @@ class AdminApiClient {
     req.headers.addAll(_jsonHeaders(userId: userId, shiftId: shiftId));
     req.body = jsonEncode(payload);
 
-    final streamed = await req.send().timeout(_timeout);
+    final streamed = await _withStreamTimeout(req.send(), 'waitlist delete');
     final res = await http.Response.fromStream(streamed);
 
     return _decodeMap(res, 'waitlist delete');
@@ -162,17 +217,18 @@ class AdminApiClient {
     required String fromIsoUtc,
     required String toIsoUtc,
   }) async {
-    final res = await http
-        .get(
-          _u('/bookings/busy', {
-            'locationId': locationId,
-            'bayId': bayId.toString(),
-            'from': fromIsoUtc,
-            'to': toIsoUtc,
-          }),
-          headers: _jsonHeaders(),
-        )
-        .timeout(_timeout);
+    final res = await _withTimeout(
+      http.get(
+        _u('/bookings/busy', {
+          'locationId': locationId,
+          'bayId': bayId.toString(),
+          'from': fromIsoUtc,
+          'to': toIsoUtc,
+        }),
+        headers: _jsonHeaders(),
+      ),
+      'busy slots',
+    );
 
     return _decodeList(res, 'busy slots');
   }
@@ -192,21 +248,23 @@ class AdminApiClient {
     if (k == 'BASE' || k == 'ADDON') q['kind'] = k;
     if (includeInactive) q['includeInactive'] = 'true';
 
-    final res = await http
-        .get(_u('/services', q), headers: _jsonHeaders())
-        .timeout(_timeout);
+    final res = await _withTimeout(
+      http.get(_u('/services', q), headers: _jsonHeaders()),
+      'services',
+    );
     return _decodeList(res, 'services');
   }
 
   // ===== BAYS =====
 
   Future<List<dynamic>> listBays(String userId, String shiftId) async {
-    final res = await http
-        .get(
-          _u('/admin/bays'),
-          headers: _jsonHeaders(userId: userId, shiftId: shiftId),
-        )
-        .timeout(_timeout);
+    final res = await _withTimeout(
+      http.get(
+        _u('/admin/bays'),
+        headers: _jsonHeaders(userId: userId, shiftId: shiftId),
+      ),
+      'list bays',
+    );
     return _decodeList(res, 'list bays');
   }
 
@@ -217,8 +275,9 @@ class AdminApiClient {
     required bool isActive,
     String? reason,
   }) async {
-    final path =
-        isActive ? '/admin/bays/$bayNumber/open' : '/admin/bays/$bayNumber/close';
+    final path = isActive
+        ? '/admin/bays/$bayNumber/open'
+        : '/admin/bays/$bayNumber/close';
 
     String? body;
     if (!isActive) {
@@ -227,13 +286,14 @@ class AdminApiClient {
       body = jsonEncode({'reason': r});
     }
 
-    final res = await http
-        .post(
-          _u(path),
-          headers: _jsonHeaders(userId: userId, shiftId: shiftId),
-          body: body,
-        )
-        .timeout(_timeout);
+    final res = await _withTimeout(
+      http.post(
+        _u(path),
+        headers: _jsonHeaders(userId: userId, shiftId: shiftId),
+        body: body,
+      ),
+      isActive ? 'open bay' : 'close bay',
+    );
 
     return _decodeMap(res, isActive ? 'open bay' : 'close bay');
   }
@@ -246,13 +306,14 @@ class AdminApiClient {
     String bookingId,
     String? adminNote,
   ) async {
-    final res = await http
-        .post(
-          _u('/admin/bookings/$bookingId/start'),
-          headers: _jsonHeaders(userId: userId, shiftId: shiftId),
-          body: jsonEncode({'adminNote': adminNote}),
-        )
-        .timeout(_timeout);
+    final res = await _withTimeout(
+      http.post(
+        _u('/admin/bookings/$bookingId/start'),
+        headers: _jsonHeaders(userId: userId, shiftId: shiftId),
+        body: jsonEncode({'adminNote': adminNote}),
+      ),
+      'start',
+    );
     return _decodeMap(res, 'start');
   }
 
@@ -262,13 +323,14 @@ class AdminApiClient {
     String bookingId,
     String? adminNote,
   ) async {
-    final res = await http
-        .post(
-          _u('/admin/bookings/$bookingId/finish'),
-          headers: _jsonHeaders(userId: userId, shiftId: shiftId),
-          body: jsonEncode({'adminNote': adminNote}),
-        )
-        .timeout(_timeout);
+    final res = await _withTimeout(
+      http.post(
+        _u('/admin/bookings/$bookingId/finish'),
+        headers: _jsonHeaders(userId: userId, shiftId: shiftId),
+        body: jsonEncode({'adminNote': adminNote}),
+      ),
+      'finish',
+    );
     return _decodeMap(res, 'finish');
   }
 
@@ -281,18 +343,19 @@ class AdminApiClient {
     required String reason,
     required bool clientAgreed,
   }) async {
-    final res = await http
-        .post(
-          _u('/admin/bookings/$bookingId/move'),
-          headers: _jsonHeaders(userId: userId, shiftId: shiftId),
-          body: jsonEncode({
-            'newDateTime': newDateTimeIso,
-            'newBayId': newBayId,
-            'reason': reason,
-            'clientAgreed': clientAgreed,
-          }),
-        )
-        .timeout(_timeout);
+    final res = await _withTimeout(
+      http.post(
+        _u('/admin/bookings/$bookingId/move'),
+        headers: _jsonHeaders(userId: userId, shiftId: shiftId),
+        body: jsonEncode({
+          'newDateTime': newDateTimeIso,
+          'newBayId': newBayId,
+          'reason': reason,
+          'clientAgreed': clientAgreed,
+        }),
+      ),
+      'move',
+    );
     return _decodeMap(res, 'move');
   }
 
@@ -317,13 +380,14 @@ class AdminApiClient {
       if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
     };
 
-    final res = await http
-        .post(
-          _u('/admin/bookings/$bookingId/pay'),
-          headers: _jsonHeaders(userId: userId, shiftId: shiftId),
-          body: jsonEncode(payload),
-        )
-        .timeout(_timeout);
+    final res = await _withTimeout(
+      http.post(
+        _u('/admin/bookings/$bookingId/pay'),
+        headers: _jsonHeaders(userId: userId, shiftId: shiftId),
+        body: jsonEncode(payload),
+      ),
+      'admin pay',
+    );
 
     return _decodeMap(res, 'admin pay');
   }
@@ -340,13 +404,14 @@ class AdminApiClient {
       'reason': reason.trim(),
     };
 
-    final res = await http
-        .post(
-          _u('/admin/bookings/$bookingId/discount'),
-          headers: _jsonHeaders(userId: userId, shiftId: shiftId),
-          body: jsonEncode(payload),
-        )
-        .timeout(_timeout);
+    final res = await _withTimeout(
+      http.post(
+        _u('/admin/bookings/$bookingId/discount'),
+        headers: _jsonHeaders(userId: userId, shiftId: shiftId),
+        body: jsonEncode(payload),
+      ),
+      'admin discount',
+    );
 
     return _decodeMap(res, 'admin discount');
   }
@@ -356,12 +421,13 @@ class AdminApiClient {
     String shiftId,
     String bookingId,
   ) async {
-    final res = await http
-        .get(
-          _u('/admin/bookings/$bookingId/addons'),
-          headers: _jsonHeaders(userId: userId, shiftId: shiftId),
-        )
-        .timeout(_timeout);
+    final res = await _withTimeout(
+      http.get(
+        _u('/admin/bookings/$bookingId/addons'),
+        headers: _jsonHeaders(userId: userId, shiftId: shiftId),
+      ),
+      'list addons',
+    );
     return _decodeList(res, 'list addons');
   }
 
@@ -377,13 +443,14 @@ class AdminApiClient {
       'qty': qty,
     };
 
-    final res = await http
-        .post(
-          _u('/admin/bookings/$bookingId/addons'),
-          headers: _jsonHeaders(userId: userId, shiftId: shiftId),
-          body: jsonEncode(payload),
-        )
-        .timeout(_timeout);
+    final res = await _withTimeout(
+      http.post(
+        _u('/admin/bookings/$bookingId/addons'),
+        headers: _jsonHeaders(userId: userId, shiftId: shiftId),
+        body: jsonEncode(payload),
+      ),
+      'add addon',
+    );
 
     return _decodeMap(res, 'add addon');
   }
@@ -394,12 +461,13 @@ class AdminApiClient {
     String bookingId, {
     required String serviceId,
   }) async {
-    final res = await http
-        .delete(
-          _u('/admin/bookings/$bookingId/addons/${serviceId.trim()}'),
-          headers: _jsonHeaders(userId: userId, shiftId: shiftId),
-        )
-        .timeout(_timeout);
+    final res = await _withTimeout(
+      http.delete(
+        _u('/admin/bookings/$bookingId/addons/${serviceId.trim()}'),
+        headers: _jsonHeaders(userId: userId, shiftId: shiftId),
+      ),
+      'remove addon',
+    );
 
     return _decodeMap(res, 'remove addon');
   }
@@ -409,12 +477,13 @@ class AdminApiClient {
     String shiftId,
     String bookingId,
   ) async {
-    final res = await http
-        .get(
-          _u('/admin/bookings/$bookingId/photos'),
-          headers: _jsonHeaders(userId: userId, shiftId: shiftId),
-        )
-        .timeout(_timeout);
+    final res = await _withTimeout(
+      http.get(
+        _u('/admin/bookings/$bookingId/photos'),
+        headers: _jsonHeaders(userId: userId, shiftId: shiftId),
+      ),
+      'list photos',
+    );
     return _decodeList(res, 'list photos');
   }
 
@@ -432,13 +501,14 @@ class AdminApiClient {
       if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
     };
 
-    final res = await http
-        .post(
-          _u('/admin/bookings/$bookingId/photos'),
-          headers: _jsonHeaders(userId: userId, shiftId: shiftId),
-          body: jsonEncode(payload),
-        )
-        .timeout(_timeout);
+    final res = await _withTimeout(
+      http.post(
+        _u('/admin/bookings/$bookingId/photos'),
+        headers: _jsonHeaders(userId: userId, shiftId: shiftId),
+        body: jsonEncode(payload),
+      ),
+      'add photo',
+    );
 
     return _decodeMap(res, 'add photo');
   }
@@ -454,26 +524,31 @@ class AdminApiClient {
       if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
     };
 
-    final res = await http
-        .post(
-          _u('/admin/cash/open-float'),
-          headers: _jsonHeaders(userId: userId, shiftId: shiftId),
-          body: jsonEncode(payload),
-        )
-        .timeout(_timeout);
+    final res = await _withTimeout(
+      http.post(
+        _u('/admin/cash/open-float'),
+        headers: _jsonHeaders(userId: userId, shiftId: shiftId),
+        body: jsonEncode(payload),
+      ),
+      'cash open-float',
+    );
 
     if (res.statusCode >= 400) {
       throw Exception('cash open-float failed: ${res.statusCode} ${res.body}');
     }
   }
 
-  Future<Map<String, dynamic>> cashExpected(String userId, String shiftId) async {
-    final res = await http
-        .get(
-          _u('/admin/cash/expected'),
-          headers: _jsonHeaders(userId: userId, shiftId: shiftId),
-        )
-        .timeout(_timeout);
+  Future<Map<String, dynamic>> cashExpected(
+    String userId,
+    String shiftId,
+  ) async {
+    final res = await _withTimeout(
+      http.get(
+        _u('/admin/cash/expected'),
+        headers: _jsonHeaders(userId: userId, shiftId: shiftId),
+      ),
+      'cash expected',
+    );
     return _decodeMap(res, 'cash expected');
   }
 
@@ -492,13 +567,14 @@ class AdminApiClient {
       if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
     };
 
-    final res = await http
-        .post(
-          _u('/admin/cash/close'),
-          headers: _jsonHeaders(userId: userId, shiftId: shiftId),
-          body: jsonEncode(payload),
-        )
-        .timeout(_timeout);
+    final res = await _withTimeout(
+      http.post(
+        _u('/admin/cash/close'),
+        headers: _jsonHeaders(userId: userId, shiftId: shiftId),
+        body: jsonEncode(payload),
+      ),
+      'cash close',
+    );
 
     if (res.statusCode >= 400) {
       throw Exception('cash close failed: ${res.statusCode} ${res.body}');
@@ -538,13 +614,14 @@ class AdminApiClient {
       if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
     };
 
-    final res = await http
-        .post(
-          _u('/admin/bookings/manual'),
-          headers: _jsonHeaders(userId: userId, shiftId: shiftId),
-          body: jsonEncode(payload),
-        )
-        .timeout(_timeout);
+    final res = await _withTimeout(
+      http.post(
+        _u('/admin/bookings/manual'),
+        headers: _jsonHeaders(userId: userId, shiftId: shiftId),
+        body: jsonEncode(payload),
+      ),
+      'admin create booking',
+    );
 
     return _decodeMap(res, 'admin create booking');
   }
@@ -561,12 +638,13 @@ class AdminApiClient {
       'to': to.toUtc().toIso8601String(),
     };
 
-    final res = await http
-        .get(
-          _u('/admin/planned-shifts', q),
-          headers: _jsonHeaders(userId: userId),
-        )
-        .timeout(_timeout);
+    final res = await _withTimeout(
+      http.get(
+        _u('/admin/planned-shifts', q),
+        headers: _jsonHeaders(userId: userId),
+      ),
+      'planned shifts list',
+    );
 
     return _decodeList(res, 'planned shifts list');
   }
@@ -583,13 +661,14 @@ class AdminApiClient {
       if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
     };
 
-    final res = await http
-        .post(
-          _u('/admin/planned-shifts'),
-          headers: _jsonHeaders(userId: userId),
-          body: jsonEncode(payload),
-        )
-        .timeout(_timeout);
+    final res = await _withTimeout(
+      http.post(
+        _u('/admin/planned-shifts'),
+        headers: _jsonHeaders(userId: userId),
+        body: jsonEncode(payload),
+      ),
+      'planned shift create',
+    );
 
     return _decodeMap(res, 'planned shift create');
   }
@@ -612,13 +691,14 @@ class AdminApiClient {
       if (status != null && status.trim().isNotEmpty) 'status': status.trim(),
     };
 
-    final res = await http
-        .patch(
-          _u('/admin/planned-shifts/$id'),
-          headers: _jsonHeaders(userId: userId),
-          body: jsonEncode(payload),
-        )
-        .timeout(_timeout);
+    final res = await _withTimeout(
+      http.patch(
+        _u('/admin/planned-shifts/$id'),
+        headers: _jsonHeaders(userId: userId),
+        body: jsonEncode(payload),
+      ),
+      'planned shift update',
+    );
 
     return _decodeMap(res, 'planned shift update');
   }
@@ -630,13 +710,14 @@ class AdminApiClient {
     final id = plannedShiftId.trim();
     if (id.isEmpty) throw Exception('plannedShiftId is required');
 
-    final res = await http
-        .post(
-          _u('/admin/planned-shifts/$id/publish'),
-          headers: _jsonHeaders(userId: userId),
-          body: jsonEncode({}),
-        )
-        .timeout(_timeout);
+    final res = await _withTimeout(
+      http.post(
+        _u('/admin/planned-shifts/$id/publish'),
+        headers: _jsonHeaders(userId: userId),
+        body: jsonEncode({}),
+      ),
+      'planned shift publish',
+    );
 
     return _decodeMap(res, 'planned shift publish');
   }
@@ -648,12 +729,13 @@ class AdminApiClient {
     final id = plannedShiftId.trim();
     if (id.isEmpty) throw Exception('plannedShiftId is required');
 
-    final res = await http
-        .delete(
-          _u('/admin/planned-shifts/$id'),
-          headers: _jsonHeaders(userId: userId),
-        )
-        .timeout(_timeout);
+    final res = await _withTimeout(
+      http.delete(
+        _u('/admin/planned-shifts/$id'),
+        headers: _jsonHeaders(userId: userId),
+      ),
+      'planned shift delete',
+    );
 
     return _decodeMap(res, 'planned shift delete');
   }
@@ -674,18 +756,18 @@ class AdminApiClient {
       if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
     };
 
-    final res = await http
-        .post(
-          _u('/admin/planned-shifts/$id/assign-washer'),
-          headers: _jsonHeaders(userId: userId),
-          body: jsonEncode(payload),
-        )
-        .timeout(_timeout);
+    final res = await _withTimeout(
+      http.post(
+        _u('/admin/planned-shifts/$id/assign-washer'),
+        headers: _jsonHeaders(userId: userId),
+        body: jsonEncode(payload),
+      ),
+      'planned shift assign washer',
+    );
 
     return _decodeMap(res, 'planned shift assign washer');
   }
 
-  // ⚠️ Этот endpoint может быть ещё не реализован на сервере — метод не мешает компиляции.
   Future<Map<String, dynamic>> unassignWasherFromPlannedShift(
     String userId,
     String plannedShiftId,
@@ -693,15 +775,17 @@ class AdminApiClient {
   ) async {
     final ps = plannedShiftId.trim();
     final a = assignmentId.trim();
+
     if (ps.isEmpty) throw Exception('plannedShiftId is required');
     if (a.isEmpty) throw Exception('assignmentId is required');
 
-    final res = await http
-        .delete(
-          _u('/admin/planned-shifts/$ps/assignments/$a'),
-          headers: _jsonHeaders(userId: userId),
-        )
-        .timeout(_timeout);
+    final res = await _withTimeout(
+      http.delete(
+        _u('/admin/planned-shifts/$ps/assignments/$a'),
+        headers: _jsonHeaders(userId: userId),
+      ),
+      'planned shift unassign washer',
+    );
 
     return _decodeMap(res, 'planned shift unassign washer');
   }
