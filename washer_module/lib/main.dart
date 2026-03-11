@@ -10,8 +10,12 @@ void main() async {
   final store = WasherSessionStore();
   await store.load();
 
-  // поменяешь потом на прод URL
-  final api = WasherApiClient(baseUrl: 'http://localhost:3000', store: store);
+  const baseUrl = String.fromEnvironment(
+    'BASE_URL',
+    defaultValue: 'http://95.174.95.1:3000',
+  );
+
+  final api = WasherApiClient(baseUrl: baseUrl, store: store);
 
   runApp(MyApp(api: api, store: store));
 }
@@ -25,7 +29,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Carwash Washer',
+      title: 'Мойщик',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,

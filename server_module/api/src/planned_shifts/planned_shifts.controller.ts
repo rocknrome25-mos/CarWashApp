@@ -1,4 +1,3 @@
-// C:\dev\carwash\server_module\api\src\planned_shifts\planned_shifts.controller.ts
 import {
   BadRequestException,
   Body,
@@ -19,6 +18,13 @@ import { AssignPlannedWasherDto } from './dto/assign_planned_washer.dto';
 @Controller('admin/planned-shifts')
 export class PlannedShiftsController {
   constructor(private readonly svc: PlannedShiftsService) {}
+
+  @Get('washers/list')
+  listWashers(@Headers('x-user-id') userId?: string) {
+    const uid = (userId ?? '').trim();
+    if (!uid) throw new BadRequestException('x-user-id is required');
+    return this.svc.listWashers(uid);
+  }
 
   @Get()
   list(
@@ -84,7 +90,6 @@ export class PlannedShiftsController {
     return this.svc.assignWasher(uid, pid, dto);
   }
 
-  // ✅ remove washer from planned shift (washerId = userId of washer)
   @Delete(':id/washers/:washerId')
   removeWasher(
     @Headers('x-user-id') userId?: string,
@@ -100,7 +105,6 @@ export class PlannedShiftsController {
     return this.svc.removeWasher(uid, pid, wid);
   }
 
-  // ✅ "Delete planned shift" = soft-cancel
   @Delete(':id')
   deletePlannedShift(
     @Headers('x-user-id') userId?: string,

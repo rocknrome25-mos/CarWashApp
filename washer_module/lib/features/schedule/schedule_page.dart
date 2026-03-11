@@ -17,7 +17,8 @@ class SchedulePage extends StatefulWidget {
   State<SchedulePage> createState() => _SchedulePageState();
 }
 
-class _SchedulePageState extends State<SchedulePage> {
+class _SchedulePageState extends State<SchedulePage>
+    with SingleTickerProviderStateMixin {
   bool loading = true;
   bool refreshing = false;
   String? error;
@@ -30,13 +31,35 @@ class _SchedulePageState extends State<SchedulePage> {
 
   static const _autoRefreshSec = 45;
 
+  late final AnimationController _introController;
+  late final Animation<double> _fadeAnim;
+  late final Animation<Offset> _slideAnim;
+
   DateTime get _from => DateTime.now();
   DateTime get _to => DateTime.now().add(const Duration(days: 7));
 
   @override
   void initState() {
     super.initState();
-    _load(initial: true);
+
+    _introController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 520),
+    );
+
+    _fadeAnim = CurvedAnimation(
+      parent: _introController,
+      curve: Curves.easeOut,
+    );
+
+    _slideAnim = Tween<Offset>(begin: const Offset(0, 0.035), end: Offset.zero)
+        .animate(
+          CurvedAnimation(parent: _introController, curve: Curves.easeOutCubic),
+        );
+
+    _load(initial: true).then((_) {
+      if (mounted) _introController.forward();
+    });
 
     _timer = Timer.periodic(const Duration(seconds: _autoRefreshSec), (
       _,
@@ -50,6 +73,7 @@ class _SchedulePageState extends State<SchedulePage> {
   @override
   void dispose() {
     _timer?.cancel();
+    _introController.dispose();
     super.dispose();
   }
 
@@ -75,7 +99,6 @@ class _SchedulePageState extends State<SchedulePage> {
     });
 
     try {
-      // schedule
       final res = await widget.api.schedule(from: _from, to: _to);
       final list = (res['shifts'] as List? ?? [])
           .cast<Map>()
@@ -105,7 +128,6 @@ class _SchedulePageState extends State<SchedulePage> {
         return da.compareTo(db);
       });
 
-      // admin contact (optional)
       Map<String, dynamic>? admin;
       try {
         final cs = await widget.api.getCurrentShift();
@@ -117,14 +139,18 @@ class _SchedulePageState extends State<SchedulePage> {
         // ignore
       }
 
+      if (!mounted) return;
       setState(() {
         shifts = list;
         adminOnDuty = admin;
         _lastUpdatedAt = DateTime.now();
       });
     } catch (e) {
-      if (!silent) setState(() => error = e.toString());
+      if (!silent && mounted) {
+        setState(() => error = e.toString());
+      }
     } finally {
+      if (!mounted) return;
       setState(() {
         loading = false;
         refreshing = false;
@@ -151,29 +177,29 @@ class _SchedulePageState extends State<SchedulePage> {
       case 'PUBLISHED':
         return _StatusUi(
           label: 'Опубликовано',
-          icon: Icons.verified,
-          bg: cs.secondaryContainer.withValues(alpha: 0.65),
+          icon: Icons.verified_rounded,
+          bg: cs.secondaryContainer.withValues(alpha: 0.70),
           fg: cs.onSecondaryContainer,
         );
       case 'DRAFT':
         return _StatusUi(
           label: 'Черновик',
-          icon: Icons.edit_note,
-          bg: cs.surfaceContainerHighest.withValues(alpha: 0.50),
+          icon: Icons.edit_note_rounded,
+          bg: cs.surfaceContainerHighest.withValues(alpha: 0.55),
           fg: cs.onSurface,
         );
       case 'CANCELED':
         return _StatusUi(
           label: 'Отменено',
-          icon: Icons.cancel,
-          bg: cs.errorContainer.withValues(alpha: 0.65),
+          icon: Icons.cancel_rounded,
+          bg: cs.errorContainer.withValues(alpha: 0.72),
           fg: cs.onErrorContainer,
         );
       default:
         return _StatusUi(
           label: status,
-          icon: Icons.help_outline,
-          bg: cs.surfaceContainerHighest.withValues(alpha: 0.50),
+          icon: Icons.help_outline_rounded,
+          bg: cs.surfaceContainerHighest.withValues(alpha: 0.55),
           fg: cs.onSurface,
         );
     }
@@ -191,11 +217,11 @@ class _SchedulePageState extends State<SchedulePage> {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
     final dfTime = DateFormat('HH:mm');
 
     if (loading) return const Center(child: CircularProgressIndicator());
 
-    // group by day
     final groups = <DateTime, List<Map<String, dynamic>>>{};
     for (final s in shifts) {
       final start = DateTime.tryParse(
@@ -210,163 +236,239 @@ class _SchedulePageState extends State<SchedulePage> {
 
     return RefreshIndicator(
       onRefresh: () => _load(),
-      child: ListView(
-        physics:
-            const AlwaysScrollableScrollPhysics(), // ✅ web refresh always works
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
-        children: [
-          if (adminOnDuty != null) ...[
-            _YCard(
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 46,
-                      height: 46,
-                      decoration: BoxDecoration(
-                        color: cs.primary.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: Icon(Icons.support_agent, color: cs.primary),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Админ смены',
-                            style: Theme.of(context).textTheme.bodySmall
-                                ?.copyWith(
-                                  color: cs.onSurface.withValues(alpha: 0.70),
-                                  fontWeight: FontWeight.w700,
-                                ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            '${adminOnDuty!['name'] ?? ''}',
-                            style: Theme.of(context).textTheme.titleSmall
-                                ?.copyWith(fontWeight: FontWeight.w900),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            '${adminOnDuty!['phone'] ?? ''}',
-                            style: Theme.of(context).textTheme.bodySmall
-                                ?.copyWith(
-                                  color: cs.onSurface.withValues(alpha: 0.75),
-                                  fontWeight: FontWeight.w700,
-                                ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    FilledButton(
-                      onPressed: () =>
-                          _callAdmin((adminOnDuty!['phone'] ?? '').toString()),
-                      child: const Text('Позвонить'),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 10),
-          ],
-
-          Row(
+      child: FadeTransition(
+        opacity: _fadeAnim,
+        child: SlideTransition(
+          position: _slideAnim,
+          child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
             children: [
-              Expanded(
-                child: Text(
-                  _lastUpdatedAt == null
-                      ? 'Обновление…'
-                      : 'Обновлено: ${DateFormat('HH:mm:ss').format(_lastUpdatedAt!)}',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: cs.onSurface.withValues(alpha: 0.65),
-                    fontWeight: FontWeight.w600,
+              _YCard(
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 48,
+                        height: 48,
+                        decoration: BoxDecoration(
+                          color: cs.primary.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Icon(
+                          Icons.calendar_month_rounded,
+                          color: cs.primary,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Расписание',
+                              style: textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              _lastUpdatedAt == null
+                                  ? 'Обновление…'
+                                  : 'Обновлено: ${DateFormat('HH:mm:ss').format(_lastUpdatedAt!)}',
+                              style: textTheme.bodySmall?.copyWith(
+                                color: cs.onSurface.withValues(alpha: 0.65),
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: refreshing ? null : () => _load(),
+                        icon: refreshing
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.refresh),
+                        tooltip: 'Обновить',
+                      ),
+                    ],
                   ),
                 ),
               ),
-              IconButton(
-                onPressed: refreshing ? null : () => _load(),
-                icon: refreshing
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.refresh),
-                tooltip: 'Обновить',
-              ),
-            ],
-          ),
 
-          if (error != null) ...[
-            const SizedBox(height: 10),
-            _YCard(
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Row(
-                  children: [
-                    Icon(Icons.error_outline, color: cs.error),
-                    const SizedBox(width: 10),
-                    Expanded(child: Text(error!)),
-                  ],
+              if (adminOnDuty != null) ...[
+                const SizedBox(height: 12),
+                _YCard(
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          width: 50,
+                          height: 50,
+                          decoration: BoxDecoration(
+                            color: cs.primary.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Icon(Icons.support_agent, color: cs.primary),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Админ смены',
+                                style: textTheme.bodySmall?.copyWith(
+                                  color: cs.onSurface.withValues(alpha: 0.70),
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                '${adminOnDuty!['name'] ?? ''}',
+                                style: textTheme.titleSmall?.copyWith(
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                '${adminOnDuty!['phone'] ?? ''}',
+                                style: textTheme.bodySmall?.copyWith(
+                                  color: cs.onSurface.withValues(alpha: 0.75),
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        _ScaleTap(
+                          child: FilledButton.icon(
+                            onPressed: () => _callAdmin(
+                              (adminOnDuty!['phone'] ?? '').toString(),
+                            ),
+                            icon: const Icon(Icons.call_rounded),
+                            label: const Text('Позвонить'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
-              ),
-            ),
-          ],
+              ],
 
-          const SizedBox(height: 14),
+              if (error != null) ...[
+                const SizedBox(height: 12),
+                _YCard(
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(Icons.error_outline, color: cs.error),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            error!,
+                            style: textTheme.bodyMedium?.copyWith(
+                              color: cs.onSurface.withValues(alpha: 0.82),
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
 
-          if (shifts.isEmpty)
-            _YCard(
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Row(
+              const SizedBox(height: 14),
+
+              if (shifts.isEmpty)
+                _YCard(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 46,
+                          height: 46,
+                          decoration: BoxDecoration(
+                            color: cs.surfaceContainerHighest.withValues(
+                              alpha: 0.45,
+                            ),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Icon(
+                            Icons.inbox_outlined,
+                            color: cs.onSurface.withValues(alpha: 0.65),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            'На ближайшую неделю смен нет.',
+                            style: textTheme.bodyMedium?.copyWith(
+                              color: cs.onSurface.withValues(alpha: 0.78),
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+              for (final day in days) ...[
+                const SizedBox(height: 14),
+                Row(
                   children: [
-                    Icon(
-                      Icons.inbox_outlined,
-                      color: cs.onSurface.withValues(alpha: 0.65),
+                    Container(
+                      width: 8,
+                      height: 26,
+                      decoration: BoxDecoration(
+                        color: cs.primary.withValues(alpha: 0.85),
+                        borderRadius: BorderRadius.circular(99),
+                      ),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        'На ближайшую неделю смен нет.',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: cs.onSurface.withValues(alpha: 0.75),
-                          fontWeight: FontWeight.w700,
+                        _dayHeader(day),
+                        style: textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w900,
                         ),
                       ),
                     ),
                   ],
                 ),
-              ),
-            ),
-
-          for (final day in days) ...[
-            const SizedBox(height: 14),
-            Text(
-              _dayHeader(day),
-              style: Theme.of(
-                context,
-              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
-            ),
-            const SizedBox(height: 10),
-            for (final s in groups[day]!) ...[
-              _YCard(
-                child: Padding(
-                  padding: const EdgeInsets.all(14),
-                  child: _ShiftTile(
-                    s: s,
-                    dfTime: dfTime,
-                    statusUi: _statusUi((s['status'] ?? '').toString(), cs),
+                const SizedBox(height: 10),
+                for (final s in groups[day]!) ...[
+                  _YCard(
+                    child: Padding(
+                      padding: const EdgeInsets.all(14),
+                      child: _ShiftTile(
+                        s: s,
+                        dfTime: dfTime,
+                        statusUi: _statusUi((s['status'] ?? '').toString(), cs),
+                      ),
+                    ),
                   ),
-                ),
-              ),
-              const SizedBox(height: 10),
+                  const SizedBox(height: 10),
+                ],
+              ],
             ],
-          ],
-        ],
+          ),
+        ),
       ),
     );
   }
@@ -396,6 +498,7 @@ class _ShiftTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
 
     final start = DateTime.tryParse((s['startAt'] ?? '').toString())?.toLocal();
     final end = DateTime.tryParse((s['endAt'] ?? '').toString())?.toLocal();
@@ -420,9 +523,9 @@ class _ShiftTile extends StatelessWidget {
             Expanded(
               child: Text(
                 title,
-                style: Theme.of(
-                  context,
-                ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900),
+                style: textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w900,
+                ),
               ),
             ),
             Container(
@@ -431,7 +534,7 @@ class _ShiftTile extends StatelessWidget {
                 color: statusUi.bg,
                 borderRadius: BorderRadius.circular(999),
                 border: Border.all(
-                  color: cs.outlineVariant.withValues(alpha: 0.5),
+                  color: cs.outlineVariant.withValues(alpha: 0.45),
                 ),
               ),
               child: Row(
@@ -441,7 +544,7 @@ class _ShiftTile extends StatelessWidget {
                   const SizedBox(width: 6),
                   Text(
                     statusUi.label,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    style: textTheme.bodySmall?.copyWith(
                       color: statusUi.fg,
                       fontWeight: FontWeight.w900,
                     ),
@@ -451,7 +554,7 @@ class _ShiftTile extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 12),
         Wrap(
           spacing: 10,
           runSpacing: 10,
@@ -459,7 +562,10 @@ class _ShiftTile extends StatelessWidget {
             if (locName.isNotEmpty)
               _Pill(icon: Icons.place_outlined, text: locName),
             if (plannedBayId != null)
-              _Pill(icon: Icons.local_car_wash, text: 'Пост: $plannedBayId'),
+              _Pill(
+                icon: Icons.local_car_wash_rounded,
+                text: 'Пост: $plannedBayId',
+              ),
             if (locAddr.isNotEmpty)
               _Pill(icon: Icons.map_outlined, text: locAddr),
           ],
@@ -469,21 +575,24 @@ class _ShiftTile extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: cs.surfaceContainerHighest.withValues(alpha: 0.18),
+              color: cs.surfaceContainerHighest.withValues(alpha: 0.20),
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
-                color: cs.outlineVariant.withValues(alpha: 0.55),
+                color: cs.outlineVariant.withValues(alpha: 0.50),
               ),
             ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(Icons.notes, color: cs.onSurface.withValues(alpha: 0.8)),
+                Icon(
+                  Icons.notes_rounded,
+                  color: cs.onSurface.withValues(alpha: 0.8),
+                ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
                     noteRaw.trim(),
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    style: textTheme.bodyMedium?.copyWith(
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -511,6 +620,40 @@ class _StatusUi {
   });
 }
 
+class _ScaleTap extends StatefulWidget {
+  final Widget child;
+
+  const _ScaleTap({required this.child});
+
+  @override
+  State<_ScaleTap> createState() => _ScaleTapState();
+}
+
+class _ScaleTapState extends State<_ScaleTap> {
+  bool _pressed = false;
+
+  void _setPressed(bool value) {
+    if (_pressed == value) return;
+    setState(() => _pressed = value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTapDown: (_) => _setPressed(true),
+      onTapUp: (_) => _setPressed(false),
+      onTapCancel: () => _setPressed(false),
+      behavior: HitTestBehavior.translucent,
+      child: AnimatedScale(
+        scale: _pressed ? 0.985 : 1,
+        duration: const Duration(milliseconds: 110),
+        curve: Curves.easeOut,
+        child: widget.child,
+      ),
+    );
+  }
+}
+
 class _YCard extends StatelessWidget {
   final Widget child;
   const _YCard({required this.child});
@@ -521,8 +664,8 @@ class _YCard extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.58)),
         boxShadow: [
           BoxShadow(
             blurRadius: 18,
@@ -545,22 +688,22 @@ class _Pill extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: BoxDecoration(
-        color: cs.surfaceContainerHighest.withValues(alpha: 0.18),
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.20),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 16, color: cs.onSurface.withValues(alpha: 0.8)),
+          Icon(icon, size: 16, color: cs.onSurface.withValues(alpha: 0.82)),
           const SizedBox(width: 6),
           Text(
             text,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               fontWeight: FontWeight.w800,
-              color: cs.onSurface.withValues(alpha: 0.88),
+              color: cs.onSurface.withValues(alpha: 0.90),
             ),
           ),
         ],

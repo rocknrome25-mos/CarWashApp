@@ -237,7 +237,7 @@ class AdminApiClient {
 
   Future<List<dynamic>> services({
     required String locationId,
-    String? kind, // 'BASE' | 'ADDON'
+    String? kind,
     bool includeInactive = false,
   }) async {
     final loc = locationId.trim();
@@ -649,6 +649,18 @@ class AdminApiClient {
     return _decodeList(res, 'planned shifts list');
   }
 
+  Future<List<dynamic>> listWashers(String userId) async {
+    final res = await _withTimeout(
+      http.get(
+        _u('/admin/planned-shifts/washers/list'),
+        headers: _jsonHeaders(userId: userId),
+      ),
+      'washers list',
+    );
+
+    return _decodeList(res, 'washers list');
+  }
+
   Future<Map<String, dynamic>> createPlannedShift(
     String userId, {
     required DateTime startAtUtc,
@@ -771,17 +783,17 @@ class AdminApiClient {
   Future<Map<String, dynamic>> unassignWasherFromPlannedShift(
     String userId,
     String plannedShiftId,
-    String assignmentId,
+    String washerId,
   ) async {
     final ps = plannedShiftId.trim();
-    final a = assignmentId.trim();
+    final wid = washerId.trim();
 
     if (ps.isEmpty) throw Exception('plannedShiftId is required');
-    if (a.isEmpty) throw Exception('assignmentId is required');
+    if (wid.isEmpty) throw Exception('washerId is required');
 
     final res = await _withTimeout(
       http.delete(
-        _u('/admin/planned-shifts/$ps/assignments/$a'),
+        _u('/admin/planned-shifts/$ps/washers/$wid'),
         headers: _jsonHeaders(userId: userId),
       ),
       'planned shift unassign washer',
