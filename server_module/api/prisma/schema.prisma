@@ -44,7 +44,9 @@ enum ShiftStatus {
   CLOSED
 }
 
-/** ✅ NEW: planned schedule status */
+/**
+ * ✅ NEW: planned schedule status
+ */
 enum PlannedShiftStatus {
   DRAFT
   PUBLISHED
@@ -291,7 +293,7 @@ model Service {
 
   name        String
   priceRub    Int
-  durationMin Int @default(30)
+  durationMin Int    @default(30)
 
   bookings         Booking[]
   waitlistRequests WaitlistRequest[]
@@ -315,17 +317,17 @@ model Booking {
   location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
 
   shiftId String?
-  shift   Shift? @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+  shift   Shift?  @relation(fields: [shiftId], references: [id], onDelete: SetNull)
 
   dateTime DateTime
-  bayId    Int @default(1)
+  bayId    Int      @default(1)
 
   requestedBayId Int?
 
   bufferMin  Int @default(0)
   depositRub Int @default(0)
 
-  discountRub  Int @default(0)
+  discountRub  Int     @default(0)
   discountNote String?
 
   comment   String?
@@ -404,7 +406,7 @@ model BookingPhoto {
   note String?
 
   uploadedByUserId String?
-  uploadedByUser   User? @relation("UserToBookingPhoto", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
+  uploadedByUser   User?   @relation("UserToBookingPhoto", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
 
   @@index([bookingId, createdAt])
   @@index([uploadedByUserId])
@@ -436,10 +438,15 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  phone    String  @unique
+  phone    String   @unique
   name     String?
   role     UserRole
-  isActive Boolean @default(true)
+  isActive Boolean  @default(true)
+
+  // ✅ auth fields for owner-managed employee access
+  passwordHash       String?
+  mustChangePassword Boolean   @default(false)
+  lastLoginAt        DateTime?
 
   locationId String
   location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
@@ -457,12 +464,14 @@ model User {
   shiftWashers ShiftWasher[]
 
   // ✅ NEW: schedule relations
-  plannedShiftsCreated PlannedShift[] @relation("PlannedShiftCreatedBy")
+  plannedShiftsCreated    PlannedShift[]       @relation("PlannedShiftCreatedBy")
   plannedShiftAssignments PlannedShiftWasher[] @relation("PlannedShiftWasherUser")
 
   @@index([role])
   @@index([locationId])
   @@index([isActive])
+  @@index([mustChangePassword])
+  @@index([lastLoginAt])
 }
 
 model Shift {
@@ -568,7 +577,7 @@ model WaitlistRequest {
   client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
 
   carId String
-  car   Car @relation(fields: [carId], references: [id], onDelete: Cascade)
+  car   Car    @relation(fields: [carId], references: [id], onDelete: Cascade)
 
   serviceId String
   service   Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
@@ -588,7 +597,9 @@ model WaitlistRequest {
   @@index([convertedBookingId])
 }
 
-/* ===================== NEW: Washer payouts + assignments + clock ===================== */
+/**
+ * ===================== NEW: Washer payouts + assignments + clock =====================
+ */
 
 model WasherPayRule {
   id        String   @id @default(cuid())
@@ -599,7 +610,7 @@ model WasherPayRule {
   location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
 
   category ServiceLaborCategory
-  percent  Int @default(30)
+  percent  Int                  @default(30)
 
   isActive Boolean @default(true)
 
@@ -620,10 +631,10 @@ model ShiftWasher {
   updatedAt DateTime @updatedAt
 
   shiftId String
-  shift   Shift @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  shift   Shift  @relation(fields: [shiftId], references: [id], onDelete: Cascade)
 
   washerId String
-  washer   User @relation(fields: [washerId], references: [id], onDelete: Cascade)
+  washer   User   @relation(fields: [washerId], references: [id], onDelete: Cascade)
 
   bayId Int
 
@@ -651,13 +662,15 @@ model WasherClockEvent {
   shiftWasher   ShiftWasher @relation(fields: [shiftWasherId], references: [id], onDelete: Cascade)
 
   type WasherClockEventType
-  at   DateTime @default(now())
+  at   DateTime             @default(now())
 
   @@index([shiftWasherId, createdAt])
   @@index([type])
 }
 
-/* ===================== NEW: Planned schedule (big SaaS) ===================== */
+/**
+ * ===================== NEW: Planned schedule (big SaaS) =====================
+ */
 
 model PlannedShift {
   id        String   @id @default(cuid())
@@ -668,7 +681,7 @@ model PlannedShift {
   location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
 
   createdByUserId String
-  createdByUser   User @relation("PlannedShiftCreatedBy", fields: [createdByUserId], references: [id], onDelete: Cascade)
+  createdByUser   User   @relation("PlannedShiftCreatedBy", fields: [createdByUserId], references: [id], onDelete: Cascade)
 
   startAt DateTime
   endAt   DateTime
@@ -693,7 +706,7 @@ model PlannedShiftWasher {
   plannedShift   PlannedShift @relation(fields: [plannedShiftId], references: [id], onDelete: Cascade)
 
   washerId String
-  washer   User @relation("PlannedShiftWasherUser", fields: [washerId], references: [id], onDelete: Cascade)
+  washer   User   @relation("PlannedShiftWasherUser", fields: [washerId], references: [id], onDelete: Cascade)
 
   plannedBayId Int?
   note         String?

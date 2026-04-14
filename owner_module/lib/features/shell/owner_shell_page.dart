@@ -1,6 +1,11 @@
+import 'dart:convert';
 import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+
 import '../../core/api/owner_api_client.dart';
+import '../../core/config/app_config.dart';
 import '../auth/owner_login_page.dart';
 
 class OwnerShellPage extends StatefulWidget {
@@ -463,16 +468,18 @@ class _ChartSection extends StatelessWidget {
                               children: [
                                 Container(
                                   width: 26,
-                                  height: ((item['suspiciousEvents'] ?? 0) as num)
-                                              .toDouble() <=
-                                          0
-                                      ? 0
-                                      : ((((item['suspiciousEvents'] ?? 0) as num)
-                                                      .toDouble() /
-                                                  suspiciousScale) *
-                                              44)
-                                          .clamp(6, 44)
-                                          .toDouble(),
+                                  height:
+                                      ((item['suspiciousEvents'] ?? 0) as num)
+                                                  .toDouble() <=
+                                              0
+                                          ? 0
+                                          : ((((item['suspiciousEvents'] ?? 0)
+                                                              as num)
+                                                          .toDouble() /
+                                                      suspiciousScale) *
+                                                  44)
+                                              .clamp(6, 44)
+                                              .toDouble(),
                                   decoration: BoxDecoration(
                                     color: const Color(0xFFF43F5E),
                                     borderRadius: BorderRadius.circular(6),
@@ -896,14 +903,223 @@ class _PageScaffold extends StatelessWidget {
   }
 }
 
-class _EmployeesTab extends StatelessWidget {
+class _EmployeesTab extends StatefulWidget {
   const _EmployeesTab();
 
   @override
+  State<_EmployeesTab> createState() => _EmployeesTabState();
+}
+
+class _EmployeesTabState extends State<_EmployeesTab> {
+  late Future<Map<String, dynamic>> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = _loadEmployees();
+  }
+
+  Future<Map<String, dynamic>> _loadEmployees() async {
+    final uri = Uri.parse('${AppConfig.defaultBaseUrl}/owner/employees');
+    final response = await http.get(uri).timeout(const Duration(seconds: 20));
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception('Employees request failed: ${response.statusCode}');
+    }
+
+    final decoded = jsonDecode(response.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw Exception('Employees response is not an object');
+    }
+
+    return decoded;
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return const _PageScaffold(
-      title: 'Сотрудники',
-      subtitle: 'Админы, мойщики, права, зарплаты и будущие графики.',
+    final theme = Theme.of(context);
+
+    return SafeArea(
+      top: false,
+      child: FutureBuilder<Map<String, dynamic>>(
+        future: _future,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          if (snapshot.hasError) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text(
+                  'Ошибка загрузки: ${snapshot.error}',
+                  style: theme.textTheme.bodyMedium,
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            );
+          }
+
+          final data = snapshot.data ?? <String, dynamic>{};
+          final totals =
+              Map<String, dynamic>.from((data['totals'] as Map?) ?? const {});
+          final admins = ((data['admins'] as List?) ?? const [])
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList();
+          final washers = ((data['washers'] as List?) ?? const [])
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList();
+
+          return RefreshIndicator(
+            onRefresh: () async {
+              setState(() {
+                _future = _loadEmployees();
+              });
+              await _future;
+            },
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+              children: [
+                Text('Сотрудники', style: theme.textTheme.headlineMedium),
+                const SizedBox(height: 8),
+                Text(
+                  'Администраторы и мойщики по локации ЖК Рассказово',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: const Color(0xFF6B7280),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _InfoTile(
+                        title: 'Всего',
+                        value: '${totals['all'] ?? 0}',
+                        subtitle: 'Сотрудников',
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _InfoTile(
+                        title: 'Админы',
+                        value: '${totals['admins'] ?? 0}',
+                        subtitle: 'Человек',
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _InfoTile(
+                        title: 'Мойщики',
+                        value: '${totals['washers'] ?? 0}',
+                        subtitle: 'Человек',
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _InfoTile(
+                        title: 'Активные',
+                        value: '${totals['active'] ?? 0}',
+                        subtitle: 'Работают',
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                Text('Администраторы', style: theme.textTheme.titleLarge),
+                const SizedBox(height: 12),
+                if (admins.isEmpty)
+                  const Text('Нет администраторов')
+                else
+                  ...admins.map((e) => _EmployeeCard(data: e)),
+                const SizedBox(height: 24),
+                Text('Мойщики', style: theme.textTheme.titleLarge),
+                const SizedBox(height: 12),
+                if (washers.isEmpty)
+                  const Text('Нет мойщиков')
+                else
+                  ...washers.map((e) => _EmployeeCard(data: e)),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _EmployeeCard extends StatelessWidget {
+  final Map<String, dynamic> data;
+
+  const _EmployeeCard({required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    final name = (data['name'] ?? 'Без имени').toString();
+    final phone = (data['phone'] ?? '').toString();
+    final role = (data['role'] ?? '').toString();
+    final isActive = data['isActive'] == true;
+
+    final roleLabel = role == 'ADMIN' ? 'Администратор' : 'Мойщик';
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            CircleAvatar(
+              radius: 22,
+              backgroundColor: const Color(0xFFF3F4F6),
+              child: Icon(
+                role == 'ADMIN'
+                    ? Icons.badge_outlined
+                    : Icons.cleaning_services_outlined,
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(name, style: theme.textTheme.titleMedium),
+                  const SizedBox(height: 4),
+                  Text(phone, style: theme.textTheme.bodySmall),
+                  const SizedBox(height: 6),
+                  Text(
+                    roleLabel,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: const Color(0xFF6B7280),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: isActive
+                    ? const Color(0xFFDCFCE7)
+                    : const Color(0xFFFEE2E2),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                isActive ? 'Активен' : 'Отключён',
+                style: theme.textTheme.bodySmall,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

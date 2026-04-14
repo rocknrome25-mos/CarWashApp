@@ -1,4 +1,3 @@
-// C:\dev\carwash\server_module\api\src\app.module.ts
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 
@@ -13,16 +12,12 @@ import { PrismaModule } from './prisma/prisma.module';
 import { ServicesModule } from './services/services.module';
 import { ConfigModule } from './config/config.module';
 import { CronHousekeeperService } from '../src/cron/cron-housekeeper.service';
-
-// ✅ existing
 import { WasherModule } from './washer/washer.module';
-
-// ✅ NEW: planned schedule module (admin/planned-shifts)
 import { PlannedShiftsModule } from './planned_shifts/planned_shifts.module';
+import { OwnerModule } from './owner/owner.module';
 
 @Module({
   imports: [
-    // ⬇️ scheduler для крон-задач
     ScheduleModule.forRoot(),
 
     PrismaModule,
@@ -33,16 +28,11 @@ import { PlannedShiftsModule } from './planned_shifts/planned_shifts.module';
     LocationsModule,
     AdminModule,
     ConfigModule,
-
-    // ✅ modules
     WasherModule,
     PlannedShiftsModule,
+    OwnerModule,
   ],
   controllers: [AppController],
-  providers: [
-    AppService,
-    // ⬇️ наш планировщик
-    CronHousekeeperService,
-  ],
+  providers: [AppService, CronHousekeeperService],
 })
 export class AppModule {}

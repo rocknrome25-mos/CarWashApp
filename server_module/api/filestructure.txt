@@ -1,0 +1,187 @@
+|-- .env
+|-- .gitignore
+|-- .prettierrc
+|-- eslint.config.mjs
+|-- nest-cli.json
+|-- package-lock.json
+|-- package.json
+|-- prisma
+    |-- migrations
+        |-- 20251230085109_init
+            |-- migration.sql
+        |-- 20251231130015_booking_status
+            |-- migration.sql
+        |-- 20251231132141_booking_canceled_at
+            |-- migration.sql
+        |-- 20260104120124_add_completed_status
+            |-- migration.sql
+        |-- 20260105123448_add_service_duration
+            |-- migration.sql
+        |-- 20260105130758_add_service_duration
+            |-- migration.sql
+        |-- 20260105144507_service_duration_default
+            |-- migration.sql
+        |-- 20260106173246_add_pending_payment_enum
+            |-- migration.sql
+        |-- 20260106173315_booking_default_pending_payment
+            |-- migration.sql
+        |-- 20260114184951_booking_deposit_buffer_comment
+            |-- migration.sql
+        |-- 20260114201150_add_payments
+            |-- migration.sql
+        |-- 20260115105927_add_payment_table
+            |-- migration.sql
+        |-- 20260115125620_add_client
+            |-- migration.sql
+        |-- 20260116152639_booking_slot_unique
+            |-- migration.sql
+        |-- 20260120103933_add_locations
+            |-- migration.sql
+        |-- 20260120111115_booking_slot_unique_active_pending_location
+            |-- migration.sql
+        |-- 20260121080315_admin_foundation
+            |-- migration.sql
+        |-- 20260121084303_client_location_membership
+            |-- migration.sql
+        |-- 20260121110940_audit_booking_start_finish
+            |-- migration.sql
+        |-- 20260122085519_shift_cash_events
+            |-- migration.sql
+        |-- 20260122091405_payments_method_type_and_cash_expected
+            |-- migration.sql
+        |-- 20260122122256_tenant_feature_flags
+            |-- migration.sql
+        |-- 20260122122831_tenant_feature_flags
+            |-- migration.sql
+        |-- 20260122163637_admin_payment_marked
+            |-- migration.sql
+        |-- 20260125110153_booking_discount
+            |-- migration.sql
+        |-- 20260127090825_waitlist
+            |-- migration.sql
+        |-- 20260129115757_addons_photos_waitlist_convert
+            |-- migration.sql
+        |-- 20260129121206_addons_photos_waitlist
+            |-- migration.sql
+        |-- 20260205074647_add_requested_bay
+            |-- migration.sql
+        |-- 20260207095000_waitlist_delete_audit
+            |-- migration.sql
+        |-- 20260210093144_services_step1_nullable
+            |-- migration.sql
+        |-- 20260210094922_services_step2_required
+            |-- migration.sql
+        |-- 20260216154600_washer_shifts_and_payout_rules
+            |-- migration.sql
+        |-- 20260217130643_planned_shifts
+            |-- migration.sql
+        |-- migration_lock.toml
+    |-- schema.prisma
+    |-- seed.ts
+|-- prisma.config.ts.bak
+|-- README.md
+|-- src
+    |-- admin
+        |-- admin.controller.ts
+        |-- admin.module.ts
+        |-- admin.service.ts
+        |-- admin_bookings.controller.ts
+        |-- admin_bookings.service.ts
+        |-- cash
+            |-- dto
+                |-- cash-move.dto.ts
+                |-- close-cash.dto.ts
+                |-- open-float.dto.ts
+        |-- dto
+            |-- admin-assign-washer.dto.ts
+            |-- admin-bay-close.dto.ts
+            |-- admin-bay-open.dto.ts
+            |-- admin-booking-discount.dto.ts
+            |-- admin-booking-finish.dto.ts
+            |-- admin-booking-move.dto.ts
+            |-- admin-booking-pay.dto.ts
+            |-- admin-booking-start.dto.ts
+            |-- admin-calendar-day.dto.ts
+            |-- admin-login.dto.ts
+            |-- admin-move-washer.dto.ts
+            |-- admin-unassign-washer.dto.ts
+    |-- app.controller.spec.ts
+    |-- app.controller.ts
+    |-- app.module.ts
+    |-- app.service.ts
+    |-- bookings
+        |-- bookings.controller.ts
+        |-- bookings.gateway.ts
+        |-- bookings.module.ts
+        |-- bookings.service.ts
+    |-- cars
+        |-- cars.controller.ts
+        |-- cars.module.ts
+        |-- cars.service.ts
+    |-- clients
+        |-- clients.controller.ts
+        |-- clients.module.ts
+        |-- clients.service.ts
+    |-- config
+        |-- config.controller.ts
+        |-- config.module.ts
+        |-- config.service.ts
+    |-- cron
+        |-- cron-housekeeper.service.ts
+    |-- locations
+        |-- locations.controller.ts
+        |-- locations.module.ts
+        |-- locations.service.ts
+    |-- main.ts
+    |-- owner
+        |-- owner.controller.ts
+        |-- owner.module.ts
+        |-- owner.service.ts
+    |-- planned_shifts
+        |-- dto
+            |-- assign_planned_washer.dto.ts
+            |-- create_planned_shift.dto.ts
+            |-- update_planned_shift.dto.ts
+        |-- planned_shifts.controller.ts
+        |-- planned_shifts.module.ts
+        |-- planned_shifts.service.ts
+    |-- prisma
+        |-- prisma.module.ts
+        |-- prisma.service.ts
+    |-- services
+        |-- services.controller.ts
+        |-- services.module.ts
+        |-- services.service.ts
+    |-- washer
+        |-- dto
+            |-- admin-assign-washer.dto.ts
+            |-- washer-clock.dto.ts
+            |-- washer-login.dto.ts
+            |-- washer-stats.dto.ts
+        |-- washer.controller.ts
+        |-- washer.module.ts
+        |-- washer.service.ts
+|-- structure.txt
+|-- structure6.txt
+|-- structure7.txt
+|-- structure8.txt
+|-- structure9.txt
+|-- test
+    |-- app.e2e-spec.ts
+    |-- jest-e2e.json
+|-- tsconfig.build.json
+|-- tsconfig.json
+|-- uploads
+    |-- bookings
+        |-- cml6lyjod000zp21kj6224s2i
+            |-- 1770132708279_after.jpg
+            |-- 1770132751942_after.jpg
+            |-- 1770132793361_after.jpg
+        |-- cml6nbucc0004p2vwguixqxss
+            |-- 1770126094582_before.jpg
+            |-- 1770126251568_before.jpg
+            |-- 1770126844734_after.jpg
+            |-- 1770126870708_damage.jpg
+        |-- cml9q9sk30004p24sf4hss38k
+            |-- 1770317282918_before.jpg
+            |-- 1770317290602_after.jpg

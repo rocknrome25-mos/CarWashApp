@@ -3,19 +3,13 @@
     "module": "commonjs",
     "target": "ES2021",
     "moduleResolution": "node",
-
     "outDir": "./dist",
-    "baseUrl": "./",
-
     "emitDecoratorMetadata": true,
     "experimentalDecorators": true,
-
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,
-
     "incremental": true,
     "skipLibCheck": true,
-
     "strict": true,
     "noImplicitAny": false
   }

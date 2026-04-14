@@ -1,5 +1,5 @@
-name: client_module
-description: Client module for car wash booking MVP-0
+name: owner_module
+description: Owner module for car wash management
 publish_to: none
 
 version: 1.0.0+1
