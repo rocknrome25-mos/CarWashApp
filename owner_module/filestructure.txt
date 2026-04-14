@@ -4,6 +4,24 @@
     |-- extension_discovery
         |-- vs_code.json
     |-- flutter_build
+        |-- 48bc036c837c4bd031b7b213c91d035c
+            |-- .filecache
+            |-- app.dill
+            |-- dart_build.d
+            |-- dart_build.stamp
+            |-- dart_build_result.json
+            |-- debug_bundle_windows-x64_assets.stamp
+            |-- flutter_assets.d
+            |-- gen_dart_plugin_registrant.stamp
+            |-- gen_localizations.stamp
+            |-- install_code_assets.d
+            |-- install_code_assets.stamp
+            |-- kernel_snapshot_program.d
+            |-- kernel_snapshot_program.stamp
+            |-- native_assets.json
+            |-- outputs.json
+            |-- unpack_windows.stamp
+            |-- windows_engine_sources.d
         |-- 50fe17817e537053041cc3ce6d866424
             |-- .filecache
             |-- app.dill
@@ -174,18 +192,36 @@
         |-- theme
             |-- app_theme.dart
         |-- widgets
+            |-- owner_page_scaffold.dart
     |-- features
         |-- analytics
         |-- auth
             |-- owner_login_page.dart
         |-- clients
+            |-- owner_clients_tab.dart
         |-- dashboard
-            |-- owner_home_page.dart
+            |-- owner_dashboard_tab.dart
+            |-- widgets
+                |-- owner_data_card.dart
+                |-- owner_info_tile.dart
+                |-- owner_legend_dot.dart
+                |-- owner_period_switcher.dart
+                |-- owner_summary_row.dart
         |-- finance
         |-- locations
+        |-- services
+            |-- owner_services_tab.dart
         |-- settings
+            |-- owner_settings_tab.dart
         |-- shell
             |-- owner_shell_page.dart
+            |-- widgets
+                |-- owner_top_brand_block.dart
+        |-- staff
+            |-- owner_employees_tab.dart
+            |-- widgets
+                |-- create_employee_dialog.dart
+                |-- owner_employee_card.dart
     |-- main.dart
 |-- linux
     |-- .gitignore
