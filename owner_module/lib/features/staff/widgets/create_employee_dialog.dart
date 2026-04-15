@@ -66,6 +66,7 @@ class _CreateEmployeeDialogState extends State<CreateEmployeeDialog> {
 
   @override
   Widget build(BuildContext context) {
+    // ignore: unused_local_variable
     final theme = Theme.of(context);
 
     return AlertDialog(
@@ -104,10 +105,12 @@ class _CreateEmployeeDialogState extends State<CreateEmployeeDialog> {
                 DropdownButtonFormField<String>(
                   initialValue: _role,
                   decoration: const InputDecoration(
-                    labelText: 'Роль',
+                    labelText: '',
                     floatingLabelBehavior: FloatingLabelBehavior.always,
-                    contentPadding:
-                        EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 16,
+                    ),
                   ),
                   items: const [
                     DropdownMenuItem<String>(

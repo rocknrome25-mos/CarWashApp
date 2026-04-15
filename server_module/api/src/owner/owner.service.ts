@@ -32,9 +32,7 @@ export class OwnerService {
     });
 
     if (!location) {
-      throw new NotFoundException(
-        `Location "${this.locationName}" not found`,
-      );
+      throw new NotFoundException(`Location "${this.locationName}" not found`);
     }
 
     return location;
@@ -102,13 +100,13 @@ export class OwnerService {
   }
 
   private parseEmployeeRole(raw?: string): 'ADMIN' | 'WASHER' {
-  if (raw === 'ADMIN') return 'ADMIN';
-  if (raw === 'WASHER') return 'WASHER';
+    if (raw === 'ADMIN') return 'ADMIN';
+    if (raw === 'WASHER') return 'WASHER';
 
-  throw new BadRequestException(
-    'Разрешены только роли ADMIN или WASHER.',
-  );
-}
+    throw new BadRequestException(
+      'Разрешены только роли ADMIN или WASHER.',
+    );
+  }
 
   private validatePassword(raw?: string): string {
     const value = (raw ?? '').trim();
@@ -653,7 +651,9 @@ export class OwnerService {
     });
 
     if (existing) {
-      throw new ConflictException('Пользователь с таким телефоном уже существует.');
+      throw new ConflictException(
+        'Пользователь с таким телефоном уже существует.',
+      );
     }
 
     const created = await this.prisma.user.create({
@@ -681,6 +681,48 @@ export class OwnerService {
     return {
       ok: true,
       employee: created,
+    };
+  }
+
+  async toggleEmployee(id: string) {
+    const location = await this.getLocation();
+
+    const user = await this.prisma.user.findFirst({
+      where: {
+        id,
+        locationId: location.id,
+        role: { in: ['ADMIN', 'WASHER'] },
+      },
+      select: {
+        id: true,
+        isActive: true,
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException('Сотрудник не найден.');
+    }
+
+    const updated = await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        isActive: !user.isActive,
+      },
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        role: true,
+        isActive: true,
+        createdAt: true,
+        mustChangePassword: true,
+        lastLoginAt: true,
+      },
+    });
+
+    return {
+      ok: true,
+      employee: updated,
     };
   }
 }

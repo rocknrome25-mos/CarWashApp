@@ -46,11 +46,7 @@ class _OwnerDashboardTabState extends State<OwnerDashboardTab> {
 
   Future<void> _refresh() async {
     setState(_load);
-    await Future.wait([
-      _summaryFuture,
-      _chartFuture,
-      _financeFuture,
-    ]);
+    await Future.wait([_summaryFuture, _chartFuture, _financeFuture]);
   }
 
   @override
@@ -73,10 +69,7 @@ class _OwnerDashboardTabState extends State<OwnerDashboardTab> {
               ),
             ),
             const SizedBox(height: 16),
-            OwnerPeriodSwitcher(
-              value: _period,
-              onChanged: _changePeriod,
-            ),
+            OwnerPeriodSwitcher(value: _period, onChanged: _changePeriod),
             const SizedBox(height: 16),
             FutureBuilder<Map<String, dynamic>>(
               future: _chartFuture,
@@ -84,7 +77,8 @@ class _OwnerDashboardTabState extends State<OwnerDashboardTab> {
                 return OwnerDataCard(
                   title: 'График',
                   snapshot: snapshot,
-                  childBuilder: (data) => _ChartSection(data: data),
+                  childBuilder: (data) =>
+                      _OwnerChartSection(data: data, period: _period),
                 );
               },
             ),
@@ -95,7 +89,7 @@ class _OwnerDashboardTabState extends State<OwnerDashboardTab> {
                 return OwnerDataCard(
                   title: 'Сводка за период',
                   snapshot: snapshot,
-                  childBuilder: (data) => _SummarySection(data: data),
+                  childBuilder: (data) => _OwnerSummarySection(data: data),
                 );
               },
             ),
@@ -106,7 +100,7 @@ class _OwnerDashboardTabState extends State<OwnerDashboardTab> {
                 return OwnerDataCard(
                   title: 'Финансовая сводка',
                   snapshot: snapshot,
-                  childBuilder: (data) => _FinanceSection(data: data),
+                  childBuilder: (data) => _OwnerFinanceSection(data: data),
                 );
               },
             ),
@@ -117,16 +111,24 @@ class _OwnerDashboardTabState extends State<OwnerDashboardTab> {
   }
 }
 
-class _ChartSection extends StatelessWidget {
+class _OwnerChartSection extends StatefulWidget {
   final Map<String, dynamic> data;
+  final OwnerSummaryPeriod period;
 
-  const _ChartSection({required this.data});
+  const _OwnerChartSection({required this.data, required this.period});
+
+  @override
+  State<_OwnerChartSection> createState() => _OwnerChartSectionState();
+}
+
+class _OwnerChartSectionState extends State<_OwnerChartSection> {
+  int? _selectedIndex;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    final points = ((data['points'] as List?) ?? const [])
+    final points = ((widget.data['points'] as List?) ?? const [])
         .whereType<Map>()
         .map((e) => Map<String, dynamic>.from(e))
         .toList();
@@ -137,22 +139,23 @@ class _ChartSection extends StatelessWidget {
 
     final maxRevenue = points.fold<double>(
       0,
-      (prev, item) => math.max(
-        prev,
-        ((item['revenue'] ?? 0) as num).toDouble(),
-      ),
+      (prev, item) =>
+          math.max(prev, ((item['revenue'] ?? 0) as num).toDouble()),
     );
 
     final maxSuspicious = points.fold<double>(
       0,
-      (prev, item) => math.max(
-        prev,
-        ((item['suspiciousEvents'] ?? 0) as num).toDouble(),
-      ),
+      (prev, item) =>
+          math.max(prev, ((item['suspiciousEvents'] ?? 0) as num).toDouble()),
     );
 
     final revenueScale = maxRevenue <= 0 ? 1.0 : maxRevenue;
     final suspiciousScale = maxSuspicious <= 0 ? 1.0 : maxSuspicious;
+
+    final itemWidth = _itemWidthForPeriod(widget.period);
+    final chartWidth = math
+        .max(MediaQuery.of(context).size.width - 72, points.length * itemWidth)
+        .toDouble();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -161,10 +164,7 @@ class _ChartSection extends StatelessWidget {
           spacing: 16,
           runSpacing: 8,
           children: [
-            OwnerLegendDot(
-              color: Color(0xFF22C55E),
-              label: 'Выручка',
-            ),
+            OwnerLegendDot(color: Color(0xFF22C55E), label: 'Выручка'),
             OwnerLegendDot(
               color: Color(0xFFF43F5E),
               label: 'Подозрительные события',
@@ -173,85 +173,235 @@ class _ChartSection extends StatelessWidget {
         ),
         const SizedBox(height: 16),
         SizedBox(
-          height: 250,
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              for (final item in points)
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        Expanded(
-                          child: Align(
-                            alignment: Alignment.bottomCenter,
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.end,
-                              children: [
-                                Container(
-                                  width: 26,
-                                  height:
-                                      ((item['suspiciousEvents'] ?? 0) as num)
-                                                  .toDouble() <=
-                                              0
-                                          ? 0
-                                          : ((((item['suspiciousEvents'] ?? 0)
-                                                              as num)
-                                                          .toDouble() /
-                                                      suspiciousScale) *
-                                                  44)
-                                              .clamp(6, 44)
-                                              .toDouble(),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFFF43F5E),
-                                    borderRadius: BorderRadius.circular(6),
+          height: 290,
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: SizedBox(
+              width: chartWidth,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  for (var i = 0; i < points.length; i++)
+                    SizedBox(
+                      width: itemWidth.toDouble(),
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () {
+                          setState(() {
+                            _selectedIndex = _selectedIndex == i ? null : i;
+                          });
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 3),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              Expanded(
+                                child: Align(
+                                  alignment: Alignment.bottomCenter,
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.end,
+                                    children: [
+                                      Container(
+                                        width: 16,
+                                        height:
+                                            ((points[i]['suspiciousEvents'] ??
+                                                            0)
+                                                        as num)
+                                                    .toDouble() <=
+                                                0
+                                            ? 0
+                                            : ((((points[i]['suspiciousEvents'] ??
+                                                                      0)
+                                                                  as num)
+                                                              .toDouble() /
+                                                          suspiciousScale) *
+                                                      40)
+                                                  .clamp(6, 40)
+                                                  .toDouble(),
+                                        decoration: BoxDecoration(
+                                          color: _selectedIndex == i
+                                              ? const Color(0xFFE11D48)
+                                              : const Color(0xFFF43F5E),
+                                          borderRadius: BorderRadius.circular(
+                                            6,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Container(
+                                        width: 16,
+                                        height:
+                                            ((points[i]['revenue'] ?? 0) as num)
+                                                    .toDouble() <=
+                                                0
+                                            ? 4
+                                            : ((((points[i]['revenue'] ?? 0)
+                                                                  as num)
+                                                              .toDouble() /
+                                                          revenueScale) *
+                                                      150)
+                                                  .clamp(10, 150)
+                                                  .toDouble(),
+                                        decoration: BoxDecoration(
+                                          color: _selectedIndex == i
+                                              ? const Color(0xFF10B981)
+                                              : const Color(0xFF34D399),
+                                          borderRadius: BorderRadius.circular(
+                                            6,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
-                                const SizedBox(height: 4),
-                                Container(
-                                  width: 26,
-                                  height: ((item['revenue'] ?? 0) as num)
-                                              .toDouble() <=
-                                          0
-                                      ? 4
-                                      : ((((item['revenue'] ?? 0) as num)
-                                                      .toDouble() /
-                                                  revenueScale) *
-                                              150)
-                                          .clamp(10, 150)
-                                          .toDouble(),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFF34D399),
-                                    borderRadius: BorderRadius.circular(6),
+                              ),
+                              const SizedBox(height: 10),
+                              SizedBox(
+                                height: 22,
+                                child: Center(
+                                  child: Text(
+                                    _axisLabel(points[i], i),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.visible,
+                                    softWrap: false,
+                                    textAlign: TextAlign.center,
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      fontSize: 11,
+                                      color: _selectedIndex == i
+                                          ? const Color(0xFF111827)
+                                          : const Color(0xFF6B7280),
+                                      fontWeight: _selectedIndex == i
+                                          ? FontWeight.w600
+                                          : FontWeight.w400,
+                                    ),
                                   ),
                                 ),
-                              ],
-                            ),
+                              ),
+                            ],
                           ),
                         ),
-                        const SizedBox(height: 8),
-                        Text(
-                          '${item['label'] ?? ''}',
-                          style: theme.textTheme.bodySmall,
-                        ),
-                      ],
+                      ),
                     ),
-                  ),
-                ),
-            ],
+                ],
+              ),
+            ),
           ),
         ),
+        const SizedBox(height: 12),
+        if (_selectedIndex != null)
+          _SelectedPointCard(
+            label: _tooltipLabel(points[_selectedIndex!]),
+            revenue: _intValue(points[_selectedIndex!]['revenue']),
+            suspiciousEvents: _intValue(
+              points[_selectedIndex!]['suspiciousEvents'],
+            ),
+          )
+        else
+          Text(
+            'Нажмите на столбик, чтобы посмотреть детали.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: const Color(0xFF6B7280),
+            ),
+          ),
       ],
+    );
+  }
+
+  int _itemWidthForPeriod(OwnerSummaryPeriod period) {
+    switch (period) {
+      case OwnerSummaryPeriod.day:
+        return 44;
+      case OwnerSummaryPeriod.month:
+        return 34;
+      case OwnerSummaryPeriod.year:
+        return 44;
+    }
+  }
+
+  String _axisLabel(Map<String, dynamic> point, int index) {
+    final raw = (point['label'] ?? '').toString().trim();
+    if (raw.isEmpty) {
+      return '${index + 1}';
+    }
+
+    switch (widget.period) {
+      case OwnerSummaryPeriod.day:
+        return raw;
+      case OwnerSummaryPeriod.month:
+        return raw;
+      case OwnerSummaryPeriod.year:
+        return raw;
+    }
+  }
+
+  String _tooltipLabel(Map<String, dynamic> point) {
+    final raw = (point['label'] ?? '').toString().trim();
+    if (raw.isEmpty) return 'Период';
+
+    switch (widget.period) {
+      case OwnerSummaryPeriod.day:
+        return 'Час: $raw';
+      case OwnerSummaryPeriod.month:
+        return 'День: $raw';
+      case OwnerSummaryPeriod.year:
+        return 'Месяц: $raw';
+    }
+  }
+
+  int _intValue(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return 0;
+  }
+}
+
+class _SelectedPointCard extends StatelessWidget {
+  final String label;
+  final int revenue;
+  final int suspiciousEvents;
+
+  const _SelectedPointCard({
+    required this.label,
+    required this.revenue,
+    required this.suspiciousEvents,
+  });
+
+  String _rub(int value) => '₽ $value';
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: theme.textTheme.titleMedium),
+          const SizedBox(height: 8),
+          Text('Выручка: ${_rub(revenue)}', style: theme.textTheme.bodyMedium),
+          const SizedBox(height: 4),
+          Text(
+            'Подозрительные события: $suspiciousEvents',
+            style: theme.textTheme.bodyMedium,
+          ),
+        ],
+      ),
     );
   }
 }
 
-class _SummarySection extends StatelessWidget {
+class _OwnerSummarySection extends StatelessWidget {
   final Map<String, dynamic> data;
 
-  const _SummarySection({required this.data});
+  const _OwnerSummarySection({required this.data});
 
   int _intValue(dynamic value) {
     if (value is int) return value;
@@ -265,8 +415,9 @@ class _SummarySection extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    final metrics =
-        Map<String, dynamic>.from((data['metrics'] as Map?) ?? const {});
+    final metrics = Map<String, dynamic>.from(
+      (data['metrics'] as Map?) ?? const {},
+    );
     final topServices = ((data['topServices'] as List?) ?? const [])
         .whereType<Map>()
         .map((e) => Map<String, dynamic>.from(e))
@@ -333,10 +484,7 @@ class _SummarySection extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 18),
-        Text(
-          'Основные показатели',
-          style: theme.textTheme.titleMedium,
-        ),
+        Text('Основные показатели', style: theme.textTheme.titleMedium),
         const SizedBox(height: 10),
         OwnerSummaryRow(label: 'Клиентов за период', value: '$clientsTotal'),
         OwnerSummaryRow(label: 'Новых клиентов', value: '$newClients'),
@@ -355,18 +503,12 @@ class _SummarySection extends StatelessWidget {
           label: 'Заблокированные клиенты',
           value: '$blockedClients',
         ),
-        OwnerSummaryRow(
-          label: 'В waitlist ожидают',
-          value: '$waitlistWaiting',
-        ),
+        OwnerSummaryRow(label: 'В waitlist ожидают', value: '$waitlistWaiting'),
         OwnerSummaryRow(label: 'Админы', value: '$admins'),
         OwnerSummaryRow(label: 'Мойщики', value: '$washers'),
         if (topServices.isNotEmpty) ...[
           const SizedBox(height: 18),
-          Text(
-            'Топ сервисов',
-            style: theme.textTheme.titleMedium,
-          ),
+          Text('Топ сервисов', style: theme.textTheme.titleMedium),
           const SizedBox(height: 10),
           ...topServices.map(
             (service) => OwnerSummaryRow(
@@ -380,10 +522,10 @@ class _SummarySection extends StatelessWidget {
   }
 }
 
-class _FinanceSection extends StatelessWidget {
+class _OwnerFinanceSection extends StatelessWidget {
   final Map<String, dynamic> data;
 
-  const _FinanceSection({required this.data});
+  const _OwnerFinanceSection({required this.data});
 
   String _rub(int value) => '₽ $value';
 
@@ -410,21 +552,26 @@ class _FinanceSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final methods =
-        Map<String, dynamic>.from((data['methods'] as Map?) ?? const {});
-    final totals =
-        Map<String, dynamic>.from((data['totals'] as Map?) ?? const {});
+    final methods = Map<String, dynamic>.from(
+      (data['methods'] as Map?) ?? const {},
+    );
+    final totals = Map<String, dynamic>.from(
+      (data['totals'] as Map?) ?? const {},
+    );
     final kinds = ((data['kinds'] as List?) ?? const [])
         .whereType<Map>()
         .map((e) => Map<String, dynamic>.from(e))
         .toList();
 
-    final cash =
-        Map<String, dynamic>.from((methods['cash'] as Map?) ?? const {});
-    final card =
-        Map<String, dynamic>.from((methods['card'] as Map?) ?? const {});
-    final contract =
-        Map<String, dynamic>.from((methods['contract'] as Map?) ?? const {});
+    final cash = Map<String, dynamic>.from(
+      (methods['cash'] as Map?) ?? const {},
+    );
+    final card = Map<String, dynamic>.from(
+      (methods['card'] as Map?) ?? const {},
+    );
+    final contract = Map<String, dynamic>.from(
+      (methods['contract'] as Map?) ?? const {},
+    );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -470,10 +617,7 @@ class _FinanceSection extends StatelessWidget {
         ),
         if (kinds.isNotEmpty) ...[
           const SizedBox(height: 18),
-          Text(
-            'Типы платежей',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
+          Text('Типы платежей', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 10),
           ...kinds.map(
             (item) => OwnerSummaryRow(

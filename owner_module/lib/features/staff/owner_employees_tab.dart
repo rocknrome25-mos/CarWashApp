@@ -16,6 +16,7 @@ class OwnerEmployeesTab extends StatefulWidget {
 
 class _OwnerEmployeesTabState extends State<OwnerEmployeesTab> {
   late Future<Map<String, dynamic>> _future;
+  bool _isBusy = false;
 
   @override
   void initState() {
@@ -47,8 +48,6 @@ class _OwnerEmployeesTabState extends State<OwnerEmployeesTab> {
   }
 
   Future<void> _openCreateDialog() async {
-    final messenger = ScaffoldMessenger.of(context);
-
     final created = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -59,14 +58,61 @@ class _OwnerEmployeesTabState extends State<OwnerEmployeesTab> {
 
     if (created == true) {
       await _reload();
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Сотрудник создан')));
+    }
+  }
+
+  Future<void> _toggleEmployee(
+    String id,
+    String name,
+    bool currentIsActive,
+  ) async {
+    if (_isBusy) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+
+    setState(() {
+      _isBusy = true;
+    });
+
+    try {
+      final uri = Uri.parse(
+        '${AppConfig.defaultBaseUrl}/owner/employees/$id/toggle',
+      );
+
+      final response = await http
+          .post(uri)
+          .timeout(const Duration(seconds: 20));
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Exception('Toggle failed: ${response.statusCode}');
+      }
+
+      await _reload();
 
       if (!mounted) return;
 
       messenger.showSnackBar(
-        const SnackBar(
-          content: Text('Сотрудник создан'),
+        SnackBar(
+          content: Text(
+            currentIsActive ? '$name отключён' : '$name активирован',
+          ),
         ),
       );
+    } catch (e) {
+      if (!mounted) return;
+
+      messenger.showSnackBar(SnackBar(content: Text('Ошибка: $e')));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isBusy = false;
+        });
+      }
     }
   }
 
@@ -82,141 +128,177 @@ class _OwnerEmployeesTabState extends State<OwnerEmployeesTab> {
 
     return SafeArea(
       top: false,
-      child: FutureBuilder<Map<String, dynamic>>(
-        future: _future,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
+      child: Stack(
+        children: [
+          FutureBuilder<Map<String, dynamic>>(
+            future: _future,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
 
-          if (snapshot.hasError) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
+              if (snapshot.hasError) {
+                return Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'Ошибка загрузки: ${snapshot.error}',
+                          style: theme.textTheme.bodyMedium,
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 12),
+                        FilledButton.icon(
+                          onPressed: _reload,
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('Повторить'),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }
+
+              final data = snapshot.data ?? <String, dynamic>{};
+              final totals = Map<String, dynamic>.from(
+                (data['totals'] as Map?) ?? const {},
+              );
+              final admins = ((data['admins'] as List?) ?? const [])
+                  .whereType<Map>()
+                  .map((e) => Map<String, dynamic>.from(e))
+                  .toList();
+              final washers = ((data['washers'] as List?) ?? const [])
+                  .whereType<Map>()
+                  .map((e) => Map<String, dynamic>.from(e))
+                  .toList();
+
+              return RefreshIndicator(
+                onRefresh: _reload,
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
                   children: [
-                    Text(
-                      'Ошибка загрузки: ${snapshot.error}',
-                      style: theme.textTheme.bodyMedium,
-                      textAlign: TextAlign.center,
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Сотрудники',
+                                style: theme.textTheme.headlineMedium,
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                'Администраторы и мойщики по текущей локации',
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: const Color(0xFF6B7280),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        FilledButton.icon(
+                          onPressed: _isBusy ? null : _openCreateDialog,
+                          icon: const Icon(Icons.person_add_alt_1),
+                          label: const Text('Добавить'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _StaffInfoTile(
+                            title: 'Всего',
+                            value: '${_intValue(totals['all'])}',
+                            subtitle: 'Сотрудников',
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _StaffInfoTile(
+                            title: 'Админы',
+                            value: '${_intValue(totals['admins'])}',
+                            subtitle: 'Человек',
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 12),
-                    FilledButton.icon(
-                      onPressed: _reload,
-                      icon: const Icon(Icons.refresh),
-                      label: const Text('Повторить'),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _StaffInfoTile(
+                            title: 'Мойщики',
+                            value: '${_intValue(totals['washers'])}',
+                            subtitle: 'Человек',
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _StaffInfoTile(
+                            title: 'Активные',
+                            value: '${_intValue(totals['active'])}',
+                            subtitle: 'Работают',
+                          ),
+                        ),
+                      ],
                     ),
+                    const SizedBox(height: 24),
+                    Text('Администраторы', style: theme.textTheme.titleLarge),
+                    const SizedBox(height: 12),
+                    if (admins.isEmpty)
+                      const _EmptyBlock(text: 'Нет администраторов')
+                    else
+                      ...admins.map(
+                        (e) => OwnerEmployeeCard(
+                          data: e,
+                          onToggle: _isBusy
+                              ? null
+                              : () => _toggleEmployee(
+                                  (e['id'] ?? '').toString(),
+                                  (e['name'] ?? 'Сотрудник').toString(),
+                                  e['isActive'] == true,
+                                ),
+                        ),
+                      ),
+                    const SizedBox(height: 24),
+                    Text('Мойщики', style: theme.textTheme.titleLarge),
+                    const SizedBox(height: 12),
+                    if (washers.isEmpty)
+                      const _EmptyBlock(text: 'Нет мойщиков')
+                    else
+                      ...washers.map(
+                        (e) => OwnerEmployeeCard(
+                          data: e,
+                          onToggle: _isBusy
+                              ? null
+                              : () => _toggleEmployee(
+                                  (e['id'] ?? '').toString(),
+                                  (e['name'] ?? 'Сотрудник').toString(),
+                                  e['isActive'] == true,
+                                ),
+                        ),
+                      ),
                   ],
+                ),
+              );
+            },
+          ),
+          if (_isBusy)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: Container(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  child: const Center(child: CircularProgressIndicator()),
                 ),
               ),
-            );
-          }
-
-          final data = snapshot.data ?? <String, dynamic>{};
-          final totals =
-              Map<String, dynamic>.from((data['totals'] as Map?) ?? const {});
-          final admins = ((data['admins'] as List?) ?? const [])
-              .whereType<Map>()
-              .map((e) => Map<String, dynamic>.from(e))
-              .toList();
-          final washers = ((data['washers'] as List?) ?? const [])
-              .whereType<Map>()
-              .map((e) => Map<String, dynamic>.from(e))
-              .toList();
-
-          return RefreshIndicator(
-            onRefresh: _reload,
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Сотрудники',
-                            style: theme.textTheme.headlineMedium,
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Администраторы и мойщики по текущей локации',
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: const Color(0xFF6B7280),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    FilledButton.icon(
-                      onPressed: _openCreateDialog,
-                      icon: const Icon(Icons.person_add_alt_1),
-                      label: const Text('Добавить'),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _StaffInfoTile(
-                        title: 'Всего',
-                        value: '${_intValue(totals['all'])}',
-                        subtitle: 'Сотрудников',
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _StaffInfoTile(
-                        title: 'Админы',
-                        value: '${_intValue(totals['admins'])}',
-                        subtitle: 'Человек',
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _StaffInfoTile(
-                        title: 'Мойщики',
-                        value: '${_intValue(totals['washers'])}',
-                        subtitle: 'Человек',
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _StaffInfoTile(
-                        title: 'Активные',
-                        value: '${_intValue(totals['active'])}',
-                        subtitle: 'Работают',
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 24),
-                Text('Администраторы', style: theme.textTheme.titleLarge),
-                const SizedBox(height: 12),
-                if (admins.isEmpty)
-                  const _EmptyBlock(text: 'Нет администраторов')
-                else
-                  ...admins.map((e) => OwnerEmployeeCard(data: e)),
-                const SizedBox(height: 24),
-                Text('Мойщики', style: theme.textTheme.titleLarge),
-                const SizedBox(height: 12),
-                if (washers.isEmpty)
-                  const _EmptyBlock(text: 'Нет мойщиков')
-                else
-                  ...washers.map((e) => OwnerEmployeeCard(data: e)),
-              ],
             ),
-          );
-        },
+        ],
       ),
     );
   }
@@ -266,10 +348,7 @@ class _EmptyBlock extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Text(text),
-      ),
+      child: Padding(padding: const EdgeInsets.all(16), child: Text(text)),
     );
   }
 }
