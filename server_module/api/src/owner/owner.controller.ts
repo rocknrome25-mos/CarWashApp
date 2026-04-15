@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { OwnerService } from './owner.service';
 
 @Controller('owner')
@@ -38,8 +38,31 @@ export class OwnerController {
     return this.ownerService.createEmployee(body);
   }
 
+  @Patch('employees/:id')
+  updateEmployee(
+    @Param('id') id: string,
+    @Body()
+    body: {
+      name?: string;
+      phone?: string;
+    },
+  ) {
+    return this.ownerService.updateEmployee(id, body);
+  }
+
   @Post('employees/:id/toggle')
   toggleEmployee(@Param('id') id: string) {
     return this.ownerService.toggleEmployee(id);
+  }
+
+  @Post('employees/:id/reset-password')
+  resetEmployeePassword(
+    @Param('id') id: string,
+    @Body()
+    body: {
+      password?: string;
+    },
+  ) {
+    return this.ownerService.resetEmployeePassword(id, body);
   }
 }

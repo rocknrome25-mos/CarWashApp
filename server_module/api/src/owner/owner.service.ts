@@ -103,9 +103,7 @@ export class OwnerService {
     if (raw === 'ADMIN') return 'ADMIN';
     if (raw === 'WASHER') return 'WASHER';
 
-    throw new BadRequestException(
-      'Разрешены только роли ADMIN или WASHER.',
-    );
+    throw new BadRequestException('Разрешены только роли ADMIN или WASHER.');
   }
 
   private validatePassword(raw?: string): string {
@@ -130,6 +128,33 @@ export class OwnerService {
     const salt = randomBytes(16).toString('hex');
     const derivedKey = (await scryptAsync(password, salt, 64)) as Buffer;
     return `scrypt$${salt}$${derivedKey.toString('hex')}`;
+  }
+
+  private async getEmployeeOrThrow(id: string, locationId: string) {
+    const employee = await this.prisma.user.findFirst({
+      where: {
+        id,
+        locationId,
+        role: { in: ['ADMIN', 'WASHER'] },
+      },
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        role: true,
+        isActive: true,
+        createdAt: true,
+        mustChangePassword: true,
+        lastLoginAt: true,
+        locationId: true,
+      },
+    });
+
+    if (!employee) {
+      throw new NotFoundException('Сотрудник не найден.');
+    }
+
+    return employee;
   }
 
   async getSummary(rawPeriod?: string) {
@@ -596,6 +621,7 @@ export class OwnerService {
     const users = await this.prisma.user.findMany({
       where: {
         locationId: location.id,
+        role: { in: ['ADMIN', 'WASHER'] },
       },
       select: {
         id: true,
@@ -647,13 +673,11 @@ export class OwnerService {
 
     const existing = await this.prisma.user.findUnique({
       where: { phone },
-      select: { id: true, role: true, locationId: true },
+      select: { id: true },
     });
 
     if (existing) {
-      throw new ConflictException(
-        'Пользователь с таким телефоном уже существует.',
-      );
+      throw new ConflictException('Пользователь с таким телефоном уже существует.');
     }
 
     const created = await this.prisma.user.create({
@@ -684,29 +708,76 @@ export class OwnerService {
     };
   }
 
-  async toggleEmployee(id: string) {
+  async updateEmployee(
+    id: string,
+    body: {
+      name?: string;
+      phone?: string;
+    },
+  ) {
     const location = await this.getLocation();
+    await this.getEmployeeOrThrow(id, location.id);
 
-    const user = await this.prisma.user.findFirst({
-      where: {
-        id,
-        locationId: location.id,
-        role: { in: ['ADMIN', 'WASHER'] },
-      },
-      select: {
-        id: true,
-        isActive: true,
-      },
-    });
+    const hasName = typeof body.name === 'string';
+    const hasPhone = typeof body.phone === 'string';
 
-    if (!user) {
-      throw new NotFoundException('Сотрудник не найден.');
+    if (!hasName && !hasPhone) {
+      throw new BadRequestException('Нужно передать name и/или phone.');
+    }
+
+    const data: { name?: string; phone?: string } = {};
+
+    if (hasName) {
+      data.name = this.normalizeName(body.name ?? '');
+    }
+
+    if (hasPhone) {
+      const normalizedPhone = this.normalizePhone(body.phone ?? '');
+
+      const existing = await this.prisma.user.findFirst({
+        where: {
+          phone: normalizedPhone,
+          id: { not: id },
+        },
+        select: { id: true },
+      });
+
+      if (existing) {
+        throw new ConflictException('Пользователь с таким телефоном уже существует.');
+      }
+
+      data.phone = normalizedPhone;
     }
 
     const updated = await this.prisma.user.update({
-      where: { id: user.id },
+      where: { id },
+      data,
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        role: true,
+        isActive: true,
+        mustChangePassword: true,
+        lastLoginAt: true,
+        createdAt: true,
+      },
+    });
+
+    return {
+      ok: true,
+      employee: updated,
+    };
+  }
+
+  async toggleEmployee(id: string) {
+    const location = await this.getLocation();
+    const employee = await this.getEmployeeOrThrow(id, location.id);
+
+    const updated = await this.prisma.user.update({
+      where: { id },
       data: {
-        isActive: !user.isActive,
+        isActive: !employee.isActive,
       },
       select: {
         id: true,
@@ -714,9 +785,45 @@ export class OwnerService {
         phone: true,
         role: true,
         isActive: true,
-        createdAt: true,
         mustChangePassword: true,
         lastLoginAt: true,
+        createdAt: true,
+      },
+    });
+
+    return {
+      ok: true,
+      employee: updated,
+    };
+  }
+
+  async resetEmployeePassword(
+    id: string,
+    body: {
+      password?: string;
+    },
+  ) {
+    const location = await this.getLocation();
+    await this.getEmployeeOrThrow(id, location.id);
+
+    const password = this.validatePassword(body.password);
+    const passwordHash = await this.hashPassword(password);
+
+    const updated = await this.prisma.user.update({
+      where: { id },
+      data: {
+        passwordHash,
+        mustChangePassword: true,
+      },
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        role: true,
+        isActive: true,
+        mustChangePassword: true,
+        lastLoginAt: true,
+        createdAt: true,
       },
     });
 

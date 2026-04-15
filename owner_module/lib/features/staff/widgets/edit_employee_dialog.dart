@@ -57,7 +57,7 @@ class _EditEmployeeDialogState extends State<EditEmployeeDialog> {
               TextFormField(
                 controller: _nameController,
                 textInputAction: TextInputAction.next,
-                decoration: const InputDecoration(labelText: 'Имя'),
+                decoration: const InputDecoration(labelText: ''),
                 validator: (value) {
                   final v = (value ?? '').trim();
                   if (v.isEmpty) return 'Введите имя';
@@ -70,7 +70,7 @@ class _EditEmployeeDialogState extends State<EditEmployeeDialog> {
                 controller: _phoneController,
                 keyboardType: TextInputType.phone,
                 textInputAction: TextInputAction.done,
-                decoration: const InputDecoration(labelText: 'Телефон'),
+                decoration: const InputDecoration(labelText: ''),
                 validator: (value) {
                   final v = (value ?? '').trim();
                   if (v.isEmpty) return 'Введите телефон';

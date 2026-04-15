@@ -47,6 +47,24 @@ class _OwnerEmployeesTabState extends State<OwnerEmployeesTab> {
     await _future;
   }
 
+  Future<void> _runBusyAction(Future<void> Function() action) async {
+    if (_isBusy) return;
+
+    setState(() {
+      _isBusy = true;
+    });
+
+    try {
+      await action();
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isBusy = false;
+        });
+      }
+    }
+  }
+
   Future<void> _openCreateDialog() async {
     final created = await showDialog<bool>(
       context: context,
@@ -57,62 +75,15 @@ class _OwnerEmployeesTabState extends State<OwnerEmployeesTab> {
     if (!mounted) return;
 
     if (created == true) {
-      await _reload();
+      await _runBusyAction(() async {
+        await _reload();
+      });
+
       if (!mounted) return;
 
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Сотрудник создан')));
-    }
-  }
-
-  Future<void> _toggleEmployee(
-    String id,
-    String name,
-    bool currentIsActive,
-  ) async {
-    if (_isBusy) return;
-
-    final messenger = ScaffoldMessenger.of(context);
-
-    setState(() {
-      _isBusy = true;
-    });
-
-    try {
-      final uri = Uri.parse(
-        '${AppConfig.defaultBaseUrl}/owner/employees/$id/toggle',
-      );
-
-      final response = await http
-          .post(uri)
-          .timeout(const Duration(seconds: 20));
-
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw Exception('Toggle failed: ${response.statusCode}');
-      }
-
-      await _reload();
-
-      if (!mounted) return;
-
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            currentIsActive ? '$name отключён' : '$name активирован',
-          ),
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-
-      messenger.showSnackBar(SnackBar(content: Text('Ошибка: $e')));
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isBusy = false;
-        });
-      }
     }
   }
 
@@ -257,13 +228,11 @@ class _OwnerEmployeesTabState extends State<OwnerEmployeesTab> {
                       ...admins.map(
                         (e) => OwnerEmployeeCard(
                           data: e,
-                          onToggle: _isBusy
-                              ? null
-                              : () => _toggleEmployee(
-                                  (e['id'] ?? '').toString(),
-                                  (e['name'] ?? 'Сотрудник').toString(),
-                                  e['isActive'] == true,
-                                ),
+                          onUpdated: () async {
+                            await _runBusyAction(() async {
+                              await _reload();
+                            });
+                          },
                         ),
                       ),
                     const SizedBox(height: 24),
@@ -275,13 +244,11 @@ class _OwnerEmployeesTabState extends State<OwnerEmployeesTab> {
                       ...washers.map(
                         (e) => OwnerEmployeeCard(
                           data: e,
-                          onToggle: _isBusy
-                              ? null
-                              : () => _toggleEmployee(
-                                  (e['id'] ?? '').toString(),
-                                  (e['name'] ?? 'Сотрудник').toString(),
-                                  e['isActive'] == true,
-                                ),
+                          onUpdated: () async {
+                            await _runBusyAction(() async {
+                              await _reload();
+                            });
+                          },
                         ),
                       ),
                   ],
