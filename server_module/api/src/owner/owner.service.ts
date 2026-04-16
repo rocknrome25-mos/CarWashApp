@@ -4,7 +4,16 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { AuditType, BookingStatus, PaymentMethodType } from '@prisma/client';
+import {
+  AuditType,
+  BookingStatus,
+  PaymentMethodType,
+  Prisma,
+  Service,
+  ServiceImageKey,
+  ServiceKind,
+  ServiceLaborCategory,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { promisify } from 'node:util';
 import { randomBytes, scrypt as scryptCallback } from 'node:crypto';
@@ -99,11 +108,124 @@ export class OwnerService {
     return value;
   }
 
+  private normalizeDescription(raw?: string): string {
+    const value = (raw ?? '').trim();
+    if (value.length > 1000) {
+      throw new BadRequestException('Описание слишком длинное.');
+    }
+    return value;
+  }
+
   private parseEmployeeRole(raw?: string): 'ADMIN' | 'WASHER' {
     if (raw === 'ADMIN') return 'ADMIN';
     if (raw === 'WASHER') return 'WASHER';
 
     throw new BadRequestException('Разрешены только роли ADMIN или WASHER.');
+  }
+
+  private parseServiceKind(raw?: string): ServiceKind {
+    if (raw === 'BASE') return ServiceKind.BASE;
+    if (raw === 'ADDON') return ServiceKind.ADDON;
+
+    throw new BadRequestException('Разрешены только kind BASE или ADDON.');
+  }
+
+  private parseServiceImageKey(raw?: string): ServiceImageKey {
+    switch ((raw ?? '').trim().toUpperCase()) {
+      case 'EXTERIOR_WASH':
+        return ServiceImageKey.EXTERIOR_WASH;
+      case 'FULL_WASH':
+        return ServiceImageKey.FULL_WASH;
+      case 'WAX':
+        return ServiceImageKey.WAX;
+      case 'TIRES':
+        return ServiceImageKey.TIRES;
+      case 'INTERIOR':
+        return ServiceImageKey.INTERIOR;
+      case 'LEATHER_CARE':
+        return ServiceImageKey.LEATHER_CARE;
+      default:
+        return ServiceImageKey.EXTERIOR_WASH;
+    }
+  }
+
+  private normalizePriceRub(raw: unknown): number {
+    const value = Number(raw);
+    if (!Number.isFinite(value)) {
+      throw new BadRequestException('priceRub должен быть числом.');
+    }
+    if (value < 0) {
+      throw new BadRequestException('Цена не может быть отрицательной.');
+    }
+    return Math.round(value);
+  }
+
+  private normalizeDurationMin(raw: unknown): number {
+    const value = Number(raw);
+    if (!Number.isFinite(value)) {
+      throw new BadRequestException('durationMin должен быть числом.');
+    }
+    if (value <= 0) {
+      throw new BadRequestException('durationMin должен быть > 0.');
+    }
+    return Math.round(value);
+  }
+
+  private normalizeSortOrder(raw: unknown): number {
+    const value = Number(raw);
+    if (!Number.isFinite(value)) {
+      throw new BadRequestException('sortOrder должен быть числом.');
+    }
+    return Math.round(value);
+  }
+
+  private normalizeBodyType(raw?: string): string {
+    const value = (raw ?? '').trim();
+    if (!value) {
+      throw new BadRequestException('bodyType обязателен.');
+    }
+    if (value.length > 50) {
+      throw new BadRequestException('bodyType слишком длинный.');
+    }
+    return value;
+  }
+
+  private normalizeBodyTypePrices(
+    raw?: Array<{
+      bodyType?: string;
+      priceRub?: number;
+    }>,
+  ): Array<{
+    bodyType: string;
+    priceRub: number;
+  }> {
+    const items = Array.isArray(raw) ? raw : [];
+
+    const normalized = items.map((item) => ({
+      bodyType: this.normalizeBodyType(item.bodyType),
+      priceRub: this.normalizePriceRub(item.priceRub),
+    }));
+
+    const uniqueMap = new Map<string, number>();
+    for (const item of normalized) {
+      uniqueMap.set(item.bodyType.toLowerCase(), item.priceRub);
+    }
+
+    return Array.from(uniqueMap.entries()).map(([bodyTypeKey, priceRub]) => ({
+      bodyType: normalized.find(
+        (x) => x.bodyType.toLowerCase() === bodyTypeKey,
+      )!.bodyType,
+      priceRub,
+    }));
+  }
+
+  private normalizeIncludedAddonIds(raw?: string[]): string[] {
+    const items = Array.isArray(raw) ? raw : [];
+    const cleaned = items
+      .map((x) => (x ?? '').trim())
+      .filter((x) => x.length > 0);
+
+    return Array.from(new Set(cleaned));
   }
 
   private validatePassword(raw?: string): string {
@@ -155,6 +277,24 @@ export class OwnerService {
     }
 
     return employee;
+  }
+
+  private async getServiceOrThrow(
+    id: string,
+    locationId: string,
+  ): Promise<Service> {
+    const service = await this.prisma.service.findFirst({
+      where: {
+        id,
+        locationId,
+      },
+    });
+
+    if (!service) {
+      throw new NotFoundException('Сервис не найден.');
+    }
+
+    return service;
   }
 
   async getSummary(rawPeriod?: string) {
@@ -677,7 +817,9 @@ export class OwnerService {
     });
 
     if (existing) {
-      throw new ConflictException('Пользователь с таким телефоном уже существует.');
+      throw new ConflictException(
+        'Пользователь с таким телефоном уже существует.',
+      );
     }
 
     const created = await this.prisma.user.create({
@@ -743,7 +885,9 @@ export class OwnerService {
       });
 
       if (existing) {
-        throw new ConflictException('Пользователь с таким телефоном уже существует.');
+        throw new ConflictException(
+          'Пользователь с таким телефоном уже существует.',
+        );
       }
 
       data.phone = normalizedPhone;
@@ -830,6 +974,338 @@ export class OwnerService {
     return {
       ok: true,
       employee: updated,
+    };
+  }
+
+  // =======================
+  // SERVICES
+  // =======================
+
+    // =======================
+  // SERVICES
+  // =======================
+
+  async createService(body: {
+    name?: string;
+    description?: string;
+    kind?: 'BASE' | 'ADDON';
+    imageKey?:
+      | 'EXTERIOR_WASH'
+      | 'FULL_WASH'
+      | 'WAX'
+      | 'TIRES'
+      | 'INTERIOR'
+      | 'LEATHER_CARE';
+    priceRub?: number;
+    durationMin?: number;
+    hasBodyTypePricing?: boolean;
+    bodyTypePrices?: Array<{
+      bodyType?: string;
+      priceRub?: number;
+    }>;
+    includedAddonIds?: string[];
+    isPublished?: boolean;
+  }) {
+    const location = await this.getLocation();
+
+    const name = this.normalizeName(body.name ?? '');
+    const description = this.normalizeDescription(body.description);
+    const kind = this.parseServiceKind(body.kind);
+    const imageKey = this.parseServiceImageKey(body.imageKey);
+    const priceRub = this.normalizePriceRub(body.priceRub);
+    const durationMin = this.normalizeDurationMin(body.durationMin);
+    const hasBodyTypePricing = body.hasBodyTypePricing === true;
+    const bodyTypePrices = this.normalizeBodyTypePrices(body.bodyTypePrices);
+    const includedAddonIds = this.normalizeIncludedAddonIds(body.includedAddonIds);
+    const isPublished = body.isPublished ?? true;
+
+    if (hasBodyTypePricing && bodyTypePrices.length === 0) {
+      throw new BadRequestException(
+        'Если включена градация по типу кузова, нужно передать bodyTypePrices.',
+      );
+    }
+
+    if (kind === ServiceKind.ADDON && includedAddonIds.length > 0) {
+      throw new BadRequestException(
+        'includedAddonIds можно задавать только для базовой услуги.',
+      );
+    }
+
+    if (includedAddonIds.length > 0) {
+      const addons = await this.prisma.service.findMany({
+        where: {
+          id: { in: includedAddonIds },
+          locationId: location.id,
+          kind: ServiceKind.ADDON,
+        },
+        select: { id: true },
+      });
+
+      if (addons.length !== includedAddonIds.length) {
+        throw new BadRequestException(
+          'Все includedAddonIds должны существовать в текущей локации и быть ADDON.',
+        );
+      }
+    }
+
+    const maxSort = await this.prisma.service.aggregate({
+      where: { locationId: location.id, kind },
+      _max: { sortOrder: true },
+    });
+
+    const sortOrder =
+      (maxSort._max.sortOrder ?? (kind === ServiceKind.BASE ? 0 : 100)) + 10;
+
+    const created = await this.prisma.service.create({
+      data: {
+        locationId: location.id,
+        name,
+        description,
+        kind,
+        imageKey,
+        isActive: true,
+        isPublished,
+        sortOrder,
+        laborCategory: ServiceLaborCategory.WASH,
+        priceRub,
+        durationMin,
+        hasBodyTypePricing,
+        bodyTypePrices: bodyTypePrices.length
+          ? {
+              create: bodyTypePrices.map((x) => ({
+                bodyType: x.bodyType,
+                priceRub: x.priceRub,
+              })),
+            }
+          : undefined,
+        includedAddonsForBase: includedAddonIds.length
+          ? {
+              create: includedAddonIds.map((addonServiceId) => ({
+                addonService: {
+                  connect: { id: addonServiceId },
+                },
+              })),
+            }
+          : undefined,
+      },
+      include: {
+        bodyTypePrices: true,
+        includedAddonsForBase: {
+          include: {
+            addonService: true,
+          },
+        },
+      },
+    });
+
+    return {
+      ok: true,
+      service: created,
+    };
+  }
+
+  async updateService(
+    id: string,
+    body: {
+      name?: string;
+      description?: string;
+      imageKey?:
+        | 'EXTERIOR_WASH'
+        | 'FULL_WASH'
+        | 'WAX'
+        | 'TIRES'
+        | 'INTERIOR'
+        | 'LEATHER_CARE';
+      priceRub?: number;
+      durationMin?: number;
+      hasBodyTypePricing?: boolean;
+      bodyTypePrices?: Array<{
+        bodyType?: string;
+        priceRub?: number;
+      }>;
+      includedAddonIds?: string[];
+      isPublished?: boolean;
+    },
+  ) {
+    const location = await this.getLocation();
+    const existing = await this.getServiceOrThrow(id, location.id);
+
+    const hasName = typeof body.name === 'string';
+    const hasDescription = typeof body.description === 'string';
+    const hasImageKey = typeof body.imageKey === 'string';
+    const hasPriceRub = body.priceRub !== undefined;
+    const hasDurationMin = body.durationMin !== undefined;
+    const hasHasBodyTypePricing = body.hasBodyTypePricing !== undefined;
+    const hasBodyTypePrices = Array.isArray(body.bodyTypePrices);
+    const hasIncludedAddonIds = Array.isArray(body.includedAddonIds);
+    const hasIsPublished = body.isPublished !== undefined;
+
+    if (
+      !hasName &&
+      !hasDescription &&
+      !hasImageKey &&
+      !hasPriceRub &&
+      !hasDurationMin &&
+      !hasHasBodyTypePricing &&
+      !hasBodyTypePrices &&
+      !hasIncludedAddonIds &&
+      !hasIsPublished
+    ) {
+      throw new BadRequestException(
+        'Нужно передать хотя бы одно поле для обновления.',
+      );
+    }
+
+    const data: Prisma.ServiceUpdateInput = {};
+
+    if (hasName) {
+      data.name = this.normalizeName(body.name ?? '');
+    }
+
+    if (hasDescription) {
+      data.description = this.normalizeDescription(body.description);
+    }
+
+    if (hasImageKey) {
+      data.imageKey = this.parseServiceImageKey(body.imageKey);
+    }
+
+    if (hasPriceRub) {
+      data.priceRub = this.normalizePriceRub(body.priceRub);
+    }
+
+    if (hasDurationMin) {
+      data.durationMin = this.normalizeDurationMin(body.durationMin);
+    }
+
+    if (hasHasBodyTypePricing) {
+      data.hasBodyTypePricing = body.hasBodyTypePricing === true;
+    }
+
+    if (hasIsPublished) {
+      data.isPublished = body.isPublished === true;
+    }
+
+    if (hasIncludedAddonIds) {
+      if (existing.kind !== ServiceKind.BASE) {
+        throw new BadRequestException(
+          'includedAddonIds можно задавать только для базовой услуги.',
+        );
+      }
+
+      const includedAddonIds = this.normalizeIncludedAddonIds(
+        body.includedAddonIds,
+      );
+
+      if (includedAddonIds.length > 0) {
+        const addons = await this.prisma.service.findMany({
+          where: {
+            id: { in: includedAddonIds },
+            locationId: location.id,
+            kind: ServiceKind.ADDON,
+          },
+          select: { id: true },
+        });
+
+        if (addons.length !== includedAddonIds.length) {
+          throw new BadRequestException(
+            'Все includedAddonIds должны существовать в текущей локации и быть ADDON.',
+          );
+        }
+      }
+
+      await this.prisma.serviceIncludedAddon.deleteMany({
+        where: { baseServiceId: id },
+      });
+
+      if (includedAddonIds.length > 0) {
+        await this.prisma.serviceIncludedAddon.createMany({
+          data: includedAddonIds.map((addonServiceId) => ({
+            baseServiceId: id,
+            addonServiceId,
+          })),
+        });
+      }
+    }
+
+    if (hasBodyTypePrices || hasHasBodyTypePricing) {
+      const hasBodyTypePricing =
+        body.hasBodyTypePricing !== undefined
+          ? body.hasBodyTypePricing === true
+          : existing.hasBodyTypePricing;
+
+      const bodyTypePrices = hasBodyTypePrices
+        ? this.normalizeBodyTypePrices(body.bodyTypePrices)
+        : null;
+
+      if (
+        hasBodyTypePricing &&
+        hasBodyTypePrices &&
+        bodyTypePrices!.length === 0
+      ) {
+        throw new BadRequestException(
+          'Если включена градация по типу кузова, нужно передать bodyTypePrices.',
+        );
+      }
+
+      if (hasBodyTypePrices) {
+        await this.prisma.serviceBodyTypePrice.deleteMany({
+          where: { serviceId: id },
+        });
+
+        if (bodyTypePrices && bodyTypePrices.length > 0) {
+          await this.prisma.serviceBodyTypePrice.createMany({
+            data: bodyTypePrices.map((x) => ({
+              serviceId: id,
+              bodyType: x.bodyType,
+              priceRub: x.priceRub,
+            })),
+          });
+        }
+      }
+    }
+
+    const updated = await this.prisma.service.update({
+      where: { id },
+      data,
+      include: {
+        bodyTypePrices: true,
+        includedAddonsForBase: {
+          include: {
+            addonService: true,
+          },
+        },
+      },
+    });
+
+    return {
+      ok: true,
+      service: updated,
+    };
+  }
+
+  async toggleService(id: string) {
+    const location = await this.getLocation();
+    const existing = await this.getServiceOrThrow(id, location.id);
+
+    const updated = await this.prisma.service.update({
+      where: { id },
+      data: {
+        isActive: !existing.isActive,
+      },
+      include: {
+        bodyTypePrices: true,
+        includedAddonsForBase: {
+          include: {
+            addonService: true,
+          },
+        },
+      },
+    });
+
+    return {
+      ok: true,
+      service: updated,
     };
   }
 }

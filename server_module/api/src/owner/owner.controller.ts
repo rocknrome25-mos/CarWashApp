@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { OwnerService } from './owner.service';
 
 @Controller('owner')
@@ -64,5 +72,66 @@ export class OwnerController {
     },
   ) {
     return this.ownerService.resetEmployeePassword(id, body);
+  }
+
+  @Post('services')
+  createService(
+    @Body()
+    body: {
+      name?: string;
+      description?: string;
+      kind?: 'BASE' | 'ADDON';
+      imageKey?:
+        | 'EXTERIOR_WASH'
+        | 'FULL_WASH'
+        | 'WAX'
+        | 'TIRES'
+        | 'INTERIOR'
+        | 'LEATHER_CARE';
+      priceRub?: number;
+      durationMin?: number;
+      hasBodyTypePricing?: boolean;
+      bodyTypePrices?: Array<{
+        bodyType?: string;
+        priceRub?: number;
+      }>;
+      includedAddonIds?: string[];
+      isPublished?: boolean;
+    },
+  ) {
+    return this.ownerService.createService(body);
+  }
+
+  @Patch('services/:id')
+  updateService(
+    @Param('id') id: string,
+    @Body()
+    body: {
+      name?: string;
+      description?: string;
+      imageKey?:
+        | 'EXTERIOR_WASH'
+        | 'FULL_WASH'
+        | 'WAX'
+        | 'TIRES'
+        | 'INTERIOR'
+        | 'LEATHER_CARE';
+      priceRub?: number;
+      durationMin?: number;
+      hasBodyTypePricing?: boolean;
+      bodyTypePrices?: Array<{
+        bodyType?: string;
+        priceRub?: number;
+      }>;
+      includedAddonIds?: string[];
+      isPublished?: boolean;
+    },
+  ) {
+    return this.ownerService.updateService(id, body);
+  }
+
+  @Post('services/:id/toggle')
+  toggleService(@Param('id') id: string) {
+    return this.ownerService.toggleService(id);
   }
 }

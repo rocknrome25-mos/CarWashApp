@@ -109,6 +109,15 @@ enum ServiceLaborCategory {
   CHEM
 }
 
+enum ServiceImageKey {
+  EXTERIOR_WASH
+  FULL_WASH
+  WAX
+  TIRES
+  INTERIOR
+  LEATHER_CARE
+}
+
 model Tenant {
   id        String   @id
   createdAt DateTime @default(now())
@@ -153,6 +162,11 @@ model Location {
   name     String  @unique
   address  String?
   colorHex String  @default("#2D9CDB")
+
+  phone         String?
+  telegram      String?
+  whatsapp      String?
+  navigatorLink String?
 
   baysCount Int @default(2)
 
@@ -280,32 +294,79 @@ model Service {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // ✅ REQUIRED now
   locationId String
   location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
 
-  kind      ServiceKind @default(BASE)
-  isActive  Boolean     @default(true)
-  sortOrder Int         @default(100)
+  kind        ServiceKind @default(BASE)
+  isActive    Boolean     @default(true)
+  isPublished Boolean     @default(true)
 
-  // ✅ NEW: для расчёта зарплаты мойщика (30% WASH / 40% CHEM)
+  // техническое поле оставляем в БД, но не показываем owner
+  sortOrder Int @default(100)
+
+  // техническое поле оставляем в БД для логики зарплаты мойщиков
   laborCategory ServiceLaborCategory @default(WASH)
 
   name        String
+  description String          @default("")
+  imageKey    ServiceImageKey @default(EXTERIOR_WASH)
+
   priceRub    Int
-  durationMin Int    @default(30)
+  durationMin Int @default(30)
+
+  // если true — цена берётся из таблицы ServiceBodyTypePrice
+  hasBodyTypePricing Boolean @default(false)
 
   bookings         Booking[]
   waitlistRequests WaitlistRequest[]
   bookingAddons    BookingAddon[]
+
+  bodyTypePrices ServiceBodyTypePrice[]
+
+  includedByBaseServices ServiceIncludedAddon[] @relation("IncludedAddonService")
+  includedAddonsForBase  ServiceIncludedAddon[] @relation("BaseServiceIncludedAddons")
 
   @@unique([locationId, name])
   @@index([createdAt])
   @@index([locationId])
   @@index([locationId, kind])
   @@index([locationId, isActive])
+  @@index([locationId, isPublished])
   @@index([locationId, sortOrder])
   @@index([locationId, laborCategory])
+  @@index([locationId, hasBodyTypePricing])
+}
+
+model ServiceBodyTypePrice {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  serviceId String
+  service   Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  // пока строкой, чтобы не ломать существующую модель Car.bodyType
+  bodyType String
+  priceRub Int
+
+  @@unique([serviceId, bodyType])
+  @@index([serviceId])
+  @@index([bodyType])
+}
+
+model ServiceIncludedAddon {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  baseServiceId  String
+  addonServiceId String
+
+  baseService  Service @relation("BaseServiceIncludedAddons", fields: [baseServiceId], references: [id], onDelete: Cascade)
+  addonService Service @relation("IncludedAddonService", fields: [addonServiceId], references: [id], onDelete: Cascade)
+
+  @@unique([baseServiceId, addonServiceId])
+  @@index([baseServiceId])
+  @@index([addonServiceId])
 }
 
 model Booking {

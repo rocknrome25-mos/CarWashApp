@@ -1,4 +1,5 @@
 import { BadRequestException, Controller, Get, Query } from '@nestjs/common';
+import { ServiceKind } from '@prisma/client';
 import { ServicesService } from './services.service';
 
 @Controller('services')
@@ -9,7 +10,7 @@ export class ServicesController {
   @Get()
   getAll(
     @Query('locationId') locationId?: string,
-    @Query('kind') kind?: 'BASE' | 'ADDON',
+    @Query('kind') kind?: string,
     @Query('includeInactive') includeInactive?: string,
   ) {
     const loc = (locationId ?? '').trim();
@@ -17,16 +18,29 @@ export class ServicesController {
       throw new BadRequestException('locationId is required');
     }
 
-    const inc = (includeInactive ?? '').toString().toLowerCase();
-    const include = inc === 'true' || inc === '1' || inc === 'yes';
+    const include = this.parseBoolean(includeInactive);
 
-    const k = (kind ?? '').trim().toUpperCase();
-    const kindNorm = k === 'BASE' || k === 'ADDON' ? (k as 'BASE' | 'ADDON') : undefined;
+    const kindRaw = (kind ?? '').trim().toUpperCase();
+    let kindNorm: ServiceKind | undefined;
+
+    if (kindRaw) {
+      if (kindRaw !== ServiceKind.BASE && kindRaw !== ServiceKind.ADDON) {
+        throw new BadRequestException(
+          'kind must be either BASE or ADDON',
+        );
+      }
+      kindNorm = kindRaw as ServiceKind;
+    }
 
     return this.servicesService.findAll({
       locationId: loc,
       kind: kindNorm,
       includeInactive: include,
     });
+  }
+
+  private parseBoolean(value?: string): boolean {
+    const raw = (value ?? '').trim().toLowerCase();
+    return raw === 'true' || raw === '1' || raw === 'yes';
   }
 }

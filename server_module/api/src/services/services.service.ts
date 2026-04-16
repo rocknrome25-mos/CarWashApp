@@ -1,10 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { Prisma, ServiceKind } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class ServicesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async findAll(opts: {
     locationId: string;
@@ -12,7 +12,9 @@ export class ServicesService {
     includeInactive?: boolean;
   }) {
     const locationId = (opts.locationId ?? '').trim();
-    if (!locationId) throw new Error('locationId is required');
+    if (!locationId) {
+      throw new BadRequestException('locationId is required');
+    }
 
     const where: Prisma.ServiceWhereInput = {
       locationId,
