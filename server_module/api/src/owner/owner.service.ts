@@ -150,6 +150,29 @@ export class OwnerService {
     return { start, end };
   }
 
+  private getDaysInMonth(date: Date): number {
+    return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+  }
+
+  private getAdminSalaryForPeriod(
+    monthlySalaryRub: number,
+    period: Period,
+    rangeStart: Date,
+  ): number {
+    if (monthlySalaryRub <= 0) return 0;
+
+    if (period === 'month') {
+      return monthlySalaryRub;
+    }
+
+    if (period === 'year') {
+      return monthlySalaryRub * 12;
+    }
+
+    const daysInMonth = this.getDaysInMonth(rangeStart);
+    return Math.round(monthlySalaryRub / daysInMonth);
+  }
+
   private readonly suspiciousAuditTypes: AuditType[] = [
     AuditType.BOOKING_CHANGE_SERVICE,
     AuditType.BOOKING_CHANGE_BODYTYPE,
@@ -1315,6 +1338,7 @@ export class OwnerService {
     const period = this.parsePeriod(rawPeriod);
     const location = await this.getLocation();
     const { start, end } = this.getRange(period);
+    const compensationDefaults = this.getDefaultCompensationSettings();
 
     const employees = await this.prisma.user.findMany({
       where: {
@@ -1348,6 +1372,8 @@ export class OwnerService {
       washerAssignments,
       adminSaleBookings,
       adminUpsellAddons,
+      compensationSettings,
+      adminCompensationProfiles,
     ] = await Promise.all([
       adminIds.length === 0
         ? []
@@ -1467,6 +1493,26 @@ export class OwnerService {
               qty: true,
               priceRubSnapshot: true,
               upsellBonusRubSnapshot: true,
+            },
+          }),
+
+      this.prisma.locationCompensationSettings.findUnique({
+        where: { locationId: location.id },
+        select: {
+          adminBaseSalaryRub: true,
+        },
+      }),
+
+      adminIds.length === 0
+        ? []
+        : this.prisma.userCompensationProfile.findMany({
+            where: {
+              userId: { in: adminIds },
+              isActive: true,
+            },
+            select: {
+              userId: true,
+              adminBaseSalaryRub: true,
             },
           }),
     ]);
@@ -1601,7 +1647,31 @@ export class OwnerService {
     }
 
     const adminSalesRevenueRubMap = new Map<string, number>();
-    const adminEarnedRubMap = new Map<string, number>();
+    const adminBonusRubMap = new Map<string, number>();
+    const adminSalaryRubMap = new Map<string, number>();
+
+    const baseMonthlySalary =
+      compensationSettings?.adminBaseSalaryRub ??
+      compensationDefaults.adminBaseSalaryRub;
+
+    for (const employee of employees) {
+      if (employee.role !== 'ADMIN') continue;
+
+      const profile = adminCompensationProfiles.find(
+        (x) => x.userId === employee.id,
+      );
+
+      const monthlySalaryRub =
+        profile?.adminBaseSalaryRub ?? baseMonthlySalary;
+
+      const salaryRub = this.getAdminSalaryForPeriod(
+        monthlySalaryRub,
+        period,
+        start,
+      );
+
+      adminSalaryRubMap.set(employee.id, salaryRub);
+    }
 
     for (const booking of adminSaleBookings) {
       const adminId = booking.createdByUserId;
@@ -1622,7 +1692,7 @@ export class OwnerService {
       }
 
       const totalRevenue = baseRevenue + addonRevenue;
-      const totalEarned =
+      const totalBonus =
         (booking.adminBaseBonusRubSnapshot ?? 0) + addonBonus;
 
       adminSalesRevenueRubMap.set(
@@ -1630,9 +1700,9 @@ export class OwnerService {
         (adminSalesRevenueRubMap.get(adminId) ?? 0) + totalRevenue,
       );
 
-      adminEarnedRubMap.set(
+      adminBonusRubMap.set(
         adminId,
-        (adminEarnedRubMap.get(adminId) ?? 0) + totalEarned,
+        (adminBonusRubMap.get(adminId) ?? 0) + totalBonus,
       );
     }
 
@@ -1643,16 +1713,16 @@ export class OwnerService {
       const qty = addon.qty ?? 1;
       const price = addon.priceRubSnapshot ?? 0;
       const revenue = qty * price;
-      const earned = addon.upsellBonusRubSnapshot ?? 0;
+      const bonus = addon.upsellBonusRubSnapshot ?? 0;
 
       adminSalesRevenueRubMap.set(
         adminId,
         (adminSalesRevenueRubMap.get(adminId) ?? 0) + revenue,
       );
 
-      adminEarnedRubMap.set(
+      adminBonusRubMap.set(
         adminId,
-        (adminEarnedRubMap.get(adminId) ?? 0) + earned,
+        (adminBonusRubMap.get(adminId) ?? 0) + bonus,
       );
     }
 
@@ -1674,15 +1744,25 @@ export class OwnerService {
       const washerShiftsWorked = washerShiftSetMap.get(employee.id)?.size ?? 0;
       const carsServiced = washerCarsServicedMap.get(employee.id) ?? 0;
 
-      const earnedRub =
-        employee.role === 'ADMIN'
-          ? (adminEarnedRubMap.get(employee.id) ?? 0)
-          : (washerEarnedRubMap.get(employee.id) ?? 0);
-
       const salesRevenueRub =
         employee.role === 'ADMIN'
           ? (adminSalesRevenueRubMap.get(employee.id) ?? 0)
           : 0;
+
+      const bonusRub =
+        employee.role === 'ADMIN'
+          ? (adminBonusRubMap.get(employee.id) ?? 0)
+          : 0;
+
+      const salaryRub =
+        employee.role === 'ADMIN'
+          ? (adminSalaryRubMap.get(employee.id) ?? 0)
+          : 0;
+
+      const earnedRub =
+        employee.role === 'ADMIN'
+          ? bonusRub + salaryRub
+          : (washerEarnedRubMap.get(employee.id) ?? 0);
 
       return {
         id: employee.id,
@@ -1699,6 +1779,8 @@ export class OwnerService {
           suspiciousActions,
           carsServiced,
           salesRevenueRub,
+          bonusRub,
+          salaryRub,
           earnedRub,
         },
       };
