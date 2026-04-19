@@ -242,7 +242,9 @@ export class OwnerService {
       throw new BadRequestException(`${fieldName} должен быть числом.`);
     }
     if (value < 0 || value > 100) {
-      throw new BadRequestException(`${fieldName} должен быть в диапазоне 0..100.`);
+      throw new BadRequestException(
+        `${fieldName} должен быть в диапазоне 0..100.`,
+      );
     }
     return Math.round(value);
   }
@@ -253,7 +255,9 @@ export class OwnerService {
       throw new BadRequestException(`${fieldName} должен быть числом.`);
     }
     if (value < 0) {
-      throw new BadRequestException(`${fieldName} не может быть отрицательным.`);
+      throw new BadRequestException(
+        `${fieldName} не может быть отрицательным.`,
+      );
     }
     return Math.round(value);
   }
@@ -450,7 +454,9 @@ export class OwnerService {
     };
   }
 
-  private getDefaultOwnerSettings(contacts: ContactsConfig): OwnerSettingsConfig {
+  private getDefaultOwnerSettings(
+    contacts: ContactsConfig,
+  ): OwnerSettingsConfig {
     return {
       communication: {
         washStartTemplate:
@@ -1330,54 +1336,140 @@ export class OwnerService {
       .filter((e) => e.role === 'ADMIN')
       .map((e) => e.id);
 
-    const [shiftGroups, discountGroups, suspiciousGroups, bookingGroups] =
-      await Promise.all([
-        adminIds.length === 0
-          ? []
-          : this.prisma.shift.groupBy({
-              by: ['adminId'],
-              where: {
+    const washerIds = employees
+      .filter((e) => e.role === 'WASHER')
+      .map((e) => e.id);
+
+    const [
+      shiftGroups,
+      discountGroups,
+      suspiciousGroups,
+      bookingGroups,
+      washerAssignments,
+      adminSaleBookings,
+      adminUpsellAddons,
+    ] = await Promise.all([
+      adminIds.length === 0
+        ? []
+        : this.prisma.shift.groupBy({
+            by: ['adminId'],
+            where: {
+              locationId: location.id,
+              openedAt: { gte: start, lt: end },
+            },
+            _count: { _all: true },
+          }),
+
+      adminIds.length === 0
+        ? []
+        : this.prisma.auditEvent.groupBy({
+            by: ['userId'],
+            where: {
+              locationId: location.id,
+              createdAt: { gte: start, lt: end },
+              type: AuditType.BOOKING_DISCOUNT,
+              userId: { in: adminIds },
+            },
+            _count: { _all: true },
+          }),
+
+      adminIds.length === 0
+        ? []
+        : this.prisma.auditEvent.groupBy({
+            by: ['userId'],
+            where: {
+              locationId: location.id,
+              createdAt: { gte: start, lt: end },
+              type: { in: this.suspiciousAuditTypes },
+              userId: { in: adminIds },
+            },
+            _count: { _all: true },
+          }),
+
+      adminIds.length === 0
+        ? []
+        : this.prisma.booking.groupBy({
+            by: ['shiftId'],
+            where: {
+              locationId: location.id,
+              dateTime: { gte: start, lt: end },
+              shiftId: { not: null },
+            },
+            _count: { _all: true },
+          }),
+
+      washerIds.length === 0
+        ? []
+        : this.prisma.shiftWasher.findMany({
+            where: {
+              washerId: { in: washerIds },
+              shift: {
                 locationId: location.id,
                 openedAt: { gte: start, lt: end },
               },
-              _count: { _all: true },
-            }),
-        adminIds.length === 0
-          ? []
-          : this.prisma.auditEvent.groupBy({
-              by: ['userId'],
-              where: {
-                locationId: location.id,
-                createdAt: { gte: start, lt: end },
-                type: AuditType.BOOKING_DISCOUNT,
-                userId: { in: adminIds },
+            },
+            select: {
+              washerId: true,
+              shiftId: true,
+              bayId: true,
+              percentWash: true,
+              percentBaseService: true,
+              percentAddon: true,
+            },
+          }),
+
+      adminIds.length === 0
+        ? []
+        : this.prisma.booking.findMany({
+            where: {
+              locationId: location.id,
+              status: BookingStatus.COMPLETED,
+              dateTime: { gte: start, lt: end },
+              createdByUserId: { in: adminIds },
+              isAdminSale: true,
+            },
+            select: {
+              id: true,
+              createdByUserId: true,
+              servicePriceRubSnapshot: true,
+              adminBaseBonusRubSnapshot: true,
+              service: {
+                select: {
+                  priceRub: true,
+                },
               },
-              _count: { _all: true },
-            }),
-        adminIds.length === 0
-          ? []
-          : this.prisma.auditEvent.groupBy({
-              by: ['userId'],
-              where: {
-                locationId: location.id,
-                createdAt: { gte: start, lt: end },
-                type: { in: this.suspiciousAuditTypes },
-                userId: { in: adminIds },
+              addons: {
+                select: {
+                  qty: true,
+                  priceRubSnapshot: true,
+                  isUpsell: true,
+                  adminAddonBonusRubSnapshot: true,
+                },
               },
-              _count: { _all: true },
-            }),
-        adminIds.length === 0
-          ? []
-          : this.prisma.booking.groupBy({
-              by: ['shiftId'],
-              where: {
+            },
+          }),
+
+      adminIds.length === 0
+        ? []
+        : this.prisma.bookingAddon.findMany({
+            where: {
+              isUpsell: true,
+              upsoldByUserId: { in: adminIds },
+              booking: {
                 locationId: location.id,
+                status: BookingStatus.COMPLETED,
                 dateTime: { gte: start, lt: end },
-                shiftId: { not: null },
               },
-              _count: { _all: true },
-            }),
-      ]);
+            },
+            select: {
+              id: true,
+              upsoldByUserId: true,
+              qty: true,
+              priceRubSnapshot: true,
+              upsellBonusRubSnapshot: true,
+            },
+          }),
+    ]);
 
     const shiftIds = bookingGroups
       .map((x) => x.shiftId)
@@ -1407,8 +1499,165 @@ export class OwnerService {
       );
     }
 
+    const washerShiftIds = Array.from(
+      new Set(washerAssignments.map((x) => x.shiftId)),
+    );
+
+    const washerBookings =
+      washerShiftIds.length === 0
+        ? []
+        : await this.prisma.booking.findMany({
+            where: {
+              locationId: location.id,
+              status: BookingStatus.COMPLETED,
+              shiftId: { in: washerShiftIds },
+              dateTime: { gte: start, lt: end },
+            },
+            select: {
+              id: true,
+              shiftId: true,
+              bayId: true,
+              servicePriceRubSnapshot: true,
+              service: {
+                select: {
+                  priceRub: true,
+                },
+              },
+              addons: {
+                select: {
+                  qty: true,
+                  priceRubSnapshot: true,
+                },
+              },
+            },
+          });
+
+    const washerShiftSetMap = new Map<string, Set<string>>();
+    const washerCarsServicedMap = new Map<string, number>();
+    const washerEarnedRubMap = new Map<string, number>();
+
+    for (const assignment of washerAssignments) {
+      const shiftSet =
+        washerShiftSetMap.get(assignment.washerId) ?? new Set<string>();
+      shiftSet.add(assignment.shiftId);
+      washerShiftSetMap.set(assignment.washerId, shiftSet);
+    }
+
+    const assignmentByShiftBay = new Map<
+      string,
+      {
+        washerId: string;
+        percentBaseService: number;
+        percentAddon: number;
+      }
+    >();
+
+    for (const assignment of washerAssignments) {
+      const key = `${assignment.shiftId}:${assignment.bayId}`;
+
+      assignmentByShiftBay.set(key, {
+        washerId: assignment.washerId,
+        percentBaseService:
+          assignment.percentBaseService ?? assignment.percentWash ?? 0,
+        percentAddon: assignment.percentAddon ?? 0,
+      });
+    }
+
+    for (const booking of washerBookings) {
+      const shiftId = booking.shiftId;
+      if (!shiftId) continue;
+
+      const key = `${shiftId}:${booking.bayId}`;
+      const assignment = assignmentByShiftBay.get(key);
+      if (!assignment) continue;
+
+      const basePrice =
+        booking.servicePriceRubSnapshot ?? booking.service?.priceRub ?? 0;
+
+      const addonTotal = booking.addons.reduce((sum, addon) => {
+        const qty = addon.qty ?? 1;
+        const price = addon.priceRubSnapshot ?? 0;
+        return sum + qty * price;
+      }, 0);
+
+      const baseEarned = Math.round(
+        (basePrice * assignment.percentBaseService) / 100,
+      );
+      const addonEarned = Math.round(
+        (addonTotal * assignment.percentAddon) / 100,
+      );
+
+      washerCarsServicedMap.set(
+        assignment.washerId,
+        (washerCarsServicedMap.get(assignment.washerId) ?? 0) + 1,
+      );
+
+      washerEarnedRubMap.set(
+        assignment.washerId,
+        (washerEarnedRubMap.get(assignment.washerId) ?? 0) +
+          baseEarned +
+          addonEarned,
+      );
+    }
+
+    const adminSalesRevenueRubMap = new Map<string, number>();
+    const adminEarnedRubMap = new Map<string, number>();
+
+    for (const booking of adminSaleBookings) {
+      const adminId = booking.createdByUserId;
+      if (!adminId) continue;
+
+      const baseRevenue =
+        booking.servicePriceRubSnapshot ?? booking.service?.priceRub ?? 0;
+
+      let addonRevenue = 0;
+      let addonBonus = 0;
+
+      for (const addon of booking.addons) {
+        if (addon.isUpsell === true) continue;
+        const qty = addon.qty ?? 1;
+        const price = addon.priceRubSnapshot ?? 0;
+        addonRevenue += qty * price;
+        addonBonus += addon.adminAddonBonusRubSnapshot ?? 0;
+      }
+
+      const totalRevenue = baseRevenue + addonRevenue;
+      const totalEarned =
+        (booking.adminBaseBonusRubSnapshot ?? 0) + addonBonus;
+
+      adminSalesRevenueRubMap.set(
+        adminId,
+        (adminSalesRevenueRubMap.get(adminId) ?? 0) + totalRevenue,
+      );
+
+      adminEarnedRubMap.set(
+        adminId,
+        (adminEarnedRubMap.get(adminId) ?? 0) + totalEarned,
+      );
+    }
+
+    for (const addon of adminUpsellAddons) {
+      const adminId = addon.upsoldByUserId;
+      if (!adminId) continue;
+
+      const qty = addon.qty ?? 1;
+      const price = addon.priceRubSnapshot ?? 0;
+      const revenue = qty * price;
+      const earned = addon.upsellBonusRubSnapshot ?? 0;
+
+      adminSalesRevenueRubMap.set(
+        adminId,
+        (adminSalesRevenueRubMap.get(adminId) ?? 0) + revenue,
+      );
+
+      adminEarnedRubMap.set(
+        adminId,
+        (adminEarnedRubMap.get(adminId) ?? 0) + earned,
+      );
+    }
+
     const analytics = employees.map((employee) => {
-      const shiftsOpened =
+      const adminShiftsOpened =
         shiftGroups.find((x) => x.adminId === employee.id)?._count._all ?? 0;
 
       const discountsGiven =
@@ -1422,6 +1671,19 @@ export class OwnerService {
 
       const bookingsHandled = bookingsHandledMap.get(employee.id) ?? 0;
 
+      const washerShiftsWorked = washerShiftSetMap.get(employee.id)?.size ?? 0;
+      const carsServiced = washerCarsServicedMap.get(employee.id) ?? 0;
+
+      const earnedRub =
+        employee.role === 'ADMIN'
+          ? (adminEarnedRubMap.get(employee.id) ?? 0)
+          : (washerEarnedRubMap.get(employee.id) ?? 0);
+
+      const salesRevenueRub =
+        employee.role === 'ADMIN'
+          ? (adminSalesRevenueRubMap.get(employee.id) ?? 0)
+          : 0;
+
       return {
         id: employee.id,
         name: employee.name ?? 'Без имени',
@@ -1430,10 +1692,14 @@ export class OwnerService {
         isActive: employee.isActive,
         lastLoginAt: employee.lastLoginAt,
         stats: {
-          shiftsOpened,
+          shiftsOpened:
+            employee.role === 'WASHER' ? washerShiftsWorked : adminShiftsOpened,
           bookingsHandled,
           discountsGiven,
           suspiciousActions,
+          carsServiced,
+          salesRevenueRub,
+          earnedRub,
         },
       };
     });
@@ -2143,12 +2409,14 @@ export class OwnerService {
         name: location.name,
       },
       compensation: {
-        washerBasePercent: settings?.washerBasePercent ?? defaults.washerBasePercent,
+        washerBasePercent:
+          settings?.washerBasePercent ?? defaults.washerBasePercent,
         washerAddonPercent:
           settings?.washerAddonPercent ?? defaults.washerAddonPercent,
         adminBaseSalaryRub:
           settings?.adminBaseSalaryRub ?? defaults.adminBaseSalaryRub,
-        adminBasePercent: settings?.adminBasePercent ?? defaults.adminBasePercent,
+        adminBasePercent:
+          settings?.adminBasePercent ?? defaults.adminBasePercent,
         adminAddonPercent:
           settings?.adminAddonPercent ?? defaults.adminAddonPercent,
         adminUpsellPercent:
@@ -2183,7 +2451,10 @@ export class OwnerService {
           : currentComp.washerAddonPercent,
       adminBaseSalaryRub:
         body.adminBaseSalaryRub !== undefined
-          ? this.normalizeMoneyRub(body.adminBaseSalaryRub, 'adminBaseSalaryRub')
+          ? this.normalizeMoneyRub(
+              body.adminBaseSalaryRub,
+              'adminBaseSalaryRub',
+            )
           : currentComp.adminBaseSalaryRub,
       adminBasePercent:
         body.adminBasePercent !== undefined
@@ -2195,7 +2466,10 @@ export class OwnerService {
           : currentComp.adminAddonPercent,
       adminUpsellPercent:
         body.adminUpsellPercent !== undefined
-          ? this.normalizePercent(body.adminUpsellPercent, 'adminUpsellPercent')
+          ? this.normalizePercent(
+              body.adminUpsellPercent,
+              'adminUpsellPercent',
+            )
           : currentComp.adminUpsellPercent,
     };
 

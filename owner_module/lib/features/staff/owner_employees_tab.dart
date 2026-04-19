@@ -27,9 +27,7 @@ class _OwnerEmployeesTabState extends State<OwnerEmployeesTab> {
     final analyticsUri = Uri.parse(
       '${AppConfig.defaultBaseUrl}/owner/employees/analytics?period=$_period',
     );
-    final employeesUri = Uri.parse(
-      '${AppConfig.defaultBaseUrl}/owner/employees',
-    );
+    final employeesUri = Uri.parse('${AppConfig.defaultBaseUrl}/owner/employees');
 
     final responses = await Future.wait([
       http.get(analyticsUri).timeout(const Duration(seconds: 20)),
@@ -115,9 +113,7 @@ class _OwnerEmployeesTabState extends State<OwnerEmployeesTab> {
       final uri = Uri.parse(
         '${AppConfig.defaultBaseUrl}/owner/employees/$id/toggle',
       );
-      final response = await http
-          .post(uri)
-          .timeout(const Duration(seconds: 20));
+      final response = await http.post(uri).timeout(const Duration(seconds: 20));
 
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw Exception(
@@ -436,6 +432,9 @@ class _EmployeeView {
   final int bookingsHandled;
   final int discountsGiven;
   final int suspiciousActions;
+  final int carsServiced;
+  final int salesRevenueRub;
+  final int earnedRub;
 
   const _EmployeeView({
     required this.id,
@@ -449,6 +448,9 @@ class _EmployeeView {
     required this.bookingsHandled,
     required this.discountsGiven,
     required this.suspiciousActions,
+    required this.carsServiced,
+    required this.salesRevenueRub,
+    required this.earnedRub,
   });
 
   factory _EmployeeView.fromJson(
@@ -472,6 +474,9 @@ class _EmployeeView {
       bookingsHandled: _asInt(stats['bookingsHandled']),
       discountsGiven: _asInt(stats['discountsGiven']),
       suspiciousActions: _asInt(stats['suspiciousActions']),
+      carsServiced: _asInt(stats['carsServiced']),
+      salesRevenueRub: _asInt(stats['salesRevenueRub']),
+      earnedRub: _asInt(stats['earnedRub']),
     );
   }
 
@@ -543,6 +548,8 @@ class _EmployeeCard extends StatelessWidget {
     required this.onToggle,
     required this.onResetPassword,
   });
+
+  String _rub(int value) => '₽ $value';
 
   @override
   Widget build(BuildContext context) {
@@ -626,10 +633,34 @@ class _EmployeeCard extends StatelessWidget {
                           child: Text('Сбросить пароль'),
                         ),
                       ],
-                      child: OutlinedButton.icon(
-                        onPressed: null,
-                        icon: const Icon(Icons.more_horiz),
-                        label: const Text('Действия'),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 9,
+                        ),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: const Color(0xFFD1D5DB)),
+                          borderRadius: BorderRadius.circular(12),
+                          color: Colors.white,
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.more_horiz,
+                              size: 18,
+                              color: theme.colorScheme.primary,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Действия',
+                              style: TextStyle(
+                                color: theme.colorScheme.primary,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ],
@@ -673,6 +704,24 @@ class _EmployeeCard extends StatelessWidget {
                   ),
                 ],
               ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: _MiniStat(
+                      title: 'Принёс дохода',
+                      value: _rub(employee.salesRevenueRub),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _MiniStat(
+                      title: 'Заработал',
+                      value: _rub(employee.earnedRub),
+                    ),
+                  ),
+                ],
+              ),
             ] else if (employee.isWasher) ...[
               Row(
                 children: [
@@ -680,6 +729,24 @@ class _EmployeeCard extends StatelessWidget {
                     child: _MiniStat(
                       title: 'Смен отработал',
                       value: '${employee.shiftsOpened}',
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _MiniStat(
+                      title: 'Машин обслужил',
+                      value: '${employee.carsServiced}',
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: _MiniStat(
+                      title: 'Заработал',
+                      value: _rub(employee.earnedRub),
                     ),
                   ),
                   const SizedBox(width: 10),
