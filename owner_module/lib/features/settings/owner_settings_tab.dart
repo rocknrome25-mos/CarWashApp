@@ -36,6 +36,13 @@ class _OwnerSettingsTabState extends State<OwnerSettingsTab> {
   final _notifyPhoneController = TextEditingController();
   final _notifyTelegramController = TextEditingController();
 
+  final _washerBasePercentController = TextEditingController();
+  final _washerAddonPercentController = TextEditingController();
+  final _adminBaseSalaryRubController = TextEditingController();
+  final _adminBasePercentController = TextEditingController();
+  final _adminAddonPercentController = TextEditingController();
+  final _adminUpsellPercentController = TextEditingController();
+
   bool _promotionsEnabled = false;
   bool _discountsEnabled = false;
   bool _holidayGreetingsEnabled = false;
@@ -63,23 +70,61 @@ class _OwnerSettingsTabState extends State<OwnerSettingsTab> {
     _washFinishTemplateController.dispose();
     _notifyPhoneController.dispose();
     _notifyTelegramController.dispose();
+
+    _washerBasePercentController.dispose();
+    _washerAddonPercentController.dispose();
+    _adminBaseSalaryRubController.dispose();
+    _adminBasePercentController.dispose();
+    _adminAddonPercentController.dispose();
+    _adminUpsellPercentController.dispose();
+
     super.dispose();
   }
 
   Future<_OwnerSettingsData> _loadData() async {
-    final uri = Uri.parse('${AppConfig.defaultBaseUrl}/owner/settings');
-    final response = await http.get(uri).timeout(const Duration(seconds: 20));
+    final settingsUri = Uri.parse('${AppConfig.defaultBaseUrl}/owner/settings');
+    final compUri = Uri.parse(
+      '${AppConfig.defaultBaseUrl}/owner/compensation-settings',
+    );
 
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw Exception(_extractErrorMessage(response.body, response.statusCode));
+    final responses = await Future.wait([
+      http.get(settingsUri).timeout(const Duration(seconds: 20)),
+      http.get(compUri).timeout(const Duration(seconds: 20)),
+    ]);
+
+    final settingsResponse = responses[0];
+    final compResponse = responses[1];
+
+    if (settingsResponse.statusCode < 200 ||
+        settingsResponse.statusCode >= 300) {
+      throw Exception(
+        _extractErrorMessage(
+          settingsResponse.body,
+          settingsResponse.statusCode,
+        ),
+      );
     }
 
-    final decoded = jsonDecode(response.body);
-    if (decoded is! Map<String, dynamic>) {
+    if (compResponse.statusCode < 200 || compResponse.statusCode >= 300) {
+      throw Exception(
+        _extractErrorMessage(compResponse.body, compResponse.statusCode),
+      );
+    }
+
+    final settingsDecoded = jsonDecode(settingsResponse.body);
+    final compDecoded = jsonDecode(compResponse.body);
+
+    if (settingsDecoded is! Map<String, dynamic>) {
       throw Exception('Owner settings response is not an object');
     }
+    if (compDecoded is! Map<String, dynamic>) {
+      throw Exception('Compensation response is not an object');
+    }
 
-    return _OwnerSettingsData.fromJson(decoded);
+    return _OwnerSettingsData.fromJson(
+      settingsDecoded,
+      compensationJson: compDecoded,
+    );
   }
 
   void _syncFromData(_OwnerSettingsData data) {
@@ -102,6 +147,13 @@ class _OwnerSettingsTabState extends State<OwnerSettingsTab> {
     _washFinishTemplateController.text = data.washFinishTemplate;
     _notifyPhoneController.text = data.notifyPhone;
     _notifyTelegramController.text = data.notifyTelegram;
+
+    _washerBasePercentController.text = '${data.washerBasePercent}';
+    _washerAddonPercentController.text = '${data.washerAddonPercent}';
+    _adminBaseSalaryRubController.text = '${data.adminBaseSalaryRub}';
+    _adminBasePercentController.text = '${data.adminBasePercent}';
+    _adminAddonPercentController.text = '${data.adminAddonPercent}';
+    _adminUpsellPercentController.text = '${data.adminUpsellPercent}';
 
     _promotionsEnabled = data.promotionsEnabled;
     _discountsEnabled = data.discountsEnabled;
@@ -245,6 +297,81 @@ class _OwnerSettingsTabState extends State<OwnerSettingsTab> {
     }
   }
 
+  Future<void> _saveCompensationSettings() async {
+    if (_isBusy) return;
+
+    final washerBase = int.tryParse(_washerBasePercentController.text.trim());
+    final washerAddon = int.tryParse(_washerAddonPercentController.text.trim());
+    final adminSalary = int.tryParse(_adminBaseSalaryRubController.text.trim());
+    final adminBase = int.tryParse(_adminBasePercentController.text.trim());
+    final adminAddon = int.tryParse(_adminAddonPercentController.text.trim());
+    final adminUpsell = int.tryParse(_adminUpsellPercentController.text.trim());
+
+    if (washerBase == null ||
+        washerAddon == null ||
+        adminSalary == null ||
+        adminBase == null ||
+        adminAddon == null ||
+        adminUpsell == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Поля оплаты должны быть целыми числами')),
+      );
+      return;
+    }
+
+    setState(() {
+      _isBusy = true;
+    });
+
+    try {
+      final uri = Uri.parse(
+        '${AppConfig.defaultBaseUrl}/owner/compensation-settings',
+      );
+
+      final body = {
+        'washerBasePercent': washerBase,
+        'washerAddonPercent': washerAddon,
+        'adminBaseSalaryRub': adminSalary,
+        'adminBasePercent': adminBase,
+        'adminAddonPercent': adminAddon,
+        'adminUpsellPercent': adminUpsell,
+      };
+
+      final response = await http
+          .patch(
+            uri,
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode(body),
+          )
+          .timeout(const Duration(seconds: 20));
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Exception(
+          _extractErrorMessage(response.body, response.statusCode),
+        );
+      }
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Оплата сотрудников сохранена')),
+      );
+
+      await _reload();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isBusy = false;
+        });
+      }
+    }
+  }
+
   Future<void> _openPasswordDialog() async {
     if (_isBusy) return;
 
@@ -341,7 +468,6 @@ class _OwnerSettingsTabState extends State<OwnerSettingsTab> {
                       ],
                     ),
                     const SizedBox(height: 24),
-
                     _SectionCard(
                       title: 'Контакты для клиента',
                       subtitle:
@@ -404,7 +530,6 @@ class _OwnerSettingsTabState extends State<OwnerSettingsTab> {
                       ),
                     ),
                     const SizedBox(height: 16),
-
                     _SectionCard(
                       title: 'Шаблоны сообщений клиентам',
                       subtitle:
@@ -452,7 +577,6 @@ class _OwnerSettingsTabState extends State<OwnerSettingsTab> {
                       ),
                     ),
                     const SizedBox(height: 16),
-
                     _SectionCard(
                       title: 'Рассылки',
                       subtitle:
@@ -493,7 +617,6 @@ class _OwnerSettingsTabState extends State<OwnerSettingsTab> {
                       ),
                     ),
                     const SizedBox(height: 16),
-
                     _SectionCard(
                       title: 'Подозрительные события',
                       subtitle:
@@ -560,7 +683,126 @@ class _OwnerSettingsTabState extends State<OwnerSettingsTab> {
                       ),
                     ),
                     const SizedBox(height: 16),
-
+                    _SectionCard(
+                      title: 'Оплата сотрудников',
+                      subtitle:
+                          'Базовые правила оплаты по локации: мойщики и администраторы',
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Мойщики', style: theme.textTheme.titleMedium),
+                          const SizedBox(height: 12),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: TextFormField(
+                                  controller: _washerBasePercentController,
+                                  keyboardType: TextInputType.number,
+                                  decoration: const InputDecoration(
+                                    labelText: '% от основной услуги',
+                                    suffixText: '%',
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: TextFormField(
+                                  controller: _washerAddonPercentController,
+                                  keyboardType: TextInputType.number,
+                                  decoration: const InputDecoration(
+                                    labelText: '% от доп. услуги',
+                                    suffixText: '%',
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 18),
+                          Text(
+                            'Администраторы',
+                            style: theme.textTheme.titleMedium,
+                          ),
+                          const SizedBox(height: 12),
+                          TextFormField(
+                            controller: _adminBaseSalaryRubController,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: 'Оклад',
+                              prefixText: '₽ ',
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: TextFormField(
+                                  controller: _adminBasePercentController,
+                                  keyboardType: TextInputType.number,
+                                  decoration: const InputDecoration(
+                                    labelText:
+                                        '% за новое бронирование (основная услуга)',
+                                    suffixText: '%',
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: TextFormField(
+                                  controller: _adminAddonPercentController,
+                                  keyboardType: TextInputType.number,
+                                  decoration: const InputDecoration(
+                                    labelText:
+                                        '% за новое бронирование (доп. услуги)',
+                                    suffixText: '%',
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          TextFormField(
+                            controller: _adminUpsellPercentController,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText:
+                                  '% за upsell на уже существующее бронирование',
+                              suffixText: '%',
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          _PreviewBox(
+                            title: 'Как это будет считаться',
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Мойщик: ${_washerBasePercentController.text.trim().isEmpty ? '0' : _washerBasePercentController.text.trim()}% от base и ${_washerAddonPercentController.text.trim().isEmpty ? '0' : _washerAddonPercentController.text.trim()}% от add-on.',
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  'Админ: оклад ₽ ${_adminBaseSalaryRubController.text.trim().isEmpty ? '0' : _adminBaseSalaryRubController.text.trim()}, '
+                                  '${_adminBasePercentController.text.trim().isEmpty ? '0' : _adminBasePercentController.text.trim()}% за новую основную услугу, '
+                                  '${_adminAddonPercentController.text.trim().isEmpty ? '0' : _adminAddonPercentController.text.trim()}% за add-on в новом бронировании, '
+                                  '${_adminUpsellPercentController.text.trim().isEmpty ? '0' : _adminUpsellPercentController.text.trim()}% за upsell.',
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: FilledButton.icon(
+                              onPressed: _isBusy
+                                  ? null
+                                  : _saveCompensationSettings,
+                              icon: const Icon(Icons.payments_outlined),
+                              label: const Text('Сохранить оплату'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
                     _SectionCard(
                       title: 'Безопасность',
                       subtitle: 'Смена пароля owner-кабинета',
@@ -619,6 +861,13 @@ class _OwnerSettingsData {
   final String notifyTelegram;
   final bool notifyPush;
 
+  final int washerBasePercent;
+  final int washerAddonPercent;
+  final int adminBaseSalaryRub;
+  final int adminBasePercent;
+  final int adminAddonPercent;
+  final int adminUpsellPercent;
+
   final List<_AuditOption> auditOptions;
 
   const _OwnerSettingsData({
@@ -642,10 +891,19 @@ class _OwnerSettingsData {
     required this.notifyPhone,
     required this.notifyTelegram,
     required this.notifyPush,
+    required this.washerBasePercent,
+    required this.washerAddonPercent,
+    required this.adminBaseSalaryRub,
+    required this.adminBasePercent,
+    required this.adminAddonPercent,
+    required this.adminUpsellPercent,
     required this.auditOptions,
   });
 
-  factory _OwnerSettingsData.fromJson(Map<String, dynamic> json) {
+  factory _OwnerSettingsData.fromJson(
+    Map<String, dynamic> json, {
+    required Map<String, dynamic> compensationJson,
+  }) {
     final location = Map<String, dynamic>.from(
       (json['location'] as Map?) ?? const {},
     );
@@ -666,6 +924,10 @@ class _OwnerSettingsData {
     );
     final options = Map<String, dynamic>.from(
       (json['options'] as Map?) ?? const {},
+    );
+
+    final comp = Map<String, dynamic>.from(
+      (compensationJson['compensation'] as Map?) ?? const {},
     );
 
     final rawAuditOptions =
@@ -711,8 +973,20 @@ class _OwnerSettingsData {
       notifyPhone: (monitoring['notifyPhone'] ?? '').toString(),
       notifyTelegram: (monitoring['notifyTelegram'] ?? '').toString(),
       notifyPush: monitoring['notifyPush'] != false,
+      washerBasePercent: _asInt(comp['washerBasePercent']),
+      washerAddonPercent: _asInt(comp['washerAddonPercent']),
+      adminBaseSalaryRub: _asInt(comp['adminBaseSalaryRub']),
+      adminBasePercent: _asInt(comp['adminBasePercent']),
+      adminAddonPercent: _asInt(comp['adminAddonPercent']),
+      adminUpsellPercent: _asInt(comp['adminUpsellPercent']),
       auditOptions: auditOptions,
     );
+  }
+
+  static int _asInt(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return 0;
   }
 }
 

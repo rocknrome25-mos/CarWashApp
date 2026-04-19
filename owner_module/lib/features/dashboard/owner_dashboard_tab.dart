@@ -24,6 +24,7 @@ class _OwnerDashboardTabState extends State<OwnerDashboardTab> {
   late Future<Map<String, dynamic>> _summaryFuture;
   late Future<Map<String, dynamic>> _chartFuture;
   late Future<Map<String, dynamic>> _financeFuture;
+  late Future<Map<String, dynamic>> _suspiciousFuture;
 
   @override
   void initState() {
@@ -35,6 +36,7 @@ class _OwnerDashboardTabState extends State<OwnerDashboardTab> {
     _summaryFuture = _api.getOwnerSummary(period: _period.apiValue);
     _chartFuture = _api.getOwnerChart(period: _period.apiValue);
     _financeFuture = _api.getOwnerFinance(period: _period.apiValue);
+    _suspiciousFuture = _api.getOwnerSuspiciousEvents(period: _period.apiValue);
   }
 
   void _changePeriod(OwnerSummaryPeriod value) {
@@ -46,7 +48,12 @@ class _OwnerDashboardTabState extends State<OwnerDashboardTab> {
 
   Future<void> _refresh() async {
     setState(_load);
-    await Future.wait([_summaryFuture, _chartFuture, _financeFuture]);
+    await Future.wait([
+      _summaryFuture,
+      _chartFuture,
+      _financeFuture,
+      _suspiciousFuture,
+    ]);
   }
 
   @override
@@ -101,6 +108,17 @@ class _OwnerDashboardTabState extends State<OwnerDashboardTab> {
                   title: 'Финансовая сводка',
                   snapshot: snapshot,
                   childBuilder: (data) => _OwnerFinanceSection(data: data),
+                );
+              },
+            ),
+            const SizedBox(height: 12),
+            FutureBuilder<Map<String, dynamic>>(
+              future: _suspiciousFuture,
+              builder: (context, snapshot) {
+                return OwnerDataCard(
+                  title: 'Подозрительные события — детализация',
+                  snapshot: snapshot,
+                  childBuilder: (data) => _OwnerSuspiciousSection(data: data),
                 );
               },
             ),
@@ -630,4 +648,173 @@ class _OwnerFinanceSection extends StatelessWidget {
       ],
     );
   }
+}
+
+class _OwnerSuspiciousSection extends StatelessWidget {
+  final Map<String, dynamic> data;
+
+  const _OwnerSuspiciousSection({required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    final byType = ((data['byType'] as List?) ?? const [])
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+
+    final byUser = ((data['byUser'] as List?) ?? const [])
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+
+    final events = ((data['events'] as List?) ?? const [])
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('По типам', style: theme.textTheme.titleMedium),
+        const SizedBox(height: 10),
+        if (byType.isEmpty)
+          const Text('Нет данных по типам событий')
+        else
+          ...byType.map(
+            (item) => OwnerSummaryRow(
+              label: (item['label'] ?? '').toString(),
+              value: '${_intValue(item['count'])}',
+            ),
+          ),
+        const SizedBox(height: 18),
+        Text('По администраторам', style: theme.textTheme.titleMedium),
+        const SizedBox(height: 10),
+        if (byUser.isEmpty)
+          const Text('Нет данных по администраторам')
+        else
+          ...byUser.map(
+            (item) => OwnerSummaryRow(
+              label: _userLabel(item),
+              value: '${_intValue(item['count'])}',
+            ),
+          ),
+        const SizedBox(height: 18),
+        Text('Последние события', style: theme.textTheme.titleMedium),
+        const SizedBox(height: 10),
+        if (events.isEmpty)
+          const Text('Нет событий за выбранный период')
+        else
+          ...events.take(12).map((event) => _SuspiciousEventCard(event: event)),
+      ],
+    );
+  }
+
+  int _intValue(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return 0;
+  }
+
+  String _userLabel(Map<String, dynamic> item) {
+    final name = (item['userName'] ?? 'Система / не указан').toString();
+    final role = (item['role'] ?? '').toString();
+
+    String roleLabel = '';
+    if (role == 'ADMIN') roleLabel = 'Администратор';
+    if (role == 'WASHER') roleLabel = 'Мойщик';
+
+    if (roleLabel.isEmpty) return name;
+    return '$name · $roleLabel';
+  }
+}
+
+class _SuspiciousEventCard extends StatelessWidget {
+  final Map<String, dynamic> event;
+
+  const _SuspiciousEventCard({required this.event});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    final user = Map<String, dynamic>.from((event['user'] as Map?) ?? const {});
+
+    final typeLabel = (event['typeLabel'] ?? 'Событие').toString();
+    final createdAt = _formatDateTime((event['createdAt'] ?? '').toString());
+    final rawReason = (event['reason'] ?? '').toString().trim();
+    final rawType = (event['type'] ?? '').toString().trim();
+    final userName = (user['name'] ?? 'Система').toString();
+    final role = (user['role'] ?? '').toString();
+
+    final reason = _humanReason(rawReason, rawType);
+
+    String roleLabel = '';
+    if (role == 'ADMIN') roleLabel = 'Администратор';
+    if (role == 'WASHER') roleLabel = 'Мойщик';
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(typeLabel, style: theme.textTheme.titleSmall),
+          const SizedBox(height: 6),
+          Text(
+            roleLabel.isEmpty ? userName : '$userName · $roleLabel',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: const Color(0xFF6B7280),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            createdAt,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: const Color(0xFF6B7280),
+            ),
+          ),
+          if (reason != null) ...[
+            const SizedBox(height: 8),
+            Text('Причина: $reason', style: theme.textTheme.bodyMedium),
+          ],
+        ],
+      ),
+    );
+  }
+
+  String? _humanReason(String rawReason, String rawType) {
+    if (rawReason.isEmpty) return null;
+
+    final normalized = rawReason.trim();
+    final upper = normalized.toUpperCase();
+
+    if (upper == rawType.toUpperCase()) return null;
+
+    final technical = RegExp(r'^[A-Z0-9_]+$');
+    if (technical.hasMatch(normalized)) return null;
+
+    return normalized;
+  }
+}
+
+String _formatDateTime(String raw) {
+  final dt = DateTime.tryParse(raw);
+  if (dt == null) return raw;
+
+  final local = dt.toLocal();
+  final day = local.day.toString().padLeft(2, '0');
+  final month = local.month.toString().padLeft(2, '0');
+  final year = local.year.toString();
+  final hour = local.hour.toString().padLeft(2, '0');
+  final minute = local.minute.toString().padLeft(2, '0');
+
+  return '$day.$month.$year $hour:$minute';
 }

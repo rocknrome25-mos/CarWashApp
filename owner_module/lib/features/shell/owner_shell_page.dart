@@ -20,9 +20,7 @@ class _OwnerShellPageState extends State<OwnerShellPage> {
 
   void _logout() {
     Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute<void>(
-        builder: (_) => const OwnerLoginPage(),
-      ),
+      MaterialPageRoute<void>(builder: (_) => const OwnerLoginPage()),
       (route) => false,
     );
   }
@@ -47,7 +45,8 @@ class _OwnerShellPageState extends State<OwnerShellPage> {
 
     return Scaffold(
       appBar: AppBar(
-        toolbarHeight: 88,
+        toolbarHeight: 96,
+        titleSpacing: 12,
         title: const OwnerTopBrandBlock(),
         actions: [
           TextButton.icon(

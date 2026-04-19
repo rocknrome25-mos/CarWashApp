@@ -63,6 +63,15 @@ type SettingsLocation = {
   navigatorLink: string | null;
 };
 
+type CompensationSettingsConfig = {
+  washerBasePercent: number;
+  washerAddonPercent: number;
+  adminBaseSalaryRub: number;
+  adminBasePercent: number;
+  adminAddonPercent: number;
+  adminUpsellPercent: number;
+};
+
 @Injectable()
 export class OwnerService {
   constructor(private readonly prisma: PrismaService) {}
@@ -74,6 +83,14 @@ export class OwnerService {
       return raw;
     }
     return 'month';
+  }
+
+  private parsePositiveLimit(raw?: string, fallback = 50, max = 200): number {
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value <= 0) {
+      return fallback;
+    }
+    return Math.min(Math.round(value), max);
   }
 
   private async getLocation() {
@@ -147,35 +164,19 @@ export class OwnerService {
     key: AuditType;
     label: string;
   }> = [
-    {
-      key: AuditType.BOOKING_CHANGE_SERVICE,
-      label: 'Замена услуги',
-    },
-    {
-      key: AuditType.BOOKING_DISCOUNT,
-      label: 'Изменение цены / скидка',
-    },
-    {
-      key: AuditType.BOOKING_CHANGE_BODYTYPE,
-      label: 'Изменение типа кузова',
-    },
-    {
-      key: AuditType.BOOKING_DELETE,
-      label: 'Отмена бронирования',
-    },
-    {
-      key: AuditType.BAY_OPEN,
-      label: 'Открытие поста',
-    },
-    {
-      key: AuditType.BAY_CLOSE,
-      label: 'Закрытие поста',
-    },
-    {
-      key: AuditType.WAITLIST_DELETE,
-      label: 'Отмена waitlist',
-    },
+    { key: AuditType.BOOKING_CHANGE_SERVICE, label: 'Замена услуги' },
+    { key: AuditType.BOOKING_DISCOUNT, label: 'Изменение цены / скидка' },
+    { key: AuditType.BOOKING_CHANGE_BODYTYPE, label: 'Изменение типа кузова' },
+    { key: AuditType.BOOKING_DELETE, label: 'Отмена бронирования' },
+    { key: AuditType.BAY_OPEN, label: 'Открытие поста' },
+    { key: AuditType.BAY_CLOSE, label: 'Закрытие поста' },
+    { key: AuditType.WAITLIST_DELETE, label: 'Отмена waitlist' },
   ];
+
+  private auditTypeLabel(type: AuditType | string): string {
+    const found = this.suspiciousAuditOptions.find((x) => x.key === type);
+    return found?.label ?? String(type);
+  }
 
   private normalizePhone(raw: string): string {
     const value = raw.trim();
@@ -233,6 +234,28 @@ export class OwnerService {
       throw new BadRequestException('Текст слишком длинный.');
     }
     return value;
+  }
+
+  private normalizePercent(raw: unknown, fieldName: string): number {
+    const value = Number(raw);
+    if (!Number.isFinite(value)) {
+      throw new BadRequestException(`${fieldName} должен быть числом.`);
+    }
+    if (value < 0 || value > 100) {
+      throw new BadRequestException(`${fieldName} должен быть в диапазоне 0..100.`);
+    }
+    return Math.round(value);
+  }
+
+  private normalizeMoneyRub(raw: unknown, fieldName: string): number {
+    const value = Number(raw);
+    if (!Number.isFinite(value)) {
+      throw new BadRequestException(`${fieldName} должен быть числом.`);
+    }
+    if (value < 0) {
+      throw new BadRequestException(`${fieldName} не может быть отрицательным.`);
+    }
+    return Math.round(value);
   }
 
   private parseEmployeeRole(raw?: string): 'ADMIN' | 'WASHER' {
@@ -400,14 +423,10 @@ export class OwnerService {
       typeof obj.phone === 'string' ? obj.phone : defaults.phone ?? '',
     );
     const telegram = this.normalizeTelegramHandle(
-      typeof obj.telegram === 'string'
-        ? obj.telegram
-        : defaults.telegram ?? '',
+      typeof obj.telegram === 'string' ? obj.telegram : defaults.telegram ?? '',
     );
     const whatsapp = this.normalizeOptionalPhone(
-      typeof obj.whatsapp === 'string'
-        ? obj.whatsapp
-        : defaults.whatsapp ?? '',
+      typeof obj.whatsapp === 'string' ? obj.whatsapp : defaults.whatsapp ?? '',
     );
     const navigatorLink = this.normalizeOptionalText(
       typeof obj.navigatorLink === 'string'
@@ -450,6 +469,17 @@ export class OwnerService {
         notifyTelegram: contacts.telegram ?? '',
         notifyPush: true,
       },
+    };
+  }
+
+  private getDefaultCompensationSettings(): CompensationSettingsConfig {
+    return {
+      washerBasePercent: 30,
+      washerAddonPercent: 15,
+      adminBaseSalaryRub: 0,
+      adminBasePercent: 10,
+      adminAddonPercent: 10,
+      adminUpsellPercent: 10,
     };
   }
 
@@ -1100,6 +1130,139 @@ export class OwnerService {
     };
   }
 
+  async getSuspiciousEvents(params: {
+    period?: string;
+    type?: string;
+    userId?: string;
+    limit?: string;
+  }) {
+    const period = this.parsePeriod(params.period);
+    const location = await this.getLocation();
+    const { start, end } = this.getRange(period);
+    const limit = this.parsePositiveLimit(params.limit, 50, 200);
+
+    const requestedType = (params.type ?? '').trim() as AuditType;
+    const filterType = this.suspiciousAuditTypes.includes(requestedType)
+      ? requestedType
+      : undefined;
+    const filterUserId = (params.userId ?? '').trim() || undefined;
+
+    const where: Prisma.AuditEventWhereInput = {
+      locationId: location.id,
+      createdAt: { gte: start, lt: end },
+      type: filterType ? filterType : { in: this.suspiciousAuditTypes },
+      ...(filterUserId ? { userId: filterUserId } : {}),
+    };
+
+    const [events, typeGroups, userGroups] = await Promise.all([
+      this.prisma.auditEvent.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              phone: true,
+              role: true,
+            },
+          },
+        },
+      }),
+      this.prisma.auditEvent.groupBy({
+        by: ['type'],
+        where,
+        _count: { _all: true },
+      }),
+      this.prisma.auditEvent.groupBy({
+        by: ['userId'],
+        where,
+        _count: { _all: true },
+      }),
+    ]);
+
+    const userIds = userGroups
+      .map((x) => x.userId)
+      .filter((x): x is string => !!x);
+
+    const users =
+      userIds.length === 0
+        ? []
+        : await this.prisma.user.findMany({
+            where: { id: { in: userIds } },
+            select: {
+              id: true,
+              name: true,
+              phone: true,
+              role: true,
+            },
+          });
+
+    const byType = typeGroups
+      .map((row) => ({
+        type: row.type,
+        label: this.auditTypeLabel(row.type),
+        count: row._count._all,
+      }))
+      .sort((a, b) => b.count - a.count);
+
+    const byUser = userGroups
+      .map((row) => {
+        const user = users.find((u) => u.id === row.userId);
+        return {
+          userId: row.userId,
+          userName: user?.name ?? 'Система / не указан',
+          phone: user?.phone ?? '',
+          role: user?.role ?? null,
+          count: row._count._all,
+        };
+      })
+      .sort((a, b) => b.count - a.count);
+
+    return {
+      location: {
+        id: location.id,
+        name: location.name,
+      },
+      period,
+      range: { start, end },
+      filters: {
+        type: filterType ?? null,
+        userId: filterUserId ?? null,
+        limit,
+      },
+      options: {
+        suspiciousAuditTypes: this.suspiciousAuditOptions,
+      },
+      totals: {
+        total: events.length,
+      },
+      byType,
+      byUser,
+      events: events.map((event) => ({
+        id: event.id,
+        createdAt: event.createdAt,
+        type: event.type,
+        typeLabel: this.auditTypeLabel(event.type),
+        reason: event.reason ?? '',
+        locationId: event.locationId,
+        shiftId: event.shiftId,
+        bookingId: event.bookingId,
+        clientId: event.clientId,
+        payload: event.payload ?? null,
+        user: event.user
+          ? {
+              id: event.user.id,
+              name: event.user.name ?? 'Без имени',
+              phone: event.user.phone,
+              role: event.user.role,
+            }
+          : null,
+      })),
+    };
+  }
+
   async getEmployees() {
     const location = await this.getLocation();
 
@@ -1139,6 +1302,160 @@ export class OwnerService {
       },
       admins,
       washers,
+    };
+  }
+
+  async getEmployeeAnalytics(rawPeriod?: string) {
+    const period = this.parsePeriod(rawPeriod);
+    const location = await this.getLocation();
+    const { start, end } = this.getRange(period);
+
+    const employees = await this.prisma.user.findMany({
+      where: {
+        locationId: location.id,
+        role: { in: ['ADMIN', 'WASHER'] },
+      },
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        role: true,
+        isActive: true,
+        lastLoginAt: true,
+      },
+      orderBy: [{ role: 'asc' }, { name: 'asc' }],
+    });
+
+    const adminIds = employees
+      .filter((e) => e.role === 'ADMIN')
+      .map((e) => e.id);
+
+    const [shiftGroups, discountGroups, suspiciousGroups, bookingGroups] =
+      await Promise.all([
+        adminIds.length === 0
+          ? []
+          : this.prisma.shift.groupBy({
+              by: ['adminId'],
+              where: {
+                locationId: location.id,
+                openedAt: { gte: start, lt: end },
+              },
+              _count: { _all: true },
+            }),
+        adminIds.length === 0
+          ? []
+          : this.prisma.auditEvent.groupBy({
+              by: ['userId'],
+              where: {
+                locationId: location.id,
+                createdAt: { gte: start, lt: end },
+                type: AuditType.BOOKING_DISCOUNT,
+                userId: { in: adminIds },
+              },
+              _count: { _all: true },
+            }),
+        adminIds.length === 0
+          ? []
+          : this.prisma.auditEvent.groupBy({
+              by: ['userId'],
+              where: {
+                locationId: location.id,
+                createdAt: { gte: start, lt: end },
+                type: { in: this.suspiciousAuditTypes },
+                userId: { in: adminIds },
+              },
+              _count: { _all: true },
+            }),
+        adminIds.length === 0
+          ? []
+          : this.prisma.booking.groupBy({
+              by: ['shiftId'],
+              where: {
+                locationId: location.id,
+                dateTime: { gte: start, lt: end },
+                shiftId: { not: null },
+              },
+              _count: { _all: true },
+            }),
+      ]);
+
+    const shiftIds = bookingGroups
+      .map((x) => x.shiftId)
+      .filter((x): x is string => !!x);
+
+    const shifts =
+      shiftIds.length === 0
+        ? []
+        : await this.prisma.shift.findMany({
+            where: {
+              id: { in: shiftIds },
+            },
+            select: {
+              id: true,
+              adminId: true,
+            },
+          });
+
+    const bookingsHandledMap = new Map<string, number>();
+    for (const group of bookingGroups) {
+      const shift = shifts.find((s) => s.id === group.shiftId);
+      if (!shift?.adminId) continue;
+
+      bookingsHandledMap.set(
+        shift.adminId,
+        (bookingsHandledMap.get(shift.adminId) ?? 0) + group._count._all,
+      );
+    }
+
+    const analytics = employees.map((employee) => {
+      const shiftsOpened =
+        shiftGroups.find((x) => x.adminId === employee.id)?._count._all ?? 0;
+
+      const discountsGiven =
+        discountGroups.find((x) => x.userId === employee.id)?._count._all ?? 0;
+
+      const suspiciousActions =
+        employee.role === 'ADMIN'
+          ? (suspiciousGroups.find((x) => x.userId === employee.id)?._count
+              ._all ?? 0)
+          : 0;
+
+      const bookingsHandled = bookingsHandledMap.get(employee.id) ?? 0;
+
+      return {
+        id: employee.id,
+        name: employee.name ?? 'Без имени',
+        phone: employee.phone,
+        role: employee.role,
+        isActive: employee.isActive,
+        lastLoginAt: employee.lastLoginAt,
+        stats: {
+          shiftsOpened,
+          bookingsHandled,
+          discountsGiven,
+          suspiciousActions,
+        },
+      };
+    });
+
+    const admins = analytics.filter((x) => x.role === 'ADMIN');
+    const washers = analytics.filter((x) => x.role === 'WASHER');
+
+    return {
+      location: {
+        id: location.id,
+        name: location.name,
+      },
+      period,
+      range: { start, end },
+      totals: {
+        employees: analytics.length,
+        admins: admins.length,
+        washers: washers.length,
+      },
+      admins,
+      washers,
+      all: analytics,
     };
   }
 
@@ -1800,6 +2117,112 @@ export class OwnerService {
     });
 
     return this.getSettings();
+  }
+
+  async getCompensationSettings() {
+    const location = await this.getLocation();
+    const defaults = this.getDefaultCompensationSettings();
+
+    const settings = await this.prisma.locationCompensationSettings.findUnique({
+      where: { locationId: location.id },
+      select: {
+        washerBasePercent: true,
+        washerAddonPercent: true,
+        adminBaseSalaryRub: true,
+        adminBasePercent: true,
+        adminAddonPercent: true,
+        adminUpsellPercent: true,
+        isActive: true,
+        updatedAt: true,
+      },
+    });
+
+    return {
+      location: {
+        id: location.id,
+        name: location.name,
+      },
+      compensation: {
+        washerBasePercent: settings?.washerBasePercent ?? defaults.washerBasePercent,
+        washerAddonPercent:
+          settings?.washerAddonPercent ?? defaults.washerAddonPercent,
+        adminBaseSalaryRub:
+          settings?.adminBaseSalaryRub ?? defaults.adminBaseSalaryRub,
+        adminBasePercent: settings?.adminBasePercent ?? defaults.adminBasePercent,
+        adminAddonPercent:
+          settings?.adminAddonPercent ?? defaults.adminAddonPercent,
+        adminUpsellPercent:
+          settings?.adminUpsellPercent ?? defaults.adminUpsellPercent,
+        isActive: settings?.isActive ?? true,
+        updatedAt: settings?.updatedAt ?? null,
+      },
+    };
+  }
+
+  async updateCompensationSettings(body: {
+    washerBasePercent?: number;
+    washerAddonPercent?: number;
+    adminBaseSalaryRub?: number;
+    adminBasePercent?: number;
+    adminAddonPercent?: number;
+    adminUpsellPercent?: number;
+  }) {
+    const location = await this.getLocation();
+    const current = await this.getCompensationSettings();
+
+    const currentComp = current.compensation;
+
+    const next = {
+      washerBasePercent:
+        body.washerBasePercent !== undefined
+          ? this.normalizePercent(body.washerBasePercent, 'washerBasePercent')
+          : currentComp.washerBasePercent,
+      washerAddonPercent:
+        body.washerAddonPercent !== undefined
+          ? this.normalizePercent(body.washerAddonPercent, 'washerAddonPercent')
+          : currentComp.washerAddonPercent,
+      adminBaseSalaryRub:
+        body.adminBaseSalaryRub !== undefined
+          ? this.normalizeMoneyRub(body.adminBaseSalaryRub, 'adminBaseSalaryRub')
+          : currentComp.adminBaseSalaryRub,
+      adminBasePercent:
+        body.adminBasePercent !== undefined
+          ? this.normalizePercent(body.adminBasePercent, 'adminBasePercent')
+          : currentComp.adminBasePercent,
+      adminAddonPercent:
+        body.adminAddonPercent !== undefined
+          ? this.normalizePercent(body.adminAddonPercent, 'adminAddonPercent')
+          : currentComp.adminAddonPercent,
+      adminUpsellPercent:
+        body.adminUpsellPercent !== undefined
+          ? this.normalizePercent(body.adminUpsellPercent, 'adminUpsellPercent')
+          : currentComp.adminUpsellPercent,
+    };
+
+    await this.prisma.locationCompensationSettings.upsert({
+      where: { locationId: location.id },
+      update: {
+        washerBasePercent: next.washerBasePercent,
+        washerAddonPercent: next.washerAddonPercent,
+        adminBaseSalaryRub: next.adminBaseSalaryRub,
+        adminBasePercent: next.adminBasePercent,
+        adminAddonPercent: next.adminAddonPercent,
+        adminUpsellPercent: next.adminUpsellPercent,
+        isActive: true,
+      },
+      create: {
+        locationId: location.id,
+        washerBasePercent: next.washerBasePercent,
+        washerAddonPercent: next.washerAddonPercent,
+        adminBaseSalaryRub: next.adminBaseSalaryRub,
+        adminBasePercent: next.adminBasePercent,
+        adminAddonPercent: next.adminAddonPercent,
+        adminUpsellPercent: next.adminUpsellPercent,
+        isActive: true,
+      },
+    });
+
+    return this.getCompensationSettings();
   }
 
   async changeOwnerPassword(body: { password?: string }) {

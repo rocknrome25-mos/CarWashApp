@@ -1,4 +1,3 @@
-// C:\dev\carwash\server_module\api\prisma\schema.prisma
 generator client {
   provider = "prisma-client-js"
 }
@@ -181,6 +180,9 @@ model Location {
 
   // ✅ payout rules per location (editable later in OWNER module)
   washerPayRules WasherPayRule[]
+
+  // ✅ NEW: owner compensation defaults per location
+  compensationSettings LocationCompensationSettings?
 
   // ✅ NEW: planned schedule per location
   plannedShifts PlannedShift[]
@@ -409,6 +411,22 @@ model Booking {
   clientId String?
   client   Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
 
+  // ✅ NEW: кто создал бронирование
+  createdByUserId String?
+  createdByUser   User?   @relation("UserToBookingCreated", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  // ✅ NEW: если бронирование создал админ как продажу
+  isAdminSale Boolean @default(false)
+
+  // ✅ NEW: snapshot основной услуги на момент продажи
+  serviceNameSnapshot        String?
+  servicePriceRubSnapshot    Int?
+  serviceDurationMinSnapshot Int?
+
+  // ✅ NEW: бонус админу за продажу основной услуги
+  adminBasePercentSnapshot  Int?
+  adminBaseBonusRubSnapshot Int?
+
   car     Car     @relation(fields: [carId], references: [id], onDelete: Cascade)
   service Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
 
@@ -430,6 +448,8 @@ model Booking {
   @@index([paymentDueAt])
   @@index([bayId])
   @@index([requestedBayId])
+  @@index([createdByUserId])
+  @@index([isAdminSale])
 }
 
 model BookingAddon {
@@ -450,9 +470,38 @@ model BookingAddon {
 
   note String?
 
+  // ✅ NEW: когда add-on был добавлен
+  addedAt DateTime @default(now())
+
+  // ✅ NEW: кто добавил add-on
+  addedByUserId String?
+  addedByUser   User?   @relation("UserToBookingAddonAdded", fields: [addedByUserId], references: [id], onDelete: SetNull)
+
+  // ✅ NEW: true только если это add-on, добавленный ПОЗЖЕ как upsell
+  isUpsell Boolean @default(false)
+
+  // ✅ NEW: кто сделал upsell
+  upsoldByUserId String?
+  upsoldByUser   User?   @relation("UserToBookingAddonUpsold", fields: [upsoldByUserId], references: [id], onDelete: SetNull)
+
+  // ✅ NEW: когда был сделан upsell
+  upsoldAt DateTime?
+
+  // ✅ NEW: snapshot бонуса админу за upsell
+  upsellPercentSnapshot  Int?
+  upsellBonusRubSnapshot Int?
+
+  // ✅ NEW: snapshot бонуса админу за add-on, если add-on был частью НОВОГО бронирования
+  adminAddonPercentSnapshot  Int?
+  adminAddonBonusRubSnapshot Int?
+
   @@unique([bookingId, serviceId])
   @@index([bookingId, createdAt])
   @@index([serviceId])
+  @@index([addedByUserId])
+  @@index([upsoldByUserId])
+  @@index([isUpsell])
+  @@index([upsoldAt])
 }
 
 model BookingPhoto {
@@ -520,6 +569,18 @@ model User {
   cashEvents ShiftCashEvent[]
 
   bookingPhotos BookingPhoto[] @relation("UserToBookingPhoto")
+
+  // ✅ NEW: кто создал booking
+  createdBookings Booking[] @relation("UserToBookingCreated")
+
+  // ✅ NEW: кто добавил add-on
+  bookingAddonsAdded BookingAddon[] @relation("UserToBookingAddonAdded")
+
+  // ✅ NEW: кто сделал upsell
+  bookingAddonsUpsold BookingAddon[] @relation("UserToBookingAddonUpsold")
+
+  // ✅ NEW: персональные условия оплаты
+  compensationProfile UserCompensationProfile?
 
   // ✅ washer assignments to live shifts
   shiftWashers ShiftWasher[]
@@ -702,6 +763,10 @@ model ShiftWasher {
   percentWash Int @default(30)
   percentChem Int @default(40)
 
+  // ✅ NEW: более понятные проценты для owner-логики
+  percentBaseService Int @default(30)
+  percentAddon       Int @default(15)
+
   clockInAt  DateTime?
   clockOutAt DateTime?
 
@@ -775,4 +840,60 @@ model PlannedShiftWasher {
   @@unique([plannedShiftId, washerId])
   @@index([plannedShiftId, plannedBayId])
   @@index([washerId, createdAt])
+}
+
+/**
+ * ===================== NEW: Compensation settings =====================
+ */
+
+model LocationCompensationSettings {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  locationId String   @unique
+  location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  // мойщики
+  washerBasePercent  Int @default(30)
+  washerAddonPercent Int @default(15)
+
+  // админы
+  adminBaseSalaryRub Int @default(0)
+
+  // если админ создал НОВОЕ бронирование
+  adminBasePercent  Int @default(10)
+  adminAddonPercent Int @default(10)
+
+  // если админ сделал upsell на уже существующее бронирование
+  adminUpsellPercent Int @default(10)
+
+  isActive Boolean @default(true)
+
+  @@index([locationId])
+  @@index([isActive])
+}
+
+model UserCompensationProfile {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // override для мойщика
+  washerBasePercent  Int?
+  washerAddonPercent Int?
+
+  // override для админа
+  adminBaseSalaryRub Int?
+  adminBasePercent   Int?
+  adminAddonPercent  Int?
+  adminUpsellPercent Int?
+
+  note     String?
+  isActive Boolean @default(true)
+
+  @@index([isActive])
 }

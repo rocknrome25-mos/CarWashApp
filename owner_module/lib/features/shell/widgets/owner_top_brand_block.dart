@@ -11,6 +11,7 @@ class OwnerTopBrandBlock extends StatelessWidget {
     final api = OwnerApiClient();
 
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         Stack(
           clipBehavior: Clip.none,
@@ -60,6 +61,7 @@ class OwnerTopBrandBlock extends StatelessWidget {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
             children: [
               Text(
                 'ЖК Рассказово',
@@ -67,12 +69,12 @@ class OwnerTopBrandBlock extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.titleMedium,
               ),
-              const SizedBox(height: 2),
+              const SizedBox(height: 4),
               Text(
                 'г. Москва, бульвар Андрея Тарковского, д. 10',
-                maxLines: 1,
+                maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall,
+                style: theme.textTheme.bodySmall?.copyWith(height: 1.2),
               ),
             ],
           ),

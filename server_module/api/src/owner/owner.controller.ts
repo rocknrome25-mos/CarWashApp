@@ -28,9 +28,29 @@ export class OwnerController {
     return this.ownerService.getFinance(period);
   }
 
+  @Get('suspicious-events')
+  getSuspiciousEvents(
+    @Query('period') period?: string,
+    @Query('type') type?: string,
+    @Query('userId') userId?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.ownerService.getSuspiciousEvents({
+      period,
+      type,
+      userId,
+      limit,
+    });
+  }
+
   @Get('employees')
   getEmployees() {
     return this.ownerService.getEmployees();
+  }
+
+  @Get('employees/analytics')
+  getEmployeeAnalytics(@Query('period') period?: string) {
+    return this.ownerService.getEmployeeAnalytics(period);
   }
 
   @Post('employees')
@@ -162,6 +182,26 @@ export class OwnerController {
     },
   ) {
     return this.ownerService.updateSettings(body);
+  }
+
+  @Get('compensation-settings')
+  getCompensationSettings() {
+    return this.ownerService.getCompensationSettings();
+  }
+
+  @Patch('compensation-settings')
+  updateCompensationSettings(
+    @Body()
+    body: {
+      washerBasePercent?: number;
+      washerAddonPercent?: number;
+      adminBaseSalaryRub?: number;
+      adminBasePercent?: number;
+      adminAddonPercent?: number;
+      adminUpsellPercent?: number;
+    },
+  ) {
+    return this.ownerService.updateCompensationSettings(body);
   }
 
   @Post('change-password')
