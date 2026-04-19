@@ -37,7 +37,10 @@ export class ConfigService {
   }
 
   private _safeContactsParams(params: unknown): ContactsConfig {
-    if (!params || typeof params !== 'object') return {};
+    if (!params || typeof params !== 'object' || Array.isArray(params)) {
+      return {};
+    }
+
     const p = params as Record<string, unknown>;
     return {
       title: this._str(p.title),
@@ -68,6 +71,10 @@ export class ConfigService {
         address: true,
         colorHex: true,
         baysCount: true,
+        phone: true,
+        telegram: true,
+        whatsapp: true,
+        navigatorLink: true,
         tenantId: true,
       },
     });
@@ -95,10 +102,18 @@ export class ConfigService {
     const title = this._str(contacts.title, defaultTitle);
     const address = this._str(contacts.address, defaultAddress);
 
-    const phone = this._str(contacts.phone, '');
-    const telegram = this._normalizeTg(this._str(contacts.telegram, ''));
-    const whatsapp = this._str(contacts.whatsapp, phone);
-    const navigatorLink = this._str(contacts.navigatorLink, this._str(contacts.mapsLink, ''));
+    const phone = this._str(contacts.phone, this._str(loc.phone, ''));
+    const telegram = this._normalizeTg(
+      this._str(contacts.telegram, this._str(loc.telegram, '')),
+    );
+    const whatsapp = this._str(
+      contacts.whatsapp,
+      this._str(loc.whatsapp, phone),
+    );
+    const navigatorLink = this._str(
+      contacts.navigatorLink,
+      this._str(contacts.mapsLink, this._str(loc.navigatorLink, '')),
+    );
     const mapsLink = this._str(contacts.mapsLink, navigatorLink);
 
     return {
@@ -118,7 +133,6 @@ export class ConfigService {
     };
   }
 
-  // ✅ чтобы AdminService продолжал работать
   async isEnabledByLocationId(locationId: string, key: string): Promise<boolean> {
     const locId = this._str(locationId);
     const k = this._str(key);
@@ -138,51 +152,92 @@ export class ConfigService {
     return f?.enabled === true;
   }
 
-  // ✅ OWNER/ADMIN: записать CONTACTS в TenantFeature.params
   async upsertContactsByLocationId(locationId: string, body: any) {
     const locId = this._str(locationId);
     if (!locId) throw new BadRequestException('locationId is required');
 
     const loc = await this.prisma.location.findUnique({
       where: { id: locId },
-      select: { id: true, tenantId: true },
+      select: {
+        id: true,
+        tenantId: true,
+        name: true,
+        address: true,
+        phone: true,
+        telegram: true,
+        whatsapp: true,
+        navigatorLink: true,
+      },
     });
+
     if (!loc) throw new BadRequestException('Location not found');
 
-    // Нормализуем payload (оставляем только ожидаемые поля)
-    const params: ContactsConfig = {
-      title: this._str(body?.title),
-      address: this._str(body?.address),
-      phone: this._str(body?.phone),
-      telegram: this._str(body?.telegram),
-      whatsapp: this._str(body?.whatsapp),
-      navigatorLink: this._str(body?.navigatorLink),
-      mapsLink: this._str(body?.mapsLink),
+    const existing = await this.prisma.tenantFeature.findUnique({
+      where: { tenantId_key: { tenantId: loc.tenantId, key: 'CONTACTS' } },
+      select: { params: true },
+    });
+
+    const prev = this._safeContactsParams(existing?.params);
+
+    const next: ContactsConfig = {
+      title: this._str(
+        body?.title,
+        this._str(prev.title, this._str(loc.name, 'Контакты')),
+      ),
+      address: this._str(
+        body?.address,
+        this._str(prev.address, this._str(loc.address, '')),
+      ),
+      phone: this._str(
+        body?.phone,
+        this._str(prev.phone, this._str(loc.phone, '')),
+      ),
+      telegram: this._str(
+        body?.telegram,
+        this._str(prev.telegram, this._str(loc.telegram, '')),
+      ),
+      whatsapp: this._str(
+        body?.whatsapp,
+        this._str(prev.whatsapp, this._str(loc.whatsapp, '')),
+      ),
+      navigatorLink: this._str(
+        body?.navigatorLink,
+        this._str(prev.navigatorLink, this._str(loc.navigatorLink, '')),
+      ),
+      mapsLink: this._str(
+        body?.mapsLink,
+        this._str(
+          prev.mapsLink,
+          this._str(prev.navigatorLink, this._str(loc.navigatorLink, '')),
+        ),
+      ),
     };
 
-    // Если оба пустые — не валим, но предупреждаем смыслом
     const hasAny =
-      !!params.title ||
-      !!params.address ||
-      !!params.phone ||
-      !!params.telegram ||
-      !!params.whatsapp ||
-      !!params.navigatorLink ||
-      !!params.mapsLink;
+      !!next.title ||
+      !!next.address ||
+      !!next.phone ||
+      !!next.telegram ||
+      !!next.whatsapp ||
+      !!next.navigatorLink ||
+      !!next.mapsLink;
 
     if (!hasAny) {
       throw new BadRequestException('Contacts payload is empty');
     }
 
-    // Upsert CONTACTS feature for tenant
     await this.prisma.tenantFeature.upsert({
       where: { tenantId_key: { tenantId: loc.tenantId, key: 'CONTACTS' } },
-      update: { enabled: true, params: params as any },
-      create: { tenantId: loc.tenantId, key: 'CONTACTS', enabled: true, params: params as any },
+      update: { enabled: true, params: next as any },
+      create: {
+        tenantId: loc.tenantId,
+        key: 'CONTACTS',
+        enabled: true,
+        params: next as any,
+      },
       select: { id: true },
     });
 
-    // вернем свежий config, чтобы UI мог сразу перерисоваться
     return this.getConfigByLocationId(loc.id);
   }
 }

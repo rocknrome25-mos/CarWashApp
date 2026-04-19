@@ -134,4 +134,43 @@ export class OwnerController {
   toggleService(@Param('id') id: string) {
     return this.ownerService.toggleService(id);
   }
+
+  @Get('settings')
+  getSettings() {
+    return this.ownerService.getSettings();
+  }
+
+  @Patch('settings')
+  updateSettings(
+    @Body()
+    body: {
+      communication?: {
+        washStartTemplate?: string;
+        washFinishTemplate?: string;
+        campaigns?: {
+          promotionsEnabled?: boolean;
+          discountsEnabled?: boolean;
+          holidayGreetingsEnabled?: boolean;
+        };
+      };
+      monitoring?: {
+        suspiciousAuditTypes?: string[];
+        notifyPhone?: string;
+        notifyTelegram?: string;
+        notifyPush?: boolean;
+      };
+    },
+  ) {
+    return this.ownerService.updateSettings(body);
+  }
+
+  @Post('change-password')
+  changeOwnerPassword(
+    @Body()
+    body: {
+      password?: string;
+    },
+  ) {
+    return this.ownerService.changeOwnerPassword(body);
+  }
 }

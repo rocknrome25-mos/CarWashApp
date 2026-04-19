@@ -199,13 +199,6 @@ class _OwnerServicesTabState extends State<OwnerServicesTab> {
     return list;
   }
 
-  // ignore: unused_element
-  int _intValue(dynamic value) {
-    if (value is int) return value;
-    if (value is num) return value.toInt();
-    return 0;
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -416,6 +409,929 @@ class OwnerServiceCard extends StatelessWidget {
     required this.isBusy,
   });
 
+  @override
+  Widget build(BuildContext context) {
+    return _ServicePreviewCard(
+      data: data,
+      trailing: Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          _StatusPill(
+            text: data['isActive'] == true ? 'Активен' : 'Отключён',
+            background: data['isActive'] == true
+                ? const Color(0xFFDCFCE7)
+                : const Color(0xFFFEE2E2),
+          ),
+          const SizedBox(height: 10),
+          PopupMenuButton<String>(
+            onSelected: (value) {
+              if (value == 'edit') {
+                onEdit();
+              } else if (value == 'toggle') {
+                onToggle();
+              }
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(value: 'edit', child: Text('Редактировать')),
+              PopupMenuItem(
+                value: 'toggle',
+                child: Text(
+                  data['isActive'] == true ? 'Отключить' : 'Включить',
+                ),
+              ),
+            ],
+            child: OutlinedButton.icon(
+              onPressed: isBusy ? null : null,
+              icon: const Icon(Icons.more_horiz),
+              label: const Text('Действия'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CreateServiceDialog extends StatefulWidget {
+  final List<Map<String, dynamic>> allServices;
+
+  const _CreateServiceDialog({required this.allServices});
+
+  @override
+  State<_CreateServiceDialog> createState() => _CreateServiceDialogState();
+}
+
+class _CreateServiceDialogState extends State<_CreateServiceDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _nameController = TextEditingController();
+  final _descriptionController = TextEditingController();
+  final _priceController = TextEditingController();
+  final _durationController = TextEditingController();
+
+  bool _submitting = false;
+  String _kind = 'BASE';
+  String _imageKey = 'EXTERIOR_WASH';
+  bool _isPublished = true;
+  bool _hasBodyTypePricing = false;
+
+  final Map<String, TextEditingController> _bodyTypeControllers = {
+    'Седан': TextEditingController(),
+    'Кроссовер': TextEditingController(),
+    'Внедорожник': TextEditingController(),
+    'Минивэн': TextEditingController(),
+  };
+
+  final Set<String> _includedAddonIds = {};
+
+  List<Map<String, dynamic>> get _addonServices => widget.allServices
+      .where((e) => '${e['kind']}' == 'ADDON')
+      .map((e) => Map<String, dynamic>.from(e))
+      .toList();
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController.addListener(_refreshPreview);
+    _descriptionController.addListener(_refreshPreview);
+    _priceController.addListener(_refreshPreview);
+    _durationController.addListener(_refreshPreview);
+    for (final controller in _bodyTypeControllers.values) {
+      controller.addListener(_refreshPreview);
+    }
+  }
+
+  void _refreshPreview() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _descriptionController.dispose();
+    _priceController.dispose();
+    _durationController.dispose();
+    for (final controller in _bodyTypeControllers.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  Map<String, dynamic> _buildPreviewData() {
+    final bodyTypePrices = _hasBodyTypePricing
+        ? _bodyTypeControllers.entries
+              .where((e) => e.value.text.trim().isNotEmpty)
+              .map(
+                (e) => {
+                  'bodyType': e.key,
+                  'priceRub': int.tryParse(e.value.text.trim()) ?? 0,
+                },
+              )
+              .toList()
+        : <Map<String, dynamic>>[];
+
+    final included = _kind == 'BASE'
+        ? _addonServices
+              .where((service) {
+                final id = (service['id'] ?? '').toString();
+                return _includedAddonIds.contains(id);
+              })
+              .map(
+                (service) => {
+                  'addonService': {
+                    'id': service['id'],
+                    'name': service['name'],
+                  },
+                },
+              )
+              .toList()
+        : <Map<String, dynamic>>[];
+
+    return {
+      'name': _nameController.text.trim().isEmpty
+          ? 'Название услуги'
+          : _nameController.text.trim(),
+      'description': _descriptionController.text.trim(),
+      'kind': _kind,
+      'imageKey': _imageKey,
+      'priceRub': int.tryParse(_priceController.text.trim()) ?? 0,
+      'durationMin': int.tryParse(_durationController.text.trim()) ?? 0,
+      'hasBodyTypePricing': _hasBodyTypePricing,
+      'bodyTypePrices': bodyTypePrices,
+      'includedAddonsForBase': included,
+      'isPublished': _isPublished,
+      'isActive': true,
+    };
+  }
+
+  Future<void> _submit() async {
+    if (_submitting) return;
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() {
+      _submitting = true;
+    });
+
+    try {
+      final body = <String, dynamic>{
+        'name': _nameController.text.trim(),
+        'description': _descriptionController.text.trim(),
+        'kind': _kind,
+        'imageKey': _imageKey,
+        'priceRub': int.parse(_priceController.text.trim()),
+        'durationMin': int.parse(_durationController.text.trim()),
+        'isPublished': _isPublished,
+        'hasBodyTypePricing': _hasBodyTypePricing,
+      };
+
+      if (_hasBodyTypePricing) {
+        body['bodyTypePrices'] = _bodyTypeControllers.entries
+            .where((e) => e.value.text.trim().isNotEmpty)
+            .map(
+              (e) => {
+                'bodyType': e.key,
+                'priceRub': int.parse(e.value.text.trim()),
+              },
+            )
+            .toList();
+      }
+
+      if (_kind == 'BASE' && _includedAddonIds.isNotEmpty) {
+        body['includedAddonIds'] = _includedAddonIds.toList();
+      }
+
+      final uri = Uri.parse('${AppConfig.defaultBaseUrl}/owner/services');
+      final response = await http
+          .post(
+            uri,
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode(body),
+          )
+          .timeout(const Duration(seconds: 20));
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Exception(
+          _extractErrorMessage(response.body, response.statusCode),
+        );
+      }
+
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _submitting = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final preview = _buildPreviewData();
+    final isWide = MediaQuery.of(context).size.width >= 980;
+
+    final form = Form(
+      key: _formKey,
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextFormField(
+              controller: _nameController,
+              decoration: const InputDecoration(labelText: 'Название'),
+              validator: (value) {
+                final v = (value ?? '').trim();
+                if (v.isEmpty) return 'Введите название';
+                if (v.length < 2) return 'Слишком короткое название';
+                return null;
+              },
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _descriptionController,
+              minLines: 2,
+              maxLines: 4,
+              decoration: const InputDecoration(labelText: 'Описание услуги'),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue: _kind,
+              decoration: const InputDecoration(labelText: 'Тип сервиса'),
+              items: const [
+                DropdownMenuItem(value: 'BASE', child: Text('Базовая услуга')),
+                DropdownMenuItem(value: 'ADDON', child: Text('Доп. услуга')),
+              ],
+              onChanged: (value) {
+                setState(() {
+                  _kind = value ?? 'BASE';
+                  if (_kind != 'BASE') {
+                    _includedAddonIds.clear();
+                  }
+                });
+              },
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue: _imageKey,
+              decoration: const InputDecoration(labelText: 'Иконка услуги'),
+              items: const [
+                DropdownMenuItem(
+                  value: 'EXTERIOR_WASH',
+                  child: Text('Exterior wash'),
+                ),
+                DropdownMenuItem(value: 'FULL_WASH', child: Text('Full wash')),
+                DropdownMenuItem(value: 'WAX', child: Text('Wax')),
+                DropdownMenuItem(value: 'TIRES', child: Text('Tires')),
+                DropdownMenuItem(value: 'INTERIOR', child: Text('Interior')),
+                DropdownMenuItem(
+                  value: 'LEATHER_CARE',
+                  child: Text('Leather care'),
+                ),
+              ],
+              onChanged: (value) {
+                setState(() {
+                  _imageKey = value ?? 'EXTERIOR_WASH';
+                });
+              },
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _priceController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Базовая цена, ₽'),
+              validator: (value) {
+                final v = (value ?? '').trim();
+                if (v.isEmpty) return 'Введите цену';
+                final n = int.tryParse(v);
+                if (n == null) return 'Введите число';
+                if (n < 0) return 'Цена не может быть отрицательной';
+                return null;
+              },
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _durationController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Длительность, мин'),
+              validator: (value) {
+                final v = (value ?? '').trim();
+                if (v.isEmpty) return 'Введите длительность';
+                final n = int.tryParse(v);
+                if (n == null) return 'Введите число';
+                if (n <= 0) return 'Должно быть больше 0';
+                return null;
+              },
+            ),
+            const SizedBox(height: 12),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Опубликовать сразу'),
+              value: _isPublished,
+              onChanged: (value) {
+                setState(() {
+                  _isPublished = value;
+                });
+              },
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Цена зависит от типа кузова'),
+              value: _hasBodyTypePricing,
+              onChanged: (value) {
+                setState(() {
+                  _hasBodyTypePricing = value;
+                });
+              },
+            ),
+            if (_hasBodyTypePricing) ...[
+              const SizedBox(height: 4),
+              ..._bodyTypeControllers.entries.map(
+                (entry) => Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: TextFormField(
+                    controller: entry.value,
+                    keyboardType: TextInputType.number,
+                    decoration: InputDecoration(labelText: '${entry.key}, ₽'),
+                    validator: (value) {
+                      if (!_hasBodyTypePricing) return null;
+                      final v = (value ?? '').trim();
+                      if (v.isEmpty) return null;
+                      if (int.tryParse(v) == null) return 'Введите число';
+                      return null;
+                    },
+                  ),
+                ),
+              ),
+            ],
+            if (_kind == 'BASE' && _addonServices.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Что входит в услугу',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
+              const SizedBox(height: 8),
+              ..._addonServices.map((service) {
+                final id = (service['id'] ?? '').toString();
+                final name = (service['name'] ?? 'Add-on').toString();
+                final selected = _includedAddonIds.contains(id);
+
+                return CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(name),
+                  value: selected,
+                  onChanged: (value) {
+                    setState(() {
+                      if (value == true) {
+                        _includedAddonIds.add(id);
+                      } else {
+                        _includedAddonIds.remove(id);
+                      }
+                    });
+                  },
+                );
+              }),
+            ],
+          ],
+        ),
+      ),
+    );
+
+    final previewBlock = _PreviewBlock(
+      title: 'Предпросмотр для клиента',
+      child: _ServicePreviewCard(data: preview),
+    );
+
+    return AlertDialog(
+      title: const Text('Новый сервис'),
+      content: SizedBox(
+        width: isWide ? 980 : 560,
+        child: isWide
+            ? Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(flex: 6, child: form),
+                  const SizedBox(width: 20),
+                  Expanded(flex: 5, child: previewBlock),
+                ],
+              )
+            : SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [form, const SizedBox(height: 16), previewBlock],
+                ),
+              ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _submitting
+              ? null
+              : () => Navigator.of(context).pop(false),
+          child: const Text('Отмена'),
+        ),
+        FilledButton(
+          onPressed: _submitting ? null : _submit,
+          child: _submitting
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Создать'),
+        ),
+      ],
+    );
+  }
+}
+
+class _EditServiceDialog extends StatefulWidget {
+  final Map<String, dynamic> service;
+  final List<Map<String, dynamic>> allServices;
+
+  const _EditServiceDialog({required this.service, required this.allServices});
+
+  @override
+  State<_EditServiceDialog> createState() => _EditServiceDialogState();
+}
+
+class _EditServiceDialogState extends State<_EditServiceDialog> {
+  final _formKey = GlobalKey<FormState>();
+
+  late final TextEditingController _nameController;
+  late final TextEditingController _descriptionController;
+  late final TextEditingController _priceController;
+  late final TextEditingController _durationController;
+
+  bool _submitting = false;
+  late String _imageKey;
+  late bool _isPublished;
+  late bool _hasBodyTypePricing;
+
+  final Map<String, TextEditingController> _bodyTypeControllers = {
+    'Седан': TextEditingController(),
+    'Кроссовер': TextEditingController(),
+    'Внедорожник': TextEditingController(),
+    'Минивэн': TextEditingController(),
+  };
+
+  final Set<String> _includedAddonIds = {};
+
+  List<Map<String, dynamic>> get _addonServices => widget.allServices
+      .where((e) => '${e['kind']}' == 'ADDON')
+      .map((e) => Map<String, dynamic>.from(e))
+      .toList();
+
+  @override
+  void initState() {
+    super.initState();
+
+    _nameController = TextEditingController(
+      text: (widget.service['name'] ?? '').toString(),
+    );
+    _descriptionController = TextEditingController(
+      text: (widget.service['description'] ?? '').toString(),
+    );
+    _priceController = TextEditingController(
+      text: '${_asInt(widget.service['priceRub'])}',
+    );
+    _durationController = TextEditingController(
+      text: '${_asInt(widget.service['durationMin'])}',
+    );
+    _imageKey = (widget.service['imageKey'] ?? 'EXTERIOR_WASH').toString();
+    _isPublished = widget.service['isPublished'] == true;
+    _hasBodyTypePricing = widget.service['hasBodyTypePricing'] == true;
+
+    final bodyTypePrices =
+        ((widget.service['bodyTypePrices'] as List?) ?? const [])
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList();
+
+    for (final item in bodyTypePrices) {
+      final bodyType = (item['bodyType'] ?? '').toString();
+      final priceRub = _asInt(item['priceRub']);
+      if (_bodyTypeControllers.containsKey(bodyType)) {
+        _bodyTypeControllers[bodyType]!.text = '$priceRub';
+      }
+    }
+
+    final includedItems =
+        ((widget.service['includedAddonsForBase'] as List?) ?? const [])
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList();
+
+    for (final item in includedItems) {
+      final addon = Map<String, dynamic>.from(
+        (item['addonService'] as Map?) ?? const {},
+      );
+      final id = (addon['id'] ?? '').toString();
+      if (id.isNotEmpty) {
+        _includedAddonIds.add(id);
+      }
+    }
+
+    _nameController.addListener(_refreshPreview);
+    _descriptionController.addListener(_refreshPreview);
+    _priceController.addListener(_refreshPreview);
+    _durationController.addListener(_refreshPreview);
+    for (final controller in _bodyTypeControllers.values) {
+      controller.addListener(_refreshPreview);
+    }
+  }
+
+  void _refreshPreview() {
+    if (mounted) setState(() {});
+  }
+
+  int _asInt(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return 0;
+  }
+
+  Map<String, dynamic> _buildPreviewData() {
+    final bodyTypePrices = _hasBodyTypePricing
+        ? _bodyTypeControllers.entries
+              .where((e) => e.value.text.trim().isNotEmpty)
+              .map(
+                (e) => {
+                  'bodyType': e.key,
+                  'priceRub': int.tryParse(e.value.text.trim()) ?? 0,
+                },
+              )
+              .toList()
+        : <Map<String, dynamic>>[];
+
+    final included = (widget.service['kind'] ?? '') == 'BASE'
+        ? _addonServices
+              .where((service) {
+                final id = (service['id'] ?? '').toString();
+                return _includedAddonIds.contains(id);
+              })
+              .map(
+                (service) => {
+                  'addonService': {
+                    'id': service['id'],
+                    'name': service['name'],
+                  },
+                },
+              )
+              .toList()
+        : <Map<String, dynamic>>[];
+
+    return {
+      'name': _nameController.text.trim().isEmpty
+          ? 'Название услуги'
+          : _nameController.text.trim(),
+      'description': _descriptionController.text.trim(),
+      'kind': widget.service['kind'],
+      'imageKey': _imageKey,
+      'priceRub': int.tryParse(_priceController.text.trim()) ?? 0,
+      'durationMin': int.tryParse(_durationController.text.trim()) ?? 0,
+      'hasBodyTypePricing': _hasBodyTypePricing,
+      'bodyTypePrices': bodyTypePrices,
+      'includedAddonsForBase': included,
+      'isPublished': _isPublished,
+      'isActive': widget.service['isActive'] == true,
+    };
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _descriptionController.dispose();
+    _priceController.dispose();
+    _durationController.dispose();
+    for (final controller in _bodyTypeControllers.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_submitting) return;
+    if (!_formKey.currentState!.validate()) return;
+
+    final serviceId = (widget.service['id'] ?? '').toString();
+    final kind = (widget.service['kind'] ?? '').toString();
+
+    if (serviceId.isEmpty) return;
+
+    setState(() {
+      _submitting = true;
+    });
+
+    try {
+      final body = <String, dynamic>{
+        'name': _nameController.text.trim(),
+        'description': _descriptionController.text.trim(),
+        'imageKey': _imageKey,
+        'priceRub': int.parse(_priceController.text.trim()),
+        'durationMin': int.parse(_durationController.text.trim()),
+        'isPublished': _isPublished,
+        'hasBodyTypePricing': _hasBodyTypePricing,
+      };
+
+      body['bodyTypePrices'] = _hasBodyTypePricing
+          ? _bodyTypeControllers.entries
+                .where((e) => e.value.text.trim().isNotEmpty)
+                .map(
+                  (e) => {
+                    'bodyType': e.key,
+                    'priceRub': int.parse(e.value.text.trim()),
+                  },
+                )
+                .toList()
+          : <Map<String, dynamic>>[];
+
+      if (kind == 'BASE') {
+        body['includedAddonIds'] = _includedAddonIds.toList();
+      }
+
+      final uri = Uri.parse(
+        '${AppConfig.defaultBaseUrl}/owner/services/$serviceId',
+      );
+
+      final response = await http
+          .patch(
+            uri,
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode(body),
+          )
+          .timeout(const Duration(seconds: 20));
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Exception(
+          _extractErrorMessage(response.body, response.statusCode),
+        );
+      }
+
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _submitting = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final kind = (widget.service['kind'] ?? '').toString();
+    final preview = _buildPreviewData();
+    final isWide = MediaQuery.of(context).size.width >= 980;
+
+    final form = Form(
+      key: _formKey,
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextFormField(
+              controller: _nameController,
+              decoration: const InputDecoration(labelText: 'Название'),
+              validator: (value) {
+                final v = (value ?? '').trim();
+                if (v.isEmpty) return 'Введите название';
+                if (v.length < 2) return 'Слишком короткое название';
+                return null;
+              },
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _descriptionController,
+              minLines: 2,
+              maxLines: 4,
+              decoration: const InputDecoration(labelText: 'Описание услуги'),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue: _imageKey,
+              decoration: const InputDecoration(labelText: 'Иконка услуги'),
+              items: const [
+                DropdownMenuItem(
+                  value: 'EXTERIOR_WASH',
+                  child: Text('Exterior wash'),
+                ),
+                DropdownMenuItem(value: 'FULL_WASH', child: Text('Full wash')),
+                DropdownMenuItem(value: 'WAX', child: Text('Wax')),
+                DropdownMenuItem(value: 'TIRES', child: Text('Tires')),
+                DropdownMenuItem(value: 'INTERIOR', child: Text('Interior')),
+                DropdownMenuItem(
+                  value: 'LEATHER_CARE',
+                  child: Text('Leather care'),
+                ),
+              ],
+              onChanged: (value) {
+                setState(() {
+                  _imageKey = value ?? 'EXTERIOR_WASH';
+                });
+              },
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _priceController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Базовая цена, ₽'),
+              validator: (value) {
+                final v = (value ?? '').trim();
+                if (v.isEmpty) return 'Введите цену';
+                final n = int.tryParse(v);
+                if (n == null) return 'Введите число';
+                if (n < 0) return 'Цена не может быть отрицательной';
+                return null;
+              },
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _durationController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Длительность, мин'),
+              validator: (value) {
+                final v = (value ?? '').trim();
+                if (v.isEmpty) return 'Введите длительность';
+                final n = int.tryParse(v);
+                if (n == null) return 'Введите число';
+                if (n <= 0) return 'Должно быть больше 0';
+                return null;
+              },
+            ),
+            const SizedBox(height: 12),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Опубликовано'),
+              value: _isPublished,
+              onChanged: (value) {
+                setState(() {
+                  _isPublished = value;
+                });
+              },
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Цена зависит от типа кузова'),
+              value: _hasBodyTypePricing,
+              onChanged: (value) {
+                setState(() {
+                  _hasBodyTypePricing = value;
+                });
+              },
+            ),
+            if (_hasBodyTypePricing) ...[
+              const SizedBox(height: 4),
+              ..._bodyTypeControllers.entries.map(
+                (entry) => Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: TextFormField(
+                    controller: entry.value,
+                    keyboardType: TextInputType.number,
+                    decoration: InputDecoration(labelText: '${entry.key}, ₽'),
+                    validator: (value) {
+                      if (!_hasBodyTypePricing) return null;
+                      final v = (value ?? '').trim();
+                      if (v.isEmpty) return null;
+                      if (int.tryParse(v) == null) return 'Введите число';
+                      return null;
+                    },
+                  ),
+                ),
+              ),
+            ],
+            if (kind == 'BASE' && _addonServices.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Что входит в услугу',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
+              const SizedBox(height: 8),
+              ..._addonServices.map((service) {
+                final id = (service['id'] ?? '').toString();
+                final name = (service['name'] ?? 'Add-on').toString();
+                final selected = _includedAddonIds.contains(id);
+
+                return CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(name),
+                  value: selected,
+                  onChanged: (value) {
+                    setState(() {
+                      if (value == true) {
+                        _includedAddonIds.add(id);
+                      } else {
+                        _includedAddonIds.remove(id);
+                      }
+                    });
+                  },
+                );
+              }),
+            ],
+          ],
+        ),
+      ),
+    );
+
+    final previewBlock = _PreviewBlock(
+      title: 'Предпросмотр для клиента',
+      child: _ServicePreviewCard(data: preview),
+    );
+
+    return AlertDialog(
+      title: const Text('Редактировать сервис'),
+      content: SizedBox(
+        width: isWide ? 980 : 560,
+        child: isWide
+            ? Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(flex: 6, child: form),
+                  const SizedBox(width: 20),
+                  Expanded(flex: 5, child: previewBlock),
+                ],
+              )
+            : SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [form, const SizedBox(height: 16), previewBlock],
+                ),
+              ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _submitting
+              ? null
+              : () => Navigator.of(context).pop(false),
+          child: const Text('Отмена'),
+        ),
+        FilledButton(
+          onPressed: _submitting ? null : _submit,
+          child: _submitting
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Сохранить'),
+        ),
+      ],
+    );
+  }
+}
+
+class _PreviewBlock extends StatelessWidget {
+  final String title;
+  final Widget child;
+
+  const _PreviewBlock({required this.title, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: theme.textTheme.titleMedium),
+          const SizedBox(height: 12),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class _ServicePreviewCard extends StatelessWidget {
+  final Map<String, dynamic> data;
+  final Widget? trailing;
+
+  const _ServicePreviewCard({required this.data, this.trailing});
+
   int _intValue(dynamic value) {
     if (value is int) return value;
     if (value is num) return value.toInt();
@@ -547,7 +1463,6 @@ class OwnerServiceCard extends StatelessWidget {
     final description = (data['description'] ?? '').toString().trim();
     final kind = (data['kind'] ?? '').toString();
     final durationMin = _intValue(data['durationMin']);
-    final isActive = data['isActive'] == true;
     final isPublished = data['isPublished'] == true;
     final imageKey = (data['imageKey'] ?? 'EXTERIOR_WASH').toString();
 
@@ -555,7 +1470,7 @@ class OwnerServiceCard extends StatelessWidget {
     final includedAddons = _includedAddonsLabel();
 
     return Card(
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: EdgeInsets.zero,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Row(
@@ -648,53 +1563,7 @@ class OwnerServiceCard extends StatelessWidget {
                 ],
               ),
             ),
-            const SizedBox(width: 10),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: isActive
-                        ? const Color(0xFFDCFCE7)
-                        : const Color(0xFFFEE2E2),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    isActive ? 'Активен' : 'Отключён',
-                    style: theme.textTheme.bodySmall,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                PopupMenuButton<String>(
-                  onSelected: (value) {
-                    if (value == 'edit') {
-                      onEdit();
-                    } else if (value == 'toggle') {
-                      onToggle();
-                    }
-                  },
-                  itemBuilder: (context) => [
-                    const PopupMenuItem(
-                      value: 'edit',
-                      child: Text('Редактировать'),
-                    ),
-                    PopupMenuItem(
-                      value: 'toggle',
-                      child: Text(isActive ? 'Отключить' : 'Включить'),
-                    ),
-                  ],
-                  child: OutlinedButton.icon(
-                    onPressed: isBusy ? null : null,
-                    icon: const Icon(Icons.more_horiz),
-                    label: const Text('Действия'),
-                  ),
-                ),
-              ],
-            ),
+            if (trailing != null) ...[const SizedBox(width: 10), trailing!],
           ],
         ),
       ),
@@ -702,712 +1571,21 @@ class OwnerServiceCard extends StatelessWidget {
   }
 }
 
-class _CreateServiceDialog extends StatefulWidget {
-  final List<Map<String, dynamic>> allServices;
+class _StatusPill extends StatelessWidget {
+  final String text;
+  final Color background;
 
-  const _CreateServiceDialog({required this.allServices});
-
-  @override
-  State<_CreateServiceDialog> createState() => _CreateServiceDialogState();
-}
-
-class _CreateServiceDialogState extends State<_CreateServiceDialog> {
-  final _formKey = GlobalKey<FormState>();
-  final _nameController = TextEditingController();
-  final _descriptionController = TextEditingController();
-  final _priceController = TextEditingController();
-  final _durationController = TextEditingController();
-
-  bool _submitting = false;
-  String _kind = 'BASE';
-  String _imageKey = 'EXTERIOR_WASH';
-  bool _isPublished = true;
-  bool _hasBodyTypePricing = false;
-
-  final Map<String, TextEditingController> _bodyTypeControllers = {
-    'Седан': TextEditingController(),
-    'Кроссовер': TextEditingController(),
-    'Внедорожник': TextEditingController(),
-    'Минивэн': TextEditingController(),
-  };
-
-  final Set<String> _includedAddonIds = {};
-
-  List<Map<String, dynamic>> get _addonServices => widget.allServices
-      .where((e) => '${e['kind']}' == 'ADDON')
-      .map((e) => Map<String, dynamic>.from(e))
-      .toList();
-
-  @override
-  void dispose() {
-    _nameController.dispose();
-    _descriptionController.dispose();
-    _priceController.dispose();
-    _durationController.dispose();
-    for (final controller in _bodyTypeControllers.values) {
-      controller.dispose();
-    }
-    super.dispose();
-  }
-
-  Future<void> _submit() async {
-    if (_submitting) return;
-    if (!_formKey.currentState!.validate()) return;
-
-    setState(() {
-      _submitting = true;
-    });
-
-    try {
-      final body = <String, dynamic>{
-        'name': _nameController.text.trim(),
-        'description': _descriptionController.text.trim(),
-        'kind': _kind,
-        'imageKey': _imageKey,
-        'priceRub': int.parse(_priceController.text.trim()),
-        'durationMin': int.parse(_durationController.text.trim()),
-        'isPublished': _isPublished,
-        'hasBodyTypePricing': _hasBodyTypePricing,
-      };
-
-      if (_hasBodyTypePricing) {
-        body['bodyTypePrices'] = _bodyTypeControllers.entries
-            .where((e) => e.value.text.trim().isNotEmpty)
-            .map(
-              (e) => {
-                'bodyType': e.key,
-                'priceRub': int.parse(e.value.text.trim()),
-              },
-            )
-            .toList();
-      }
-
-      if (_kind == 'BASE' && _includedAddonIds.isNotEmpty) {
-        body['includedAddonIds'] = _includedAddonIds.toList();
-      }
-
-      final uri = Uri.parse('${AppConfig.defaultBaseUrl}/owner/services');
-      final response = await http
-          .post(
-            uri,
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode(body),
-          )
-          .timeout(const Duration(seconds: 20));
-
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw Exception(
-          _extractErrorMessage(response.body, response.statusCode),
-        );
-      }
-
-      if (!mounted) return;
-      Navigator.of(context).pop(true);
-    } catch (e) {
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
-    } finally {
-      if (mounted) {
-        setState(() {
-          _submitting = false;
-        });
-      }
-    }
-  }
+  const _StatusPill({required this.text, required this.background});
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Новый сервис'),
-      content: SizedBox(
-        width: 520,
-        child: Form(
-          key: _formKey,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextFormField(
-                  controller: _nameController,
-                  decoration: const InputDecoration(labelText: 'Название'),
-                  validator: (value) {
-                    final v = (value ?? '').trim();
-                    if (v.isEmpty) return 'Введите название';
-                    if (v.length < 2) return 'Слишком короткое название';
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _descriptionController,
-                  minLines: 2,
-                  maxLines: 4,
-                  decoration: const InputDecoration(
-                    labelText: 'Описание услуги',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
-                  initialValue: _kind,
-                  decoration: const InputDecoration(labelText: 'Тип сервиса'),
-                  items: const [
-                    DropdownMenuItem(
-                      value: 'BASE',
-                      child: Text('Базовая услуга'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'ADDON',
-                      child: Text('Доп. услуга'),
-                    ),
-                  ],
-                  onChanged: (value) {
-                    setState(() {
-                      _kind = value ?? 'BASE';
-                      if (_kind != 'BASE') {
-                        _includedAddonIds.clear();
-                      }
-                    });
-                  },
-                ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
-                  initialValue: _imageKey,
-                  decoration: const InputDecoration(labelText: 'Иконка услуги'),
-                  items: const [
-                    DropdownMenuItem(
-                      value: 'EXTERIOR_WASH',
-                      child: Text('Exterior wash'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'FULL_WASH',
-                      child: Text('Full wash'),
-                    ),
-                    DropdownMenuItem(value: 'WAX', child: Text('Wax')),
-                    DropdownMenuItem(value: 'TIRES', child: Text('Tires')),
-                    DropdownMenuItem(
-                      value: 'INTERIOR',
-                      child: Text('Interior'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'LEATHER_CARE',
-                      child: Text('Leather care'),
-                    ),
-                  ],
-                  onChanged: (value) {
-                    setState(() {
-                      _imageKey = value ?? 'EXTERIOR_WASH';
-                    });
-                  },
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _priceController,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: 'Базовая цена, ₽',
-                  ),
-                  validator: (value) {
-                    final v = (value ?? '').trim();
-                    if (v.isEmpty) return 'Введите цену';
-                    final n = int.tryParse(v);
-                    if (n == null) return 'Введите число';
-                    if (n < 0) return 'Цена не может быть отрицательной';
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _durationController,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: 'Длительность, мин',
-                  ),
-                  validator: (value) {
-                    final v = (value ?? '').trim();
-                    if (v.isEmpty) return 'Введите длительность';
-                    final n = int.tryParse(v);
-                    if (n == null) return 'Введите число';
-                    if (n <= 0) return 'Должно быть больше 0';
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 12),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Опубликовать сразу'),
-                  value: _isPublished,
-                  onChanged: (value) {
-                    setState(() {
-                      _isPublished = value;
-                    });
-                  },
-                ),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Цена зависит от типа кузова'),
-                  value: _hasBodyTypePricing,
-                  onChanged: (value) {
-                    setState(() {
-                      _hasBodyTypePricing = value;
-                    });
-                  },
-                ),
-                if (_hasBodyTypePricing) ...[
-                  const SizedBox(height: 4),
-                  ..._bodyTypeControllers.entries.map(
-                    (entry) => Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: TextFormField(
-                        controller: entry.value,
-                        keyboardType: TextInputType.number,
-                        decoration: InputDecoration(
-                          labelText: '${entry.key}, ₽',
-                        ),
-                        validator: (value) {
-                          if (!_hasBodyTypePricing) return null;
-                          final v = (value ?? '').trim();
-                          if (v.isEmpty) return null;
-                          if (int.tryParse(v) == null) return 'Введите число';
-                          return null;
-                        },
-                      ),
-                    ),
-                  ),
-                ],
-                if (_kind == 'BASE' && _addonServices.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      'Что входит в услугу',
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  ..._addonServices.map((service) {
-                    final id = (service['id'] ?? '').toString();
-                    final name = (service['name'] ?? 'Add-on').toString();
-                    final selected = _includedAddonIds.contains(id);
-
-                    return CheckboxListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(name),
-                      value: selected,
-                      onChanged: (value) {
-                        setState(() {
-                          if (value == true) {
-                            _includedAddonIds.add(id);
-                          } else {
-                            _includedAddonIds.remove(id);
-                          }
-                        });
-                      },
-                    );
-                  }),
-                ],
-              ],
-            ),
-          ),
-        ),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(20),
       ),
-      actions: [
-        TextButton(
-          onPressed: _submitting
-              ? null
-              : () => Navigator.of(context).pop(false),
-          child: const Text('Отмена'),
-        ),
-        FilledButton(
-          onPressed: _submitting ? null : _submit,
-          child: _submitting
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Text('Создать'),
-        ),
-      ],
-    );
-  }
-}
-
-class _EditServiceDialog extends StatefulWidget {
-  final Map<String, dynamic> service;
-  final List<Map<String, dynamic>> allServices;
-
-  const _EditServiceDialog({required this.service, required this.allServices});
-
-  @override
-  State<_EditServiceDialog> createState() => _EditServiceDialogState();
-}
-
-class _EditServiceDialogState extends State<_EditServiceDialog> {
-  final _formKey = GlobalKey<FormState>();
-
-  late final TextEditingController _nameController;
-  late final TextEditingController _descriptionController;
-  late final TextEditingController _priceController;
-  late final TextEditingController _durationController;
-
-  bool _submitting = false;
-  late String _imageKey;
-  late bool _isPublished;
-  late bool _hasBodyTypePricing;
-
-  final Map<String, TextEditingController> _bodyTypeControllers = {
-    'Седан': TextEditingController(),
-    'Кроссовер': TextEditingController(),
-    'Внедорожник': TextEditingController(),
-    'Минивэн': TextEditingController(),
-  };
-
-  final Set<String> _includedAddonIds = {};
-
-  List<Map<String, dynamic>> get _addonServices => widget.allServices
-      .where((e) => '${e['kind']}' == 'ADDON')
-      .map((e) => Map<String, dynamic>.from(e))
-      .toList();
-
-  @override
-  void initState() {
-    super.initState();
-
-    _nameController = TextEditingController(
-      text: (widget.service['name'] ?? '').toString(),
-    );
-    _descriptionController = TextEditingController(
-      text: (widget.service['description'] ?? '').toString(),
-    );
-    _priceController = TextEditingController(
-      text: '${_asInt(widget.service['priceRub'])}',
-    );
-    _durationController = TextEditingController(
-      text: '${_asInt(widget.service['durationMin'])}',
-    );
-    _imageKey = (widget.service['imageKey'] ?? 'EXTERIOR_WASH').toString();
-    _isPublished = widget.service['isPublished'] == true;
-    _hasBodyTypePricing = widget.service['hasBodyTypePricing'] == true;
-
-    final bodyTypePrices =
-        ((widget.service['bodyTypePrices'] as List?) ?? const [])
-            .whereType<Map>()
-            .map((e) => Map<String, dynamic>.from(e))
-            .toList();
-
-    for (final item in bodyTypePrices) {
-      final bodyType = (item['bodyType'] ?? '').toString();
-      final priceRub = _asInt(item['priceRub']);
-      if (_bodyTypeControllers.containsKey(bodyType)) {
-        _bodyTypeControllers[bodyType]!.text = '$priceRub';
-      }
-    }
-
-    final includedItems =
-        ((widget.service['includedAddonsForBase'] as List?) ?? const [])
-            .whereType<Map>()
-            .map((e) => Map<String, dynamic>.from(e))
-            .toList();
-
-    for (final item in includedItems) {
-      final addon = Map<String, dynamic>.from(
-        (item['addonService'] as Map?) ?? const {},
-      );
-      final id = (addon['id'] ?? '').toString();
-      if (id.isNotEmpty) {
-        _includedAddonIds.add(id);
-      }
-    }
-  }
-
-  int _asInt(dynamic value) {
-    if (value is int) return value;
-    if (value is num) return value.toInt();
-    return 0;
-  }
-
-  @override
-  void dispose() {
-    _nameController.dispose();
-    _descriptionController.dispose();
-    _priceController.dispose();
-    _durationController.dispose();
-    for (final controller in _bodyTypeControllers.values) {
-      controller.dispose();
-    }
-    super.dispose();
-  }
-
-  Future<void> _submit() async {
-    if (_submitting) return;
-    if (!_formKey.currentState!.validate()) return;
-
-    final serviceId = (widget.service['id'] ?? '').toString();
-    final kind = (widget.service['kind'] ?? '').toString();
-
-    if (serviceId.isEmpty) return;
-
-    setState(() {
-      _submitting = true;
-    });
-
-    try {
-      final body = <String, dynamic>{
-        'name': _nameController.text.trim(),
-        'description': _descriptionController.text.trim(),
-        'imageKey': _imageKey,
-        'priceRub': int.parse(_priceController.text.trim()),
-        'durationMin': int.parse(_durationController.text.trim()),
-        'isPublished': _isPublished,
-        'hasBodyTypePricing': _hasBodyTypePricing,
-      };
-
-      body['bodyTypePrices'] = _hasBodyTypePricing
-          ? _bodyTypeControllers.entries
-                .where((e) => e.value.text.trim().isNotEmpty)
-                .map(
-                  (e) => {
-                    'bodyType': e.key,
-                    'priceRub': int.parse(e.value.text.trim()),
-                  },
-                )
-                .toList()
-          : <Map<String, dynamic>>[];
-
-      if (kind == 'BASE') {
-        body['includedAddonIds'] = _includedAddonIds.toList();
-      }
-
-      final uri = Uri.parse(
-        '${AppConfig.defaultBaseUrl}/owner/services/$serviceId',
-      );
-
-      final response = await http
-          .patch(
-            uri,
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode(body),
-          )
-          .timeout(const Duration(seconds: 20));
-
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw Exception(
-          _extractErrorMessage(response.body, response.statusCode),
-        );
-      }
-
-      if (!mounted) return;
-      Navigator.of(context).pop(true);
-    } catch (e) {
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
-    } finally {
-      if (mounted) {
-        setState(() {
-          _submitting = false;
-        });
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final kind = (widget.service['kind'] ?? '').toString();
-
-    return AlertDialog(
-      title: const Text('Редактировать сервис'),
-      content: SizedBox(
-        width: 520,
-        child: Form(
-          key: _formKey,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextFormField(
-                  controller: _nameController,
-                  decoration: const InputDecoration(labelText: 'Название'),
-                  validator: (value) {
-                    final v = (value ?? '').trim();
-                    if (v.isEmpty) return 'Введите название';
-                    if (v.length < 2) return 'Слишком короткое название';
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _descriptionController,
-                  minLines: 2,
-                  maxLines: 4,
-                  decoration: const InputDecoration(
-                    labelText: 'Описание услуги',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
-                  initialValue: _imageKey,
-                  decoration: const InputDecoration(labelText: 'Иконка услуги'),
-                  items: const [
-                    DropdownMenuItem(
-                      value: 'EXTERIOR_WASH',
-                      child: Text('Exterior wash'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'FULL_WASH',
-                      child: Text('Full wash'),
-                    ),
-                    DropdownMenuItem(value: 'WAX', child: Text('Wax')),
-                    DropdownMenuItem(value: 'TIRES', child: Text('Tires')),
-                    DropdownMenuItem(
-                      value: 'INTERIOR',
-                      child: Text('Interior'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'LEATHER_CARE',
-                      child: Text('Leather care'),
-                    ),
-                  ],
-                  onChanged: (value) {
-                    setState(() {
-                      _imageKey = value ?? 'EXTERIOR_WASH';
-                    });
-                  },
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _priceController,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: 'Базовая цена, ₽',
-                  ),
-                  validator: (value) {
-                    final v = (value ?? '').trim();
-                    if (v.isEmpty) return 'Введите цену';
-                    final n = int.tryParse(v);
-                    if (n == null) return 'Введите число';
-                    if (n < 0) return 'Цена не может быть отрицательной';
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _durationController,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: 'Длительность, мин',
-                  ),
-                  validator: (value) {
-                    final v = (value ?? '').trim();
-                    if (v.isEmpty) return 'Введите длительность';
-                    final n = int.tryParse(v);
-                    if (n == null) return 'Введите число';
-                    if (n <= 0) return 'Должно быть больше 0';
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 12),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Опубликовано'),
-                  value: _isPublished,
-                  onChanged: (value) {
-                    setState(() {
-                      _isPublished = value;
-                    });
-                  },
-                ),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Цена зависит от типа кузова'),
-                  value: _hasBodyTypePricing,
-                  onChanged: (value) {
-                    setState(() {
-                      _hasBodyTypePricing = value;
-                    });
-                  },
-                ),
-                if (_hasBodyTypePricing) ...[
-                  const SizedBox(height: 4),
-                  ..._bodyTypeControllers.entries.map(
-                    (entry) => Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: TextFormField(
-                        controller: entry.value,
-                        keyboardType: TextInputType.number,
-                        decoration: InputDecoration(
-                          labelText: '${entry.key}, ₽',
-                        ),
-                        validator: (value) {
-                          if (!_hasBodyTypePricing) return null;
-                          final v = (value ?? '').trim();
-                          if (v.isEmpty) return null;
-                          if (int.tryParse(v) == null) return 'Введите число';
-                          return null;
-                        },
-                      ),
-                    ),
-                  ),
-                ],
-                if (kind == 'BASE' && _addonServices.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      'Что входит в услугу',
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  ..._addonServices.map((service) {
-                    final id = (service['id'] ?? '').toString();
-                    final name = (service['name'] ?? 'Add-on').toString();
-                    final selected = _includedAddonIds.contains(id);
-
-                    return CheckboxListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(name),
-                      value: selected,
-                      onChanged: (value) {
-                        setState(() {
-                          if (value == true) {
-                            _includedAddonIds.add(id);
-                          } else {
-                            _includedAddonIds.remove(id);
-                          }
-                        });
-                      },
-                    );
-                  }),
-                ],
-              ],
-            ),
-          ),
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: _submitting
-              ? null
-              : () => Navigator.of(context).pop(false),
-          child: const Text('Отмена'),
-        ),
-        FilledButton(
-          onPressed: _submitting ? null : _submit,
-          child: _submitting
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Text('Сохранить'),
-        ),
-      ],
+      child: Text(text, style: Theme.of(context).textTheme.bodySmall),
     );
   }
 }

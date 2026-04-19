@@ -22,6 +22,47 @@ type Period = 'day' | 'month' | 'year';
 
 const scryptAsync = promisify(scryptCallback);
 
+type ContactsConfig = {
+  title?: string;
+  address?: string;
+  phone?: string;
+  telegram?: string;
+  whatsapp?: string;
+  navigatorLink?: string;
+  mapsLink?: string;
+};
+
+type OwnerSettingsConfig = {
+  communication: {
+    washStartTemplate: string;
+    washFinishTemplate: string;
+    campaigns: {
+      promotionsEnabled: boolean;
+      discountsEnabled: boolean;
+      holidayGreetingsEnabled: boolean;
+    };
+  };
+  monitoring: {
+    suspiciousAuditTypes: AuditType[];
+    notifyPhone: string;
+    notifyTelegram: string;
+    notifyPush: boolean;
+  };
+};
+
+type SettingsLocation = {
+  id: string;
+  tenantId: string;
+  name: string;
+  address: string | null;
+  colorHex: string;
+  baysCount: number;
+  phone: string | null;
+  telegram: string | null;
+  whatsapp: string | null;
+  navigatorLink: string | null;
+};
+
 @Injectable()
 export class OwnerService {
   constructor(private readonly prisma: PrismaService) {}
@@ -38,6 +79,30 @@ export class OwnerService {
   private async getLocation() {
     const location = await this.prisma.location.findUnique({
       where: { name: this.locationName },
+    });
+
+    if (!location) {
+      throw new NotFoundException(`Location "${this.locationName}" not found`);
+    }
+
+    return location;
+  }
+
+  private async getLocationForSettings(): Promise<SettingsLocation> {
+    const location = await this.prisma.location.findUnique({
+      where: { name: this.locationName },
+      select: {
+        id: true,
+        tenantId: true,
+        name: true,
+        address: true,
+        colorHex: true,
+        baysCount: true,
+        phone: true,
+        telegram: true,
+        whatsapp: true,
+        navigatorLink: true,
+      },
     });
 
     if (!location) {
@@ -78,6 +143,40 @@ export class OwnerService {
     AuditType.BAY_CLOSE,
   ];
 
+  private readonly suspiciousAuditOptions: Array<{
+    key: AuditType;
+    label: string;
+  }> = [
+    {
+      key: AuditType.BOOKING_CHANGE_SERVICE,
+      label: 'Замена услуги',
+    },
+    {
+      key: AuditType.BOOKING_DISCOUNT,
+      label: 'Изменение цены / скидка',
+    },
+    {
+      key: AuditType.BOOKING_CHANGE_BODYTYPE,
+      label: 'Изменение типа кузова',
+    },
+    {
+      key: AuditType.BOOKING_DELETE,
+      label: 'Отмена бронирования',
+    },
+    {
+      key: AuditType.BAY_OPEN,
+      label: 'Открытие поста',
+    },
+    {
+      key: AuditType.BAY_CLOSE,
+      label: 'Закрытие поста',
+    },
+    {
+      key: AuditType.WAITLIST_DELETE,
+      label: 'Отмена waitlist',
+    },
+  ];
+
   private normalizePhone(raw: string): string {
     const value = raw.trim();
     if (!value) {
@@ -92,6 +191,18 @@ export class OwnerService {
     }
 
     return value;
+  }
+
+  private normalizeOptionalPhone(raw?: string): string {
+    const value = (raw ?? '').trim();
+    if (!value) return '';
+    return this.normalizePhone(value);
+  }
+
+  private normalizeTelegramHandle(raw?: string): string {
+    const value = (raw ?? '').trim();
+    if (!value) return '';
+    return value.startsWith('@') ? value : `@${value}`;
   }
 
   private normalizeName(raw: string): string {
@@ -112,6 +223,14 @@ export class OwnerService {
     const value = (raw ?? '').trim();
     if (value.length > 1000) {
       throw new BadRequestException('Описание слишком длинное.');
+    }
+    return value;
+  }
+
+  private normalizeOptionalText(raw?: string, max = 2000): string {
+    const value = (raw ?? '').trim();
+    if (value.length > max) {
+      throw new BadRequestException('Текст слишком длинный.');
     }
     return value;
   }
@@ -167,14 +286,6 @@ export class OwnerService {
     }
     if (value <= 0) {
       throw new BadRequestException('durationMin должен быть > 0.');
-    }
-    return Math.round(value);
-  }
-
-  private normalizeSortOrder(raw: unknown): number {
-    const value = Number(raw);
-    if (!Number.isFinite(value)) {
-      throw new BadRequestException('sortOrder должен быть числом.');
     }
     return Math.round(value);
   }
@@ -252,6 +363,214 @@ export class OwnerService {
     return `scrypt$${salt}$${derivedKey.toString('hex')}`;
   }
 
+  private asObject(value: unknown): Record<string, any> {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return {};
+    }
+    return value as Record<string, any>;
+  }
+
+  private buildDefaultContacts(location: SettingsLocation): ContactsConfig {
+    return {
+      title: (location.name ?? '').trim(),
+      address: (location.address ?? '').trim(),
+      phone: (location.phone ?? '').trim(),
+      telegram: this.normalizeTelegramHandle(location.telegram ?? ''),
+      whatsapp: (location.whatsapp ?? '').trim(),
+      navigatorLink: (location.navigatorLink ?? '').trim(),
+      mapsLink: (location.navigatorLink ?? '').trim(),
+    };
+  }
+
+  private normalizeContactsParams(
+    raw: unknown,
+    defaults: ContactsConfig,
+  ): ContactsConfig {
+    const obj = this.asObject(raw);
+
+    const title = this.normalizeOptionalText(
+      typeof obj.title === 'string' ? obj.title : defaults.title ?? '',
+      150,
+    );
+    const address = this.normalizeOptionalText(
+      typeof obj.address === 'string' ? obj.address : defaults.address ?? '',
+      300,
+    );
+    const phone = this.normalizeOptionalPhone(
+      typeof obj.phone === 'string' ? obj.phone : defaults.phone ?? '',
+    );
+    const telegram = this.normalizeTelegramHandle(
+      typeof obj.telegram === 'string'
+        ? obj.telegram
+        : defaults.telegram ?? '',
+    );
+    const whatsapp = this.normalizeOptionalPhone(
+      typeof obj.whatsapp === 'string'
+        ? obj.whatsapp
+        : defaults.whatsapp ?? '',
+    );
+    const navigatorLink = this.normalizeOptionalText(
+      typeof obj.navigatorLink === 'string'
+        ? obj.navigatorLink
+        : defaults.navigatorLink ?? '',
+      500,
+    );
+    const mapsLink = this.normalizeOptionalText(
+      typeof obj.mapsLink === 'string' ? obj.mapsLink : defaults.mapsLink ?? '',
+      500,
+    );
+
+    return {
+      title,
+      address,
+      phone,
+      telegram,
+      whatsapp,
+      navigatorLink,
+      mapsLink,
+    };
+  }
+
+  private getDefaultOwnerSettings(contacts: ContactsConfig): OwnerSettingsConfig {
+    return {
+      communication: {
+        washStartTemplate:
+          'Ваш автомобиль принят в мойку. Мы сообщим, когда работа будет завершена.',
+        washFinishTemplate:
+          'Мойка завершена. Ваш автомобиль готов к выдаче. Спасибо, что выбрали нас.',
+        campaigns: {
+          promotionsEnabled: false,
+          discountsEnabled: false,
+          holidayGreetingsEnabled: false,
+        },
+      },
+      monitoring: {
+        suspiciousAuditTypes: [...this.suspiciousAuditTypes],
+        notifyPhone: contacts.phone ?? '',
+        notifyTelegram: contacts.telegram ?? '',
+        notifyPush: true,
+      },
+    };
+  }
+
+  private normalizeSuspiciousAuditTypes(raw?: string[]): AuditType[] {
+    const allowed = new Set(this.suspiciousAuditOptions.map((x) => x.key));
+    const items = Array.isArray(raw) ? raw : [];
+
+    const normalized = items
+      .map((x) => (x ?? '').toString().trim())
+      .filter((x) => x.length > 0)
+      .map((x) => x as AuditType)
+      .filter((x) => allowed.has(x));
+
+    return Array.from(new Set(normalized));
+  }
+
+  private normalizeOwnerSettings(
+    raw: unknown,
+    defaults: OwnerSettingsConfig,
+  ): OwnerSettingsConfig {
+    const obj = this.asObject(raw);
+    const communication = this.asObject(obj.communication);
+    const campaigns = this.asObject(communication.campaigns);
+    const monitoring = this.asObject(obj.monitoring);
+
+    const suspiciousAuditTypes = this.normalizeSuspiciousAuditTypes(
+      Array.isArray(monitoring.suspiciousAuditTypes)
+        ? monitoring.suspiciousAuditTypes.map(String)
+        : defaults.monitoring.suspiciousAuditTypes,
+    );
+
+    return {
+      communication: {
+        washStartTemplate: this.normalizeOptionalText(
+          typeof communication.washStartTemplate === 'string'
+            ? communication.washStartTemplate
+            : defaults.communication.washStartTemplate,
+          1000,
+        ),
+        washFinishTemplate: this.normalizeOptionalText(
+          typeof communication.washFinishTemplate === 'string'
+            ? communication.washFinishTemplate
+            : defaults.communication.washFinishTemplate,
+          1000,
+        ),
+        campaigns: {
+          promotionsEnabled:
+            typeof campaigns.promotionsEnabled === 'boolean'
+              ? campaigns.promotionsEnabled
+              : defaults.communication.campaigns.promotionsEnabled,
+          discountsEnabled:
+            typeof campaigns.discountsEnabled === 'boolean'
+              ? campaigns.discountsEnabled
+              : defaults.communication.campaigns.discountsEnabled,
+          holidayGreetingsEnabled:
+            typeof campaigns.holidayGreetingsEnabled === 'boolean'
+              ? campaigns.holidayGreetingsEnabled
+              : defaults.communication.campaigns.holidayGreetingsEnabled,
+        },
+      },
+      monitoring: {
+        suspiciousAuditTypes:
+          suspiciousAuditTypes.length > 0
+            ? suspiciousAuditTypes
+            : [...defaults.monitoring.suspiciousAuditTypes],
+        notifyPhone: this.normalizeOptionalPhone(
+          typeof monitoring.notifyPhone === 'string'
+            ? monitoring.notifyPhone
+            : defaults.monitoring.notifyPhone,
+        ),
+        notifyTelegram: this.normalizeTelegramHandle(
+          typeof monitoring.notifyTelegram === 'string'
+            ? monitoring.notifyTelegram
+            : defaults.monitoring.notifyTelegram,
+        ),
+        notifyPush:
+          typeof monitoring.notifyPush === 'boolean'
+            ? monitoring.notifyPush
+            : defaults.monitoring.notifyPush,
+      },
+    };
+  }
+
+  private async readSettingsSnapshot(location: SettingsLocation) {
+    const features = await this.prisma.tenantFeature.findMany({
+      where: {
+        tenantId: location.tenantId,
+        key: { in: ['CONTACTS', 'OWNER_SETTINGS'] },
+      },
+      select: {
+        key: true,
+        enabled: true,
+        params: true,
+      },
+    });
+
+    const contactsFeature = features.find(
+      (x) => x.key === 'CONTACTS' && x.enabled === true,
+    );
+    const ownerFeature = features.find(
+      (x) => x.key === 'OWNER_SETTINGS' && x.enabled === true,
+    );
+
+    const defaultContacts = this.buildDefaultContacts(location);
+    const contacts = this.normalizeContactsParams(
+      contactsFeature?.params,
+      defaultContacts,
+    );
+
+    const defaultOwnerSettings = this.getDefaultOwnerSettings(contacts);
+    const ownerSettings = this.normalizeOwnerSettings(
+      ownerFeature?.params,
+      defaultOwnerSettings,
+    );
+
+    return {
+      contacts,
+      ownerSettings,
+    };
+  }
+
   private async getEmployeeOrThrow(id: string, locationId: string) {
     const employee = await this.prisma.user.findFirst({
       where: {
@@ -295,6 +614,32 @@ export class OwnerService {
     }
 
     return service;
+  }
+
+  private async getOwnerUserOrThrow(locationId: string) {
+    const owner = await this.prisma.user.findFirst({
+      where: {
+        locationId,
+        role: 'OWNER',
+      },
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        isActive: true,
+      },
+      orderBy: {
+        createdAt: 'asc',
+      },
+    });
+
+    if (!owner) {
+      throw new NotFoundException(
+        'OWNER пользователь для этой локации не найден.',
+      );
+    }
+
+    return owner;
   }
 
   async getSummary(rawPeriod?: string) {
@@ -977,14 +1322,6 @@ export class OwnerService {
     };
   }
 
-  // =======================
-  // SERVICES
-  // =======================
-
-    // =======================
-  // SERVICES
-  // =======================
-
   async createService(body: {
     name?: string;
     description?: string;
@@ -1306,6 +1643,187 @@ export class OwnerService {
     return {
       ok: true,
       service: updated,
+    };
+  }
+
+  async getSettings() {
+    const location = await this.getLocationForSettings();
+    const { contacts, ownerSettings } = await this.readSettingsSnapshot(location);
+
+    return {
+      location: {
+        id: location.id,
+        name: location.name,
+        address: location.address,
+        colorHex: location.colorHex,
+        baysCount: location.baysCount,
+      },
+      contacts,
+      settings: ownerSettings,
+      options: {
+        suspiciousAuditTypes: this.suspiciousAuditOptions,
+      },
+    };
+  }
+
+  async updateSettings(body: {
+    communication?: {
+      washStartTemplate?: string;
+      washFinishTemplate?: string;
+      campaigns?: {
+        promotionsEnabled?: boolean;
+        discountsEnabled?: boolean;
+        holidayGreetingsEnabled?: boolean;
+      };
+    };
+    monitoring?: {
+      suspiciousAuditTypes?: string[];
+      notifyPhone?: string;
+      notifyTelegram?: string;
+      notifyPush?: boolean;
+    };
+  }) {
+    const location = await this.getLocationForSettings();
+    const { contacts, ownerSettings } = await this.readSettingsSnapshot(location);
+
+    const next: OwnerSettingsConfig = {
+      communication: {
+        washStartTemplate: ownerSettings.communication.washStartTemplate,
+        washFinishTemplate: ownerSettings.communication.washFinishTemplate,
+        campaigns: {
+          promotionsEnabled:
+            ownerSettings.communication.campaigns.promotionsEnabled,
+          discountsEnabled:
+            ownerSettings.communication.campaigns.discountsEnabled,
+          holidayGreetingsEnabled:
+            ownerSettings.communication.campaigns.holidayGreetingsEnabled,
+        },
+      },
+      monitoring: {
+        suspiciousAuditTypes: [...ownerSettings.monitoring.suspiciousAuditTypes],
+        notifyPhone: ownerSettings.monitoring.notifyPhone,
+        notifyTelegram: ownerSettings.monitoring.notifyTelegram,
+        notifyPush: ownerSettings.monitoring.notifyPush,
+      },
+    };
+
+    if (body.communication) {
+      if (typeof body.communication.washStartTemplate === 'string') {
+        next.communication.washStartTemplate = this.normalizeOptionalText(
+          body.communication.washStartTemplate,
+          1000,
+        );
+      }
+
+      if (typeof body.communication.washFinishTemplate === 'string') {
+        next.communication.washFinishTemplate = this.normalizeOptionalText(
+          body.communication.washFinishTemplate,
+          1000,
+        );
+      }
+
+      if (body.communication.campaigns) {
+        if (
+          typeof body.communication.campaigns.promotionsEnabled === 'boolean'
+        ) {
+          next.communication.campaigns.promotionsEnabled =
+            body.communication.campaigns.promotionsEnabled;
+        }
+
+        if (
+          typeof body.communication.campaigns.discountsEnabled === 'boolean'
+        ) {
+          next.communication.campaigns.discountsEnabled =
+            body.communication.campaigns.discountsEnabled;
+        }
+
+        if (
+          typeof body.communication.campaigns.holidayGreetingsEnabled ===
+          'boolean'
+        ) {
+          next.communication.campaigns.holidayGreetingsEnabled =
+            body.communication.campaigns.holidayGreetingsEnabled;
+        }
+      }
+    }
+
+    if (body.monitoring) {
+      if (Array.isArray(body.monitoring.suspiciousAuditTypes)) {
+        const normalized = this.normalizeSuspiciousAuditTypes(
+          body.monitoring.suspiciousAuditTypes,
+        );
+
+        next.monitoring.suspiciousAuditTypes =
+          normalized.length > 0 ? normalized : [...this.suspiciousAuditTypes];
+      }
+
+      if (typeof body.monitoring.notifyPhone === 'string') {
+        next.monitoring.notifyPhone = this.normalizeOptionalPhone(
+          body.monitoring.notifyPhone,
+        );
+      }
+
+      if (typeof body.monitoring.notifyTelegram === 'string') {
+        next.monitoring.notifyTelegram = this.normalizeTelegramHandle(
+          body.monitoring.notifyTelegram,
+        );
+      }
+
+      if (typeof body.monitoring.notifyPush === 'boolean') {
+        next.monitoring.notifyPush = body.monitoring.notifyPush;
+      }
+    }
+
+    const normalizedFinal = this.normalizeOwnerSettings(
+      next,
+      this.getDefaultOwnerSettings(contacts),
+    );
+
+    await this.prisma.tenantFeature.upsert({
+      where: {
+        tenantId_key: {
+          tenantId: location.tenantId,
+          key: 'OWNER_SETTINGS',
+        },
+      },
+      update: {
+        enabled: true,
+        params: normalizedFinal as any,
+      },
+      create: {
+        tenantId: location.tenantId,
+        key: 'OWNER_SETTINGS',
+        enabled: true,
+        params: normalizedFinal as any,
+      },
+      select: { id: true },
+    });
+
+    return this.getSettings();
+  }
+
+  async changeOwnerPassword(body: { password?: string }) {
+    const location = await this.getLocation();
+    const owner = await this.getOwnerUserOrThrow(location.id);
+
+    const password = this.validatePassword(body.password);
+    const passwordHash = await this.hashPassword(password);
+
+    await this.prisma.user.update({
+      where: { id: owner.id },
+      data: {
+        passwordHash,
+        mustChangePassword: false,
+      },
+    });
+
+    return {
+      ok: true,
+      owner: {
+        id: owner.id,
+        name: owner.name,
+        phone: owner.phone,
+      },
     };
   }
 }
