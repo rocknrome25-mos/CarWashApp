@@ -52,7 +52,7 @@ class _OwnerShellPageState extends State<OwnerShellPage> {
           TextButton.icon(
             onPressed: _openSupport,
             icon: const Icon(Icons.support_agent_outlined),
-            label: const Text('Техподдержка'),
+            label: const Text('Помощь'),
           ),
           const SizedBox(width: 8),
           TextButton.icon(

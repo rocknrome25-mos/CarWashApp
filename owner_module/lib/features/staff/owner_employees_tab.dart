@@ -491,6 +491,9 @@ class _EmployeeView {
         return role;
     }
   }
+
+  bool get isAdmin => role == 'ADMIN';
+  bool get isWasher => role == 'WASHER';
 }
 
 class _MetricTile extends StatelessWidget {
@@ -557,7 +560,7 @@ class _EmployeeCard extends StatelessWidget {
                   radius: 22,
                   backgroundColor: const Color(0xFFF3F4F6),
                   child: Icon(
-                    employee.role == 'ADMIN'
+                    employee.isAdmin
                         ? Icons.badge_outlined
                         : Icons.cleaning_services_outlined,
                   ),
@@ -634,41 +637,56 @@ class _EmployeeCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 14),
-            Row(
-              children: [
-                Expanded(
-                  child: _MiniStat(
-                    title: 'Смен открыл',
-                    value: '${employee.shiftsOpened}',
+            if (employee.isAdmin) ...[
+              Row(
+                children: [
+                  Expanded(
+                    child: _MiniStat(
+                      title: 'Смен открыл',
+                      value: '${employee.shiftsOpened}',
+                    ),
                   ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _MiniStat(
-                    title: 'Бронирований',
-                    value: '${employee.bookingsHandled}',
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _MiniStat(
+                      title: 'Бронирований',
+                      value: '${employee.bookingsHandled}',
+                    ),
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Expanded(
-                  child: _MiniStat(
-                    title: 'Скидок дал',
-                    value: '${employee.discountsGiven}',
+                ],
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: _MiniStat(
+                      title: 'Скидок дал',
+                      value: '${employee.discountsGiven}',
+                    ),
                   ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _MiniStat(
-                    title: 'Подозрительных',
-                    value: '${employee.suspiciousActions}',
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _MiniStat(
+                      title: 'Подозрительных',
+                      value: '${employee.suspiciousActions}',
+                    ),
                   ),
-                ),
-              ],
-            ),
+                ],
+              ),
+            ] else if (employee.isWasher) ...[
+              Row(
+                children: [
+                  Expanded(
+                    child: _MiniStat(
+                      title: 'Смен отработал',
+                      value: '${employee.shiftsOpened}',
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  const Expanded(child: SizedBox()),
+                ],
+              ),
+            ],
             if (employee.lastLoginAt.trim().isNotEmpty) ...[
               const SizedBox(height: 12),
               Align(
