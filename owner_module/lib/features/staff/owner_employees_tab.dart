@@ -27,7 +27,9 @@ class _OwnerEmployeesTabState extends State<OwnerEmployeesTab> {
     final analyticsUri = Uri.parse(
       '${AppConfig.defaultBaseUrl}/owner/employees/analytics?period=$_period',
     );
-    final employeesUri = Uri.parse('${AppConfig.defaultBaseUrl}/owner/employees');
+    final employeesUri = Uri.parse(
+      '${AppConfig.defaultBaseUrl}/owner/employees',
+    );
 
     final responses = await Future.wait([
       http.get(analyticsUri).timeout(const Duration(seconds: 20)),
@@ -113,7 +115,9 @@ class _OwnerEmployeesTabState extends State<OwnerEmployeesTab> {
       final uri = Uri.parse(
         '${AppConfig.defaultBaseUrl}/owner/employees/$id/toggle',
       );
-      final response = await http.post(uri).timeout(const Duration(seconds: 20));
+      final response = await http
+          .post(uri)
+          .timeout(const Duration(seconds: 20));
 
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw Exception(
@@ -434,6 +438,8 @@ class _EmployeeView {
   final int suspiciousActions;
   final int carsServiced;
   final int salesRevenueRub;
+  final int bonusRub;
+  final int salaryRub;
   final int earnedRub;
 
   const _EmployeeView({
@@ -450,6 +456,8 @@ class _EmployeeView {
     required this.suspiciousActions,
     required this.carsServiced,
     required this.salesRevenueRub,
+    required this.bonusRub,
+    required this.salaryRub,
     required this.earnedRub,
   });
 
@@ -476,6 +484,8 @@ class _EmployeeView {
       suspiciousActions: _asInt(stats['suspiciousActions']),
       carsServiced: _asInt(stats['carsServiced']),
       salesRevenueRub: _asInt(stats['salesRevenueRub']),
+      bonusRub: _asInt(stats['bonusRub']),
+      salaryRub: _asInt(stats['salaryRub']),
       earnedRub: _asInt(stats['earnedRub']),
     );
   }
@@ -716,7 +726,25 @@ class _EmployeeCard extends StatelessWidget {
                   const SizedBox(width: 10),
                   Expanded(
                     child: _MiniStat(
-                      title: 'Заработал',
+                      title: 'Бонус',
+                      value: _rub(employee.bonusRub),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: _MiniStat(
+                      title: 'Оклад',
+                      value: _rub(employee.salaryRub),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _MiniStat(
+                      title: 'Итого заработал',
                       value: _rub(employee.earnedRub),
                     ),
                   ),

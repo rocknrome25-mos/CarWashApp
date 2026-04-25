@@ -443,6 +443,17 @@ class _OwnerSummarySection extends StatelessWidget {
     final activeShift = data['activeShift'] as Map?;
 
     final revenue = _intValue(metrics['revenue']);
+    final expenses = _intValue(
+      metrics['expenses'] ?? metrics['employeeExpenseRub'],
+    );
+    final profit = _intValue(metrics['profit']);
+    final washerExpenseRub = _intValue(metrics['washerExpenseRub']);
+    final adminExpenseRub = _intValue(metrics['adminExpenseRub']);
+    final adminBonusExpenseRub = _intValue(metrics['adminBonusExpenseRub']);
+    final adminSalaryExpenseRub = _intValue(metrics['adminSalaryExpenseRub']);
+    final adminSalesRevenueRub = _intValue(metrics['adminSalesRevenueRub']);
+    final adminUpsellRevenueRub = _intValue(metrics['adminUpsellRevenueRub']);
+    final upsellRevenueRub = _intValue(metrics['upsellRevenueRub']);
     final averageCheck = _intValue(metrics['averageCheck']);
     final suspiciousEvents = _intValue(metrics['suspiciousEvents']);
     final servicedBookings = _intValue(metrics['servicedBookings']);
@@ -466,9 +477,31 @@ class _OwnerSummarySection extends StatelessWidget {
           children: [
             Expanded(
               child: OwnerInfoTile(
-                title: 'Выручка',
+                title: 'Доход',
                 value: _rub(revenue),
-                subtitle: 'За выбранный период',
+                subtitle: 'Оплаты клиентов',
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: OwnerInfoTile(
+                title: 'Расход',
+                value: _rub(expenses),
+                subtitle: 'Админы + мойщики',
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: OwnerInfoTile(
+                title: 'Прибыль',
+                value: _rub(profit),
+                subtitle: profit >= 0
+                    ? 'Доход минус расход'
+                    : 'Расход выше дохода',
               ),
             ),
             const SizedBox(width: 12),
@@ -501,6 +534,43 @@ class _OwnerSummarySection extends StatelessWidget {
             ),
           ],
         ),
+        const SizedBox(height: 18),
+        Text('Финансы', style: theme.textTheme.titleMedium),
+        const SizedBox(height: 10),
+        OwnerSummaryRow(label: 'Доход', value: _rub(revenue)),
+        OwnerSummaryRow(label: 'Расход бизнеса', value: _rub(expenses)),
+        OwnerSummaryRow(
+          label: 'Расход на мойщиков',
+          value: _rub(washerExpenseRub),
+        ),
+        OwnerSummaryRow(
+          label: 'Расход на админов',
+          value: _rub(adminExpenseRub),
+        ),
+        OwnerSummaryRow(
+          label: 'Бонусы админов',
+          value: _rub(adminBonusExpenseRub),
+        ),
+        OwnerSummaryRow(
+          label: 'Оклады админов',
+          value: _rub(adminSalaryExpenseRub),
+        ),
+        OwnerSummaryRow(label: 'Прибыль', value: _rub(profit)),
+        if (adminSalesRevenueRub > 0)
+          OwnerSummaryRow(
+            label: 'Доход от продаж админов',
+            value: _rub(adminSalesRevenueRub),
+          ),
+        if (upsellRevenueRub > 0)
+          OwnerSummaryRow(
+            label: 'Доход от upsell',
+            value: _rub(upsellRevenueRub),
+          ),
+        if (adminUpsellRevenueRub > 0)
+          OwnerSummaryRow(
+            label: 'Upsell админов',
+            value: _rub(adminUpsellRevenueRub),
+          ),
         const SizedBox(height: 18),
         Text('Основные показатели', style: theme.textTheme.titleMedium),
         const SizedBox(height: 10),

@@ -871,6 +871,279 @@ export class OwnerService {
       });
 
     const revenue = revenueAgg._sum.amountRub ?? 0;
+
+    const compensationDefaults = this.getDefaultCompensationSettings();
+
+    const compensation = await this.prisma.locationCompensationSettings.findUnique({
+      where: { locationId: location.id },
+      select: {
+        washerBasePercent: true,
+        washerAddonPercent: true,
+        adminBaseSalaryRub: true,
+      },
+    });
+
+    const washerBasePercent =
+      compensation?.washerBasePercent ?? compensationDefaults.washerBasePercent;
+    const washerAddonPercent =
+      compensation?.washerAddonPercent ?? compensationDefaults.washerAddonPercent;
+    const defaultAdminBaseSalaryRub =
+      compensation?.adminBaseSalaryRub ??
+      compensationDefaults.adminBaseSalaryRub;
+
+    const activeAdmins = await this.prisma.user.findMany({
+      where: {
+        locationId: location.id,
+        role: 'ADMIN',
+        isActive: true,
+      },
+      select: {
+        id: true,
+        compensationProfile: {
+          select: {
+            adminBaseSalaryRub: true,
+            isActive: true,
+          },
+        },
+      },
+    });
+
+    const activeAdminIds = activeAdmins.map((x) => x.id);
+
+    const [
+      shiftWashers,
+      adminSaleBookings,
+      adminUpsellAddons,
+      allUpsellAddons,
+    ] = await Promise.all([
+      this.prisma.shiftWasher.findMany({
+        where: {
+          shift: {
+            locationId: location.id,
+            openedAt: { gte: start, lt: end },
+          },
+        },
+        select: {
+          washerId: true,
+          shiftId: true,
+          bayId: true,
+          percentWash: true,
+          percentBaseService: true,
+          percentAddon: true,
+        },
+      }),
+
+      activeAdminIds.length === 0
+        ? []
+        : this.prisma.booking.findMany({
+            where: {
+              locationId: location.id,
+              status: BookingStatus.COMPLETED,
+              dateTime: { gte: start, lt: end },
+              createdByUserId: { in: activeAdminIds },
+              isAdminSale: true,
+            },
+            select: {
+              id: true,
+              createdByUserId: true,
+              servicePriceRubSnapshot: true,
+              adminBaseBonusRubSnapshot: true,
+              service: {
+                select: {
+                  priceRub: true,
+                },
+              },
+              addons: {
+                select: {
+                  qty: true,
+                  priceRubSnapshot: true,
+                  isUpsell: true,
+                  adminAddonBonusRubSnapshot: true,
+                },
+              },
+            },
+          }),
+
+      activeAdminIds.length === 0
+        ? []
+        : this.prisma.bookingAddon.findMany({
+            where: {
+              isUpsell: true,
+              upsoldByUserId: { in: activeAdminIds },
+              booking: {
+                locationId: location.id,
+                status: BookingStatus.COMPLETED,
+                dateTime: { gte: start, lt: end },
+              },
+            },
+            select: {
+              id: true,
+              upsoldByUserId: true,
+              qty: true,
+              priceRubSnapshot: true,
+              upsellBonusRubSnapshot: true,
+            },
+          }),
+
+      this.prisma.bookingAddon.findMany({
+        where: {
+          isUpsell: true,
+          booking: {
+            locationId: location.id,
+            status: BookingStatus.COMPLETED,
+            dateTime: { gte: start, lt: end },
+          },
+        },
+        select: {
+          qty: true,
+          priceRubSnapshot: true,
+        },
+      }),
+    ]);
+
+    const shiftIdsForWashers = Array.from(
+      new Set(shiftWashers.map((x) => x.shiftId)),
+    );
+
+    const washerBookings =
+      shiftIdsForWashers.length === 0
+        ? []
+        : await this.prisma.booking.findMany({
+            where: {
+              locationId: location.id,
+              status: BookingStatus.COMPLETED,
+              shiftId: { in: shiftIdsForWashers },
+              dateTime: { gte: start, lt: end },
+            },
+            select: {
+              id: true,
+              shiftId: true,
+              bayId: true,
+              servicePriceRubSnapshot: true,
+              service: {
+                select: {
+                  priceRub: true,
+                },
+              },
+              addons: {
+                select: {
+                  qty: true,
+                  priceRubSnapshot: true,
+                },
+              },
+            },
+          });
+
+    const washerAssignmentMap = new Map<
+      string,
+      {
+        percentBaseService: number | null;
+        percentAddon: number | null;
+        percentWash: number | null;
+      }
+    >();
+
+    for (const assignment of shiftWashers) {
+      washerAssignmentMap.set(`${assignment.shiftId}:${assignment.bayId}`, {
+        percentBaseService: assignment.percentBaseService,
+        percentAddon: assignment.percentAddon,
+        percentWash: assignment.percentWash,
+      });
+    }
+
+    let washersExpense = 0;
+
+    for (const booking of washerBookings) {
+      if (!booking.shiftId) continue;
+
+      const assignment = washerAssignmentMap.get(
+        `${booking.shiftId}:${booking.bayId}`,
+      );
+      if (!assignment) continue;
+
+      const basePrice =
+        booking.servicePriceRubSnapshot ?? booking.service?.priceRub ?? 0;
+
+      const addonTotal = booking.addons.reduce((sum, addon) => {
+        const qty = addon.qty ?? 1;
+        const price = addon.priceRubSnapshot ?? 0;
+        return sum + qty * price;
+      }, 0);
+
+      const basePercent =
+        assignment.percentBaseService ??
+        assignment.percentWash ??
+        washerBasePercent;
+      const addonPercent = assignment.percentAddon ?? washerAddonPercent;
+
+      washersExpense += Math.round((basePrice * basePercent) / 100);
+      washersExpense += Math.round((addonTotal * addonPercent) / 100);
+    }
+
+    let adminSalesRevenueRub = 0;
+    let adminBonusExpense = 0;
+    let adminUpsellRevenueRub = 0;
+    let adminUpsellBonusExpense = 0;
+
+    for (const booking of adminSaleBookings) {
+      const baseRevenue =
+        booking.servicePriceRubSnapshot ?? booking.service?.priceRub ?? 0;
+
+      let addonRevenue = 0;
+      let addonBonus = 0;
+
+      for (const addon of booking.addons) {
+        if (addon.isUpsell === true) continue;
+
+        const qty = addon.qty ?? 1;
+        const price = addon.priceRubSnapshot ?? 0;
+
+        addonRevenue += qty * price;
+        addonBonus += addon.adminAddonBonusRubSnapshot ?? 0;
+      }
+
+      adminSalesRevenueRub += baseRevenue + addonRevenue;
+      adminBonusExpense +=
+        (booking.adminBaseBonusRubSnapshot ?? 0) + addonBonus;
+    }
+
+    for (const addon of adminUpsellAddons) {
+      const qty = addon.qty ?? 1;
+      const price = addon.priceRubSnapshot ?? 0;
+
+      adminUpsellRevenueRub += qty * price;
+      adminUpsellBonusExpense += addon.upsellBonusRubSnapshot ?? 0;
+    }
+
+    adminBonusExpense += adminUpsellBonusExpense;
+
+    let adminSalaryExpense = 0;
+
+    for (const admin of activeAdmins) {
+      const salaryOverride =
+        admin.compensationProfile?.isActive === true
+          ? admin.compensationProfile.adminBaseSalaryRub
+          : null;
+
+      const monthlySalaryRub =
+        salaryOverride ?? defaultAdminBaseSalaryRub;
+
+      adminSalaryExpense += this.getAdminSalaryForPeriod(
+        monthlySalaryRub,
+        period,
+        start,
+      );
+    }
+
+    const adminExpense = adminBonusExpense + adminSalaryExpense;
+    const expenses = washersExpense + adminExpense;
+    const profit = revenue - expenses;
+    const upsellRevenueRub = allUpsellAddons.reduce((sum, addon) => {
+      const qty = addon.qty ?? 1;
+      const price = addon.priceRubSnapshot ?? 0;
+      return sum + qty * price;
+    }, 0);
+
     const averageCheck =
       revenueAgg._count._all > 0
         ? Math.round(revenue / revenueAgg._count._all)
@@ -916,6 +1189,16 @@ export class OwnerService {
         waitlistWaiting,
         admins,
         washers,
+        expenses,
+        profit,
+        employeeExpenseRub: expenses,
+        washerExpenseRub: washersExpense,
+        adminExpenseRub: adminExpense,
+        adminBonusExpenseRub: adminBonusExpense,
+        adminSalaryExpenseRub: adminSalaryExpense,
+        adminSalesRevenueRub,
+        adminUpsellRevenueRub,
+        upsellRevenueRub,
       },
       activeShift: activeShift
         ? {
