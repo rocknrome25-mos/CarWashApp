@@ -2864,6 +2864,157 @@ export class OwnerService {
     return this.getCompensationSettings();
   }
 
+
+  async getOwnerAlerts(params: {
+    period?: string;
+    unreadOnly?: string;
+    limit?: string;
+  }) {
+    const period = this.parsePeriod(params.period);
+    const location = await this.getLocation();
+    const { start, end } = this.getRange(period);
+    const limit = this.parsePositiveLimit(params.limit, 20, 100);
+    const unreadOnly = (params.unreadOnly ?? '').trim().toLowerCase() === 'true';
+
+    const where: Prisma.OwnerAlertWhereInput = {
+      locationId: location.id,
+      createdAt: { gte: start, lt: end },
+      ...(unreadOnly ? { isRead: false } : {}),
+    };
+
+    const [alerts, unreadTotal, criticalUnreadTotal, typeGroups] = await Promise.all([
+      this.prisma.ownerAlert.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+      }),
+      this.prisma.ownerAlert.count({
+        where: {
+          locationId: location.id,
+          isRead: false,
+        },
+      }),
+      this.prisma.ownerAlert.count({
+        where: {
+          locationId: location.id,
+          isRead: false,
+          severity: 'CRITICAL',
+        },
+      }),
+      this.prisma.ownerAlert.groupBy({
+        by: ['type'],
+        where,
+        _count: { _all: true },
+      }),
+    ]);
+
+    return {
+      location: {
+        id: location.id,
+        name: location.name,
+      },
+      period,
+      range: { start, end },
+      filters: {
+        unreadOnly,
+        limit,
+      },
+      totals: {
+        total: alerts.length,
+        unreadTotal,
+        criticalUnreadTotal,
+      },
+      byType: typeGroups
+        .map((row) => ({
+          type: row.type,
+          label: this.ownerAlertTypeLabel(row.type),
+          count: row._count._all,
+        }))
+        .sort((a, b) => b.count - a.count),
+      alerts: alerts.map((alert) => ({
+        id: alert.id,
+        createdAt: alert.createdAt,
+        updatedAt: alert.updatedAt,
+        type: alert.type,
+        typeLabel: this.ownerAlertTypeLabel(alert.type),
+        severity: alert.severity,
+        severityLabel: this.ownerAlertSeverityLabel(alert.severity),
+        title: alert.title,
+        message: alert.message,
+        isRead: alert.isRead,
+        readAt: alert.readAt,
+        userId: alert.userId,
+        shiftId: alert.shiftId,
+        bookingId: alert.bookingId,
+        clientId: alert.clientId,
+        auditEventId: alert.auditEventId,
+        payload: alert.payload ?? null,
+      })),
+    };
+  }
+
+  async markOwnerAlertRead(id: string) {
+    const alertId = (id ?? '').trim();
+    if (!alertId) {
+      throw new BadRequestException('id обязателен.');
+    }
+
+    const location = await this.getLocation();
+
+    const existing = await this.prisma.ownerAlert.findFirst({
+      where: {
+        id: alertId,
+        locationId: location.id,
+      },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Уведомление не найдено.');
+    }
+
+    const updated = await this.prisma.ownerAlert.update({
+      where: { id: alertId },
+      data: {
+        isRead: true,
+        readAt: new Date(),
+      },
+    });
+
+    return {
+      ok: true,
+      alert: {
+        id: updated.id,
+        isRead: updated.isRead,
+        readAt: updated.readAt,
+      },
+    };
+  }
+
+  private ownerAlertTypeLabel(type: string): string {
+    switch (type) {
+      case 'CASH_MISMATCH':
+        return 'Расхождение кассы';
+      case 'SUSPICIOUS_EVENT':
+        return 'Важное событие';
+      default:
+        return type;
+    }
+  }
+
+  private ownerAlertSeverityLabel(severity: string): string {
+    switch (severity) {
+      case 'CRITICAL':
+        return 'Критично';
+      case 'WARNING':
+        return 'Внимание';
+      case 'INFO':
+        return 'Информация';
+      default:
+        return severity;
+    }
+  }
+
   async changeOwnerPassword(body: { password?: string }) {
     const location = await this.getLocation();
     const owner = await this.getOwnerUserOrThrow(location.id);

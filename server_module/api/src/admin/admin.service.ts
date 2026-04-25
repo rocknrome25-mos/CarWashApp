@@ -14,6 +14,8 @@ import {
   PaymentMethodType,
   ShiftCashEventType,
   ShiftStatus,
+  OwnerAlertSeverity,
+  OwnerAlertType,
   UserRole,
   Prisma,
   WaitlistStatus,
@@ -78,6 +80,97 @@ export class AdminService {
   private _end(start: Date, durationMin: number) {
     return new Date(start.getTime() + this._minutesToMs(durationMin));
   }
+
+  private readonly ownerAlertAuditTypes: AuditType[] = [
+    AuditType.BOOKING_CHANGE_SERVICE,
+    AuditType.BOOKING_CHANGE_BODYTYPE,
+    AuditType.BOOKING_DISCOUNT,
+    AuditType.BOOKING_DELETE,
+    AuditType.WAITLIST_DELETE,
+    AuditType.BAY_OPEN,
+    AuditType.BAY_CLOSE,
+  ];
+
+  private _ownerAlertTitleForAudit(type: AuditType): string {
+    switch (type) {
+      case AuditType.BOOKING_CHANGE_SERVICE:
+        return 'Замена услуги';
+      case AuditType.BOOKING_CHANGE_BODYTYPE:
+        return 'Изменение типа кузова';
+      case AuditType.BOOKING_DISCOUNT:
+        return 'Изменение цены / скидка';
+      case AuditType.BOOKING_DELETE:
+        return 'Отмена бронирования';
+      case AuditType.WAITLIST_DELETE:
+        return 'Отмена waitlist';
+      case AuditType.BAY_OPEN:
+        return 'Открытие поста';
+      case AuditType.BAY_CLOSE:
+        return 'Закрытие поста';
+      default:
+        return 'Важное событие';
+    }
+  }
+
+  private _ownerAlertMessageForAudit(event: {
+    type: AuditType;
+    reason?: string | null;
+    shiftId?: string | null;
+    bookingId?: string | null;
+  }): string {
+    const title = this._ownerAlertTitleForAudit(event.type);
+    const reason = (event.reason ?? '').trim();
+
+    if (reason && reason !== event.type && !/^[A-Z0-9_]+$/.test(reason)) {
+      return `${title}. Причина: ${reason}`;
+    }
+
+    return title;
+  }
+
+  private async _createOwnerAlertFromAudit(
+    db: any,
+    event: {
+      id: string;
+      type: AuditType;
+      locationId?: string | null;
+      userId?: string | null;
+      shiftId?: string | null;
+      bookingId?: string | null;
+      clientId?: string | null;
+      reason?: string | null;
+      payload?: unknown;
+    },
+  ) {
+    if (!event.locationId) return;
+    if (!this.ownerAlertAuditTypes.includes(event.type)) return;
+
+    // В текущей модели BOOKING_DELETE также используется для удаления фото.
+    // Это не уведомление владельцу о бизнес-событии, поэтому не создаём alert.
+    if (event.type === AuditType.BOOKING_DELETE && event.reason === 'BOOKING_PHOTO_DELETE') {
+      return;
+    }
+
+    await db.ownerAlert.create({
+      data: {
+        locationId: event.locationId,
+        type: OwnerAlertType.SUSPICIOUS_EVENT,
+        severity:
+          event.type === AuditType.BOOKING_DELETE || event.type === AuditType.BAY_CLOSE
+            ? OwnerAlertSeverity.WARNING
+            : OwnerAlertSeverity.INFO,
+        title: this._ownerAlertTitleForAudit(event.type),
+        message: this._ownerAlertMessageForAudit(event),
+        userId: event.userId ?? undefined,
+        shiftId: event.shiftId ?? undefined,
+        bookingId: event.bookingId ?? undefined,
+        clientId: event.clientId ?? undefined,
+        auditEventId: event.id,
+        payload: (event.payload ?? null) as Prisma.InputJsonValue,
+      },
+    });
+  }
+
 
   private _overlaps(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date) {
     return aStart < bEnd && bStart < aEnd;
@@ -1024,7 +1117,7 @@ export class AdminService {
   }
 
   async cashClose(userId: string, shiftId: string, dto: CloseCashDto) {
-    const { shift } = await this._requireActiveShift(userId, shiftId);
+    const { user, shift } = await this._requireActiveShift(userId, shiftId);
     await this._requireFeature(shift.locationId, F_CASH);
 
     if (dto.handoverRub + dto.keepRub !== dto.countedRub) {
@@ -1038,6 +1131,11 @@ export class AdminService {
     if (exists) throw new ConflictException('CLOSE_COUNT already exists for this shift');
 
     const note = this._normNote(dto.note);
+    const expected = await this.cashExpected(userId, shiftId);
+    const countedRub = Math.trunc(dto.countedRub);
+    const handoverRub = Math.trunc(dto.handoverRub);
+    const keepRub = Math.trunc(dto.keepRub);
+    const cashDifferenceRub = countedRub - expected.expectedRub;
 
     await this.prisma.$transaction(async (tx) => {
       await tx.shiftCashEvent.create({
@@ -1046,7 +1144,7 @@ export class AdminService {
           locationId: shift.locationId,
           adminId: shift.adminId,
           type: ShiftCashEventType.CLOSE_COUNT,
-          amountRub: Math.trunc(dto.countedRub),
+          amountRub: countedRub,
           note,
         },
       });
@@ -1056,7 +1154,7 @@ export class AdminService {
           locationId: shift.locationId,
           adminId: shift.adminId,
           type: ShiftCashEventType.HANDOVER,
-          amountRub: Math.trunc(dto.handoverRub),
+          amountRub: handoverRub,
           note,
         },
       });
@@ -1066,10 +1164,33 @@ export class AdminService {
           locationId: shift.locationId,
           adminId: shift.adminId,
           type: ShiftCashEventType.KEEP_IN_DRAWER,
-          amountRub: Math.trunc(dto.keepRub),
+          amountRub: keepRub,
           note,
         },
       });
+
+      if (cashDifferenceRub !== 0) {
+        await tx.ownerAlert.create({
+          data: {
+            locationId: shift.locationId,
+            type: OwnerAlertType.CASH_MISMATCH,
+            severity: OwnerAlertSeverity.CRITICAL,
+            title: 'Расхождение кассы',
+            message: `Ожидалось ₽ ${expected.expectedRub}, посчитано ₽ ${countedRub}. Разница: ₽ ${cashDifferenceRub}.`,
+            userId: user.id,
+            shiftId: shift.id,
+            payload: {
+              expectedRub: expected.expectedRub,
+              countedRub,
+              differenceRub: cashDifferenceRub,
+              handoverRub,
+              keepRub,
+              breakdown: expected.breakdown,
+              note,
+            },
+          },
+        });
+      }
     });
 
     return { ok: true };
@@ -1252,7 +1373,7 @@ export class AdminService {
       select: { id: true, locationId: true, bayId: true, discountRub: true, discountNote: true },
     });
 
-    await this.prisma.auditEvent.create({
+    const audit = await this.prisma.auditEvent.create({
       data: {
         type: AuditType.BOOKING_DISCOUNT,
         locationId: shift.locationId,
@@ -1264,6 +1385,7 @@ export class AdminService {
         payload: { oldDiscountRub: oldDiscount, newDiscountRub: discountRub },
       },
     });
+    await this._createOwnerAlertFromAudit(this.prisma, audit);
 
     this.ws.emitBookingChanged(updated.locationId, updated.bayId ?? 1);
     return updated;
@@ -1331,7 +1453,7 @@ export class AdminService {
       },
     });
 
-    await this.prisma.auditEvent.create({
+    const audit = await this.prisma.auditEvent.create({
       data: {
         type: isActive ? AuditType.BAY_OPEN : AuditType.BAY_CLOSE,
         locationId: shift.locationId,
@@ -1341,6 +1463,7 @@ export class AdminService {
         payload: { bayNumber: n, isActive },
       },
     });
+    await this._createOwnerAlertFromAudit(this.prisma, audit);
 
     this.ws.emitBookingChanged(shift.locationId, n);
     return updated;
@@ -1422,7 +1545,7 @@ export class AdminService {
       select: { id: true, status: true, reason: true, updatedAt: true },
     });
 
-    await this.prisma.auditEvent.create({
+    const audit = await this.prisma.auditEvent.create({
       data: {
         type: AuditType.WAITLIST_DELETE,
         locationId: shift.locationId,
@@ -1442,6 +1565,7 @@ export class AdminService {
         },
       },
     });
+    await this._createOwnerAlertFromAudit(this.prisma, audit);
 
     this.ws.emitBookingChanged(shift.locationId, 1);
     return { ok: true, waitlistId: wl.id };
@@ -1749,7 +1873,7 @@ export class AdminService {
     await this.prisma.bookingPhoto.delete({ where: { id: photo.id } });
     await this._tryDeleteUploadedFile(photo.url, booking.id);
 
-    await this.prisma.auditEvent.create({
+    const audit = await this.prisma.auditEvent.create({
       data: {
         type: AuditType.BOOKING_DELETE,
         locationId: shift.locationId,
@@ -1760,6 +1884,7 @@ export class AdminService {
         payload: { photoId: photo.id, url: photo.url, kind: String(photo.kind) },
       },
     });
+    await this._createOwnerAlertFromAudit(this.prisma, audit);
 
     this.ws.emitBookingChanged(booking.locationId, booking.bayId ?? 1);
     return { ok: true, deletedPhotoId: photo.id };

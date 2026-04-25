@@ -117,17 +117,9 @@ class OwnerApiClient {
     final safeType = (type ?? '').trim();
     final safeUserId = (userId ?? '').trim();
 
-    if (safeType.isNotEmpty) {
-      query['type'] = safeType;
-    }
-
-    if (safeUserId.isNotEmpty) {
-      query['userId'] = safeUserId;
-    }
-
-    if (limit != null && limit > 0) {
-      query['limit'] = '$limit';
-    }
+    if (safeType.isNotEmpty) query['type'] = safeType;
+    if (safeUserId.isNotEmpty) query['userId'] = safeUserId;
+    if (limit != null && limit > 0) query['limit'] = '$limit';
 
     final res = await http
         .get(_u('/owner/suspicious-events', query))
@@ -163,6 +155,55 @@ class OwnerApiClient {
     final decoded = jsonDecode(res.body);
     if (decoded is! Map<String, dynamic>) {
       throw Exception('Owner employee analytics response is not an object');
+    }
+
+    return decoded;
+  }
+
+  Future<Map<String, dynamic>> getOwnerAlerts({
+    String period = 'month',
+    bool unreadOnly = false,
+    int limit = 20,
+  }) async {
+    final res = await http
+        .get(
+          _u('/owner/alerts', {
+            'period': period,
+            'unreadOnly': unreadOnly ? 'true' : 'false',
+            'limit': '$limit',
+          }),
+        )
+        .timeout(_timeout);
+
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw Exception('Owner alerts request failed: ${res.statusCode}');
+    }
+
+    final decoded = jsonDecode(res.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw Exception('Owner alerts response is not an object');
+    }
+
+    return decoded;
+  }
+
+  Future<Map<String, dynamic>> markOwnerAlertRead(String alertId) async {
+    final safeId = alertId.trim();
+    if (safeId.isEmpty) {
+      throw Exception('Alert id is empty');
+    }
+
+    final res = await http
+        .post(_u('/owner/alerts/$safeId/read'))
+        .timeout(_timeout);
+
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw Exception('Mark alert read failed: ${res.statusCode}');
+    }
+
+    final decoded = jsonDecode(res.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw Exception('Mark alert read response is not an object');
     }
 
     return decoded;

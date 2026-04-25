@@ -83,6 +83,17 @@ enum ShiftCashEventType {
   KEEP_IN_DRAWER
 }
 
+enum OwnerAlertType {
+  CASH_MISMATCH
+  SUSPICIOUS_EVENT
+}
+
+enum OwnerAlertSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
 enum BookingPhotoKind {
   BEFORE
   AFTER
@@ -189,6 +200,7 @@ model Location {
 
   cashEvents       ShiftCashEvent[]
   waitlistRequests WaitlistRequest[]
+  ownerAlerts      OwnerAlert[]
 
   @@index([createdAt])
   @@index([tenantId])
@@ -672,6 +684,41 @@ model AuditEvent {
   @@index([shiftId])
   @@index([bookingId])
   @@index([clientId])
+}
+
+model OwnerAlert {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  locationId String
+  location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  type     OwnerAlertType
+  severity OwnerAlertSeverity @default(WARNING)
+
+  title   String
+  message String
+
+  userId       String?
+  shiftId      String?
+  bookingId    String?
+  clientId     String?
+  auditEventId String?
+
+  payload Json?
+
+  isRead Boolean   @default(false)
+  readAt DateTime?
+
+  @@index([locationId, createdAt])
+  @@index([locationId, isRead])
+  @@index([type])
+  @@index([severity])
+  @@index([userId])
+  @@index([shiftId])
+  @@index([bookingId])
+  @@index([auditEventId])
 }
 
 enum WaitlistStatus {

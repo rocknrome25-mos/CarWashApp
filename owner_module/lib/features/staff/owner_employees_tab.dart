@@ -597,10 +597,10 @@ class _EmployeeCard extends StatelessWidget {
                       ),
                       if (employee.mustChangePassword) ...[
                         const SizedBox(height: 8),
-                        _InlineChip(
+                        const _InlineChip(
                           text: 'Требуется смена пароля',
-                          background: const Color(0xFFFEF3C7),
-                          foreground: const Color(0xFF92400E),
+                          background: Color(0xFFFEF3C7),
+                          foreground: Color(0xFF92400E),
                         ),
                       ],
                     ],

@@ -1,8 +1,11 @@
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 
 import '../../core/api/owner_api_client.dart';
+import '../../core/config/app_config.dart';
 import 'widgets/owner_data_card.dart';
 import 'widgets/owner_info_tile.dart';
 import 'widgets/owner_legend_dot.dart';
@@ -24,6 +27,7 @@ class _OwnerDashboardTabState extends State<OwnerDashboardTab> {
   late Future<Map<String, dynamic>> _summaryFuture;
   late Future<Map<String, dynamic>> _chartFuture;
   late Future<Map<String, dynamic>> _financeFuture;
+  late Future<Map<String, dynamic>> _alertsFuture;
   late Future<Map<String, dynamic>> _suspiciousFuture;
 
   @override
@@ -36,7 +40,27 @@ class _OwnerDashboardTabState extends State<OwnerDashboardTab> {
     _summaryFuture = _api.getOwnerSummary(period: _period.apiValue);
     _chartFuture = _api.getOwnerChart(period: _period.apiValue);
     _financeFuture = _api.getOwnerFinance(period: _period.apiValue);
+    _alertsFuture = _loadOwnerAlerts();
     _suspiciousFuture = _api.getOwnerSuspiciousEvents(period: _period.apiValue);
+  }
+
+  Future<Map<String, dynamic>> _loadOwnerAlerts() async {
+    final uri = Uri.parse(
+      '${AppConfig.defaultBaseUrl}/owner/alerts?period=${_period.apiValue}&limit=20',
+    );
+
+    final response = await http.get(uri).timeout(const Duration(seconds: 20));
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception('Owner alerts request failed: ${response.statusCode}');
+    }
+
+    final decoded = jsonDecode(response.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw Exception('Owner alerts response is invalid');
+    }
+
+    return decoded;
   }
 
   void _changePeriod(OwnerSummaryPeriod value) {
@@ -52,6 +76,7 @@ class _OwnerDashboardTabState extends State<OwnerDashboardTab> {
       _summaryFuture,
       _chartFuture,
       _financeFuture,
+      _alertsFuture,
       _suspiciousFuture,
     ]);
   }
@@ -108,6 +133,17 @@ class _OwnerDashboardTabState extends State<OwnerDashboardTab> {
                   title: 'Финансовая сводка',
                   snapshot: snapshot,
                   childBuilder: (data) => _OwnerFinanceSection(data: data),
+                );
+              },
+            ),
+            const SizedBox(height: 12),
+            FutureBuilder<Map<String, dynamic>>(
+              future: _alertsFuture,
+              builder: (context, snapshot) {
+                return OwnerDataCard(
+                  title: 'Уведомления владельцу',
+                  snapshot: snapshot,
+                  childBuilder: (data) => _OwnerAlertsSection(data: data),
                 );
               },
             ),
@@ -716,6 +752,159 @@ class _OwnerFinanceSection extends StatelessWidget {
           ),
         ],
       ],
+    );
+  }
+}
+
+class _OwnerAlertsSection extends StatelessWidget {
+  final Map<String, dynamic> data;
+
+  const _OwnerAlertsSection({required this.data});
+
+  int _intValue(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return 0;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    final totals = Map<String, dynamic>.from(
+      (data['totals'] as Map?) ?? const {},
+    );
+    final alerts = ((data['alerts'] as List?) ?? const [])
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+
+    final unreadTotal = _intValue(totals['unreadTotal']);
+    final criticalUnreadTotal = _intValue(totals['criticalUnreadTotal']);
+
+    if (alerts.isEmpty) {
+      return const Text('Нет уведомлений за выбранный период');
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: OwnerInfoTile(
+                title: 'Новых',
+                value: '$unreadTotal',
+                subtitle: 'Непрочитанных',
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: OwnerInfoTile(
+                title: 'Критичных',
+                value: '$criticalUnreadTotal',
+                subtitle: 'Требуют внимания',
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 18),
+        Text('Последние уведомления', style: theme.textTheme.titleMedium),
+        const SizedBox(height: 10),
+        ...alerts.take(10).map((alert) => _OwnerAlertCard(alert: alert)),
+      ],
+    );
+  }
+}
+
+class _OwnerAlertCard extends StatelessWidget {
+  final Map<String, dynamic> alert;
+
+  const _OwnerAlertCard({required this.alert});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    final title = (alert['title'] ?? 'Уведомление').toString();
+    final message = (alert['message'] ?? '').toString();
+    final severity = (alert['severity'] ?? '').toString();
+    final severityLabel = (alert['severityLabel'] ?? severity).toString();
+    final createdAt = _formatDateTime((alert['createdAt'] ?? '').toString());
+    final isRead = alert['isRead'] == true;
+
+    final Color background;
+    final Color border;
+
+    if (severity == 'CRITICAL') {
+      background = const Color(0xFFFEF2F2);
+      border = const Color(0xFFFCA5A5);
+    } else if (severity == 'WARNING') {
+      background = const Color(0xFFFFFBEB);
+      border = const Color(0xFFFCD34D);
+    } else {
+      background = const Color(0xFFF8FAFC);
+      border = const Color(0xFFE5E7EB);
+    }
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(child: Text(title, style: theme.textTheme.titleSmall)),
+              const SizedBox(width: 8),
+              _AlertBadge(text: severityLabel, isRead: isRead),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            createdAt,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: const Color(0xFF6B7280),
+            ),
+          ),
+          if (message.trim().isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(message, style: theme.textTheme.bodyMedium),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _AlertBadge extends StatelessWidget {
+  final String text;
+  final bool isRead;
+
+  const _AlertBadge({required this.text, required this.isRead});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: isRead ? const Color(0xFFE5E7EB) : const Color(0xFF111827),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        isRead ? 'Прочитано' : text,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
     );
   }
 }

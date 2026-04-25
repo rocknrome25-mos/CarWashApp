@@ -28,6 +28,24 @@ export class OwnerController {
     return this.ownerService.getFinance(period);
   }
 
+  @Get('alerts')
+  getOwnerAlerts(
+    @Query('period') period?: string,
+    @Query('unreadOnly') unreadOnly?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.ownerService.getOwnerAlerts({
+      period,
+      unreadOnly,
+      limit,
+    });
+  }
+
+  @Post('alerts/:id/read')
+  markOwnerAlertRead(@Param('id') id: string) {
+    return this.ownerService.markOwnerAlertRead(id);
+  }
+
   @Get('suspicious-events')
   getSuspiciousEvents(
     @Query('period') period?: string,
