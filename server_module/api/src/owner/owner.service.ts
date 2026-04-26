@@ -3,7 +3,7 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
-} from '@nestjs/common';
+} from "@nestjs/common";
 import {
   AuditType,
   BookingStatus,
@@ -13,12 +13,12 @@ import {
   ServiceImageKey,
   ServiceKind,
   ServiceLaborCategory,
-} from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
-import { promisify } from 'node:util';
-import { randomBytes, scrypt as scryptCallback } from 'node:crypto';
+} from "@prisma/client";
+import { PrismaService } from "../prisma/prisma.service";
+import { promisify } from "node:util";
+import { randomBytes, scrypt as scryptCallback } from "node:crypto";
 
-type Period = 'day' | 'month' | 'year';
+type Period = "day" | "month" | "year";
 
 const scryptAsync = promisify(scryptCallback);
 
@@ -76,13 +76,13 @@ type CompensationSettingsConfig = {
 export class OwnerService {
   constructor(private readonly prisma: PrismaService) {}
 
-  private readonly locationName = 'ЖК Рассказово';
+  private readonly locationName = "ЖК Рассказово";
 
   private parsePeriod(raw?: string): Period {
-    if (raw === 'day' || raw === 'month' || raw === 'year') {
+    if (raw === "day" || raw === "month" || raw === "year") {
       return raw;
     }
-    return 'month';
+    return "month";
   }
 
   private parsePositiveLimit(raw?: string, fallback = 50, max = 200): number {
@@ -132,14 +132,14 @@ export class OwnerService {
   private getRange(period: Period) {
     const now = new Date();
 
-    if (period === 'day') {
+    if (period === "day") {
       const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       const end = new Date(start);
       end.setDate(end.getDate() + 1);
       return { start, end };
     }
 
-    if (period === 'month') {
+    if (period === "month") {
       const start = new Date(now.getFullYear(), now.getMonth(), 1);
       const end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
       return { start, end };
@@ -161,11 +161,11 @@ export class OwnerService {
   ): number {
     if (monthlySalaryRub <= 0) return 0;
 
-    if (period === 'month') {
+    if (period === "month") {
       return monthlySalaryRub;
     }
 
-    if (period === 'year') {
+    if (period === "year") {
       return monthlySalaryRub * 12;
     }
 
@@ -187,13 +187,13 @@ export class OwnerService {
     key: AuditType;
     label: string;
   }> = [
-    { key: AuditType.BOOKING_CHANGE_SERVICE, label: 'Замена услуги' },
-    { key: AuditType.BOOKING_DISCOUNT, label: 'Изменение цены / скидка' },
-    { key: AuditType.BOOKING_CHANGE_BODYTYPE, label: 'Изменение типа кузова' },
-    { key: AuditType.BOOKING_DELETE, label: 'Отмена бронирования' },
-    { key: AuditType.BAY_OPEN, label: 'Открытие поста' },
-    { key: AuditType.BAY_CLOSE, label: 'Закрытие поста' },
-    { key: AuditType.WAITLIST_DELETE, label: 'Отмена waitlist' },
+    { key: AuditType.BOOKING_CHANGE_SERVICE, label: "Замена услуги" },
+    { key: AuditType.BOOKING_DISCOUNT, label: "Изменение цены / скидка" },
+    { key: AuditType.BOOKING_CHANGE_BODYTYPE, label: "Изменение типа кузова" },
+    { key: AuditType.BOOKING_DELETE, label: "Отмена бронирования" },
+    { key: AuditType.BAY_OPEN, label: "Открытие поста" },
+    { key: AuditType.BAY_CLOSE, label: "Закрытие поста" },
+    { key: AuditType.WAITLIST_DELETE, label: "Отмена waitlist" },
   ];
 
   private auditTypeLabel(type: AuditType | string): string {
@@ -204,13 +204,13 @@ export class OwnerService {
   private normalizePhone(raw: string): string {
     const value = raw.trim();
     if (!value) {
-      throw new BadRequestException('Телефон обязателен.');
+      throw new BadRequestException("Телефон обязателен.");
     }
 
     const allowed = /^\+?[0-9]{10,15}$/;
     if (!allowed.test(value)) {
       throw new BadRequestException(
-        'Телефон должен содержать только цифры и при необходимости знак + в начале.',
+        "Телефон должен содержать только цифры и при необходимости знак + в начале.",
       );
     }
 
@@ -218,43 +218,43 @@ export class OwnerService {
   }
 
   private normalizeOptionalPhone(raw?: string): string {
-    const value = (raw ?? '').trim();
-    if (!value) return '';
+    const value = (raw ?? "").trim();
+    if (!value) return "";
     return this.normalizePhone(value);
   }
 
   private normalizeTelegramHandle(raw?: string): string {
-    const value = (raw ?? '').trim();
-    if (!value) return '';
-    return value.startsWith('@') ? value : `@${value}`;
+    const value = (raw ?? "").trim();
+    if (!value) return "";
+    return value.startsWith("@") ? value : `@${value}`;
   }
 
   private normalizeName(raw: string): string {
     const value = raw.trim();
     if (!value) {
-      throw new BadRequestException('Имя обязательно.');
+      throw new BadRequestException("Имя обязательно.");
     }
     if (value.length < 2) {
-      throw new BadRequestException('Имя слишком короткое.');
+      throw new BadRequestException("Имя слишком короткое.");
     }
     if (value.length > 100) {
-      throw new BadRequestException('Имя слишком длинное.');
+      throw new BadRequestException("Имя слишком длинное.");
     }
     return value;
   }
 
   private normalizeDescription(raw?: string): string {
-    const value = (raw ?? '').trim();
+    const value = (raw ?? "").trim();
     if (value.length > 1000) {
-      throw new BadRequestException('Описание слишком длинное.');
+      throw new BadRequestException("Описание слишком длинное.");
     }
     return value;
   }
 
   private normalizeOptionalText(raw?: string, max = 2000): string {
-    const value = (raw ?? '').trim();
+    const value = (raw ?? "").trim();
     if (value.length > max) {
-      throw new BadRequestException('Текст слишком длинный.');
+      throw new BadRequestException("Текст слишком длинный.");
     }
     return value;
   }
@@ -285,33 +285,33 @@ export class OwnerService {
     return Math.round(value);
   }
 
-  private parseEmployeeRole(raw?: string): 'ADMIN' | 'WASHER' {
-    if (raw === 'ADMIN') return 'ADMIN';
-    if (raw === 'WASHER') return 'WASHER';
+  private parseEmployeeRole(raw?: string): "ADMIN" | "WASHER" {
+    if (raw === "ADMIN") return "ADMIN";
+    if (raw === "WASHER") return "WASHER";
 
-    throw new BadRequestException('Разрешены только роли ADMIN или WASHER.');
+    throw new BadRequestException("Разрешены только роли ADMIN или WASHER.");
   }
 
   private parseServiceKind(raw?: string): ServiceKind {
-    if (raw === 'BASE') return ServiceKind.BASE;
-    if (raw === 'ADDON') return ServiceKind.ADDON;
+    if (raw === "BASE") return ServiceKind.BASE;
+    if (raw === "ADDON") return ServiceKind.ADDON;
 
-    throw new BadRequestException('Разрешены только kind BASE или ADDON.');
+    throw new BadRequestException("Разрешены только kind BASE или ADDON.");
   }
 
   private parseServiceImageKey(raw?: string): ServiceImageKey {
-    switch ((raw ?? '').trim().toUpperCase()) {
-      case 'EXTERIOR_WASH':
+    switch ((raw ?? "").trim().toUpperCase()) {
+      case "EXTERIOR_WASH":
         return ServiceImageKey.EXTERIOR_WASH;
-      case 'FULL_WASH':
+      case "FULL_WASH":
         return ServiceImageKey.FULL_WASH;
-      case 'WAX':
+      case "WAX":
         return ServiceImageKey.WAX;
-      case 'TIRES':
+      case "TIRES":
         return ServiceImageKey.TIRES;
-      case 'INTERIOR':
+      case "INTERIOR":
         return ServiceImageKey.INTERIOR;
-      case 'LEATHER_CARE':
+      case "LEATHER_CARE":
         return ServiceImageKey.LEATHER_CARE;
       default:
         return ServiceImageKey.EXTERIOR_WASH;
@@ -321,10 +321,10 @@ export class OwnerService {
   private normalizePriceRub(raw: unknown): number {
     const value = Number(raw);
     if (!Number.isFinite(value)) {
-      throw new BadRequestException('priceRub должен быть числом.');
+      throw new BadRequestException("priceRub должен быть числом.");
     }
     if (value < 0) {
-      throw new BadRequestException('Цена не может быть отрицательной.');
+      throw new BadRequestException("Цена не может быть отрицательной.");
     }
     return Math.round(value);
   }
@@ -332,21 +332,21 @@ export class OwnerService {
   private normalizeDurationMin(raw: unknown): number {
     const value = Number(raw);
     if (!Number.isFinite(value)) {
-      throw new BadRequestException('durationMin должен быть числом.');
+      throw new BadRequestException("durationMin должен быть числом.");
     }
     if (value <= 0) {
-      throw new BadRequestException('durationMin должен быть > 0.');
+      throw new BadRequestException("durationMin должен быть > 0.");
     }
     return Math.round(value);
   }
 
   private normalizeBodyType(raw?: string): string {
-    const value = (raw ?? '').trim();
+    const value = (raw ?? "").trim();
     if (!value) {
-      throw new BadRequestException('bodyType обязателен.');
+      throw new BadRequestException("bodyType обязателен.");
     }
     if (value.length > 50) {
-      throw new BadRequestException('bodyType слишком длинный.');
+      throw new BadRequestException("bodyType слишком длинный.");
     }
     return value;
   }
@@ -383,38 +383,38 @@ export class OwnerService {
   private normalizeIncludedAddonIds(raw?: string[]): string[] {
     const items = Array.isArray(raw) ? raw : [];
     const cleaned = items
-      .map((x) => (x ?? '').trim())
+      .map((x) => (x ?? "").trim())
       .filter((x) => x.length > 0);
 
     return Array.from(new Set(cleaned));
   }
 
   private validatePassword(raw?: string): string {
-    const value = (raw ?? '').trim();
+    const value = (raw ?? "").trim();
 
     if (!value) {
-      throw new BadRequestException('Пароль обязателен.');
+      throw new BadRequestException("Пароль обязателен.");
     }
 
     if (value.length < 6) {
-      throw new BadRequestException('Пароль должен быть не короче 6 символов.');
+      throw new BadRequestException("Пароль должен быть не короче 6 символов.");
     }
 
     if (value.length > 128) {
-      throw new BadRequestException('Пароль слишком длинный.');
+      throw new BadRequestException("Пароль слишком длинный.");
     }
 
     return value;
   }
 
   private async hashPassword(password: string): Promise<string> {
-    const salt = randomBytes(16).toString('hex');
+    const salt = randomBytes(16).toString("hex");
     const derivedKey = (await scryptAsync(password, salt, 64)) as Buffer;
-    return `scrypt$${salt}$${derivedKey.toString('hex')}`;
+    return `scrypt$${salt}$${derivedKey.toString("hex")}`;
   }
 
   private asObject(value: unknown): Record<string, any> {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
       return {};
     }
     return value as Record<string, any>;
@@ -422,13 +422,13 @@ export class OwnerService {
 
   private buildDefaultContacts(location: SettingsLocation): ContactsConfig {
     return {
-      title: (location.name ?? '').trim(),
-      address: (location.address ?? '').trim(),
-      phone: (location.phone ?? '').trim(),
-      telegram: this.normalizeTelegramHandle(location.telegram ?? ''),
-      whatsapp: (location.whatsapp ?? '').trim(),
-      navigatorLink: (location.navigatorLink ?? '').trim(),
-      mapsLink: (location.navigatorLink ?? '').trim(),
+      title: (location.name ?? "").trim(),
+      address: (location.address ?? "").trim(),
+      phone: (location.phone ?? "").trim(),
+      telegram: this.normalizeTelegramHandle(location.telegram ?? ""),
+      whatsapp: (location.whatsapp ?? "").trim(),
+      navigatorLink: (location.navigatorLink ?? "").trim(),
+      mapsLink: (location.navigatorLink ?? "").trim(),
     };
   }
 
@@ -439,30 +439,36 @@ export class OwnerService {
     const obj = this.asObject(raw);
 
     const title = this.normalizeOptionalText(
-      typeof obj.title === 'string' ? obj.title : defaults.title ?? '',
+      typeof obj.title === "string" ? obj.title : (defaults.title ?? ""),
       150,
     );
     const address = this.normalizeOptionalText(
-      typeof obj.address === 'string' ? obj.address : defaults.address ?? '',
+      typeof obj.address === "string" ? obj.address : (defaults.address ?? ""),
       300,
     );
     const phone = this.normalizeOptionalPhone(
-      typeof obj.phone === 'string' ? obj.phone : defaults.phone ?? '',
+      typeof obj.phone === "string" ? obj.phone : (defaults.phone ?? ""),
     );
     const telegram = this.normalizeTelegramHandle(
-      typeof obj.telegram === 'string' ? obj.telegram : defaults.telegram ?? '',
+      typeof obj.telegram === "string"
+        ? obj.telegram
+        : (defaults.telegram ?? ""),
     );
     const whatsapp = this.normalizeOptionalPhone(
-      typeof obj.whatsapp === 'string' ? obj.whatsapp : defaults.whatsapp ?? '',
+      typeof obj.whatsapp === "string"
+        ? obj.whatsapp
+        : (defaults.whatsapp ?? ""),
     );
     const navigatorLink = this.normalizeOptionalText(
-      typeof obj.navigatorLink === 'string'
+      typeof obj.navigatorLink === "string"
         ? obj.navigatorLink
-        : defaults.navigatorLink ?? '',
+        : (defaults.navigatorLink ?? ""),
       500,
     );
     const mapsLink = this.normalizeOptionalText(
-      typeof obj.mapsLink === 'string' ? obj.mapsLink : defaults.mapsLink ?? '',
+      typeof obj.mapsLink === "string"
+        ? obj.mapsLink
+        : (defaults.mapsLink ?? ""),
       500,
     );
 
@@ -483,9 +489,9 @@ export class OwnerService {
     return {
       communication: {
         washStartTemplate:
-          'Ваш автомобиль принят в мойку. Мы сообщим, когда работа будет завершена.',
+          "Ваш автомобиль принят в мойку. Мы сообщим, когда работа будет завершена.",
         washFinishTemplate:
-          'Мойка завершена. Ваш автомобиль готов к выдаче. Спасибо, что выбрали нас.',
+          "Мойка завершена. Ваш автомобиль готов к выдаче. Спасибо, что выбрали нас.",
         campaigns: {
           promotionsEnabled: false,
           discountsEnabled: false,
@@ -494,8 +500,8 @@ export class OwnerService {
       },
       monitoring: {
         suspiciousAuditTypes: [...this.suspiciousAuditTypes],
-        notifyPhone: contacts.phone ?? '',
-        notifyTelegram: contacts.telegram ?? '',
+        notifyPhone: contacts.phone ?? "",
+        notifyTelegram: contacts.telegram ?? "",
         notifyPush: true,
       },
     };
@@ -517,7 +523,7 @@ export class OwnerService {
     const items = Array.isArray(raw) ? raw : [];
 
     const normalized = items
-      .map((x) => (x ?? '').toString().trim())
+      .map((x) => (x ?? "").toString().trim())
       .filter((x) => x.length > 0)
       .map((x) => x as AuditType)
       .filter((x) => allowed.has(x));
@@ -543,28 +549,28 @@ export class OwnerService {
     return {
       communication: {
         washStartTemplate: this.normalizeOptionalText(
-          typeof communication.washStartTemplate === 'string'
+          typeof communication.washStartTemplate === "string"
             ? communication.washStartTemplate
             : defaults.communication.washStartTemplate,
           1000,
         ),
         washFinishTemplate: this.normalizeOptionalText(
-          typeof communication.washFinishTemplate === 'string'
+          typeof communication.washFinishTemplate === "string"
             ? communication.washFinishTemplate
             : defaults.communication.washFinishTemplate,
           1000,
         ),
         campaigns: {
           promotionsEnabled:
-            typeof campaigns.promotionsEnabled === 'boolean'
+            typeof campaigns.promotionsEnabled === "boolean"
               ? campaigns.promotionsEnabled
               : defaults.communication.campaigns.promotionsEnabled,
           discountsEnabled:
-            typeof campaigns.discountsEnabled === 'boolean'
+            typeof campaigns.discountsEnabled === "boolean"
               ? campaigns.discountsEnabled
               : defaults.communication.campaigns.discountsEnabled,
           holidayGreetingsEnabled:
-            typeof campaigns.holidayGreetingsEnabled === 'boolean'
+            typeof campaigns.holidayGreetingsEnabled === "boolean"
               ? campaigns.holidayGreetingsEnabled
               : defaults.communication.campaigns.holidayGreetingsEnabled,
         },
@@ -575,17 +581,17 @@ export class OwnerService {
             ? suspiciousAuditTypes
             : [...defaults.monitoring.suspiciousAuditTypes],
         notifyPhone: this.normalizeOptionalPhone(
-          typeof monitoring.notifyPhone === 'string'
+          typeof monitoring.notifyPhone === "string"
             ? monitoring.notifyPhone
             : defaults.monitoring.notifyPhone,
         ),
         notifyTelegram: this.normalizeTelegramHandle(
-          typeof monitoring.notifyTelegram === 'string'
+          typeof monitoring.notifyTelegram === "string"
             ? monitoring.notifyTelegram
             : defaults.monitoring.notifyTelegram,
         ),
         notifyPush:
-          typeof monitoring.notifyPush === 'boolean'
+          typeof monitoring.notifyPush === "boolean"
             ? monitoring.notifyPush
             : defaults.monitoring.notifyPush,
       },
@@ -596,7 +602,7 @@ export class OwnerService {
     const features = await this.prisma.tenantFeature.findMany({
       where: {
         tenantId: location.tenantId,
-        key: { in: ['CONTACTS', 'OWNER_SETTINGS'] },
+        key: { in: ["CONTACTS", "OWNER_SETTINGS"] },
       },
       select: {
         key: true,
@@ -606,10 +612,10 @@ export class OwnerService {
     });
 
     const contactsFeature = features.find(
-      (x) => x.key === 'CONTACTS' && x.enabled === true,
+      (x) => x.key === "CONTACTS" && x.enabled === true,
     );
     const ownerFeature = features.find(
-      (x) => x.key === 'OWNER_SETTINGS' && x.enabled === true,
+      (x) => x.key === "OWNER_SETTINGS" && x.enabled === true,
     );
 
     const defaultContacts = this.buildDefaultContacts(location);
@@ -635,7 +641,7 @@ export class OwnerService {
       where: {
         id,
         locationId,
-        role: { in: ['ADMIN', 'WASHER'] },
+        role: { in: ["ADMIN", "WASHER"] },
       },
       select: {
         id: true,
@@ -651,7 +657,7 @@ export class OwnerService {
     });
 
     if (!employee) {
-      throw new NotFoundException('Сотрудник не найден.');
+      throw new NotFoundException("Сотрудник не найден.");
     }
 
     return employee;
@@ -669,7 +675,7 @@ export class OwnerService {
     });
 
     if (!service) {
-      throw new NotFoundException('Сервис не найден.');
+      throw new NotFoundException("Сервис не найден.");
     }
 
     return service;
@@ -679,7 +685,7 @@ export class OwnerService {
     const owner = await this.prisma.user.findFirst({
       where: {
         locationId,
-        role: 'OWNER',
+        role: "OWNER",
       },
       select: {
         id: true,
@@ -688,13 +694,13 @@ export class OwnerService {
         isActive: true,
       },
       orderBy: {
-        createdAt: 'asc',
+        createdAt: "asc",
       },
     });
 
     if (!owner) {
       throw new NotFoundException(
-        'OWNER пользователь для этой локации не найден.',
+        "OWNER пользователь для этой локации не найден.",
       );
     }
 
@@ -740,7 +746,7 @@ export class OwnerService {
               locationId: location.id,
             },
           },
-          phone: { not: '' },
+          phone: { not: "" },
         },
       }),
 
@@ -780,9 +786,9 @@ export class OwnerService {
       this.prisma.shift.findFirst({
         where: {
           locationId: location.id,
-          status: 'OPEN',
+          status: "OPEN",
         },
-        orderBy: { openedAt: 'desc' },
+        orderBy: { openedAt: "desc" },
         include: {
           admin: {
             select: { id: true, name: true, phone: true },
@@ -791,7 +797,7 @@ export class OwnerService {
       }),
 
       this.prisma.payment.groupBy({
-        by: ['methodType'],
+        by: ["methodType"],
         where: {
           booking: { locationId: location.id },
           paidAt: { gte: start, lt: end },
@@ -810,14 +816,14 @@ export class OwnerService {
       this.prisma.waitlistRequest.count({
         where: {
           locationId: location.id,
-          status: 'WAITING',
+          status: "WAITING",
         },
       }),
 
       this.prisma.user.count({
         where: {
           locationId: location.id,
-          role: 'ADMIN',
+          role: "ADMIN",
           isActive: true,
         },
       }),
@@ -825,13 +831,13 @@ export class OwnerService {
       this.prisma.user.count({
         where: {
           locationId: location.id,
-          role: 'WASHER',
+          role: "WASHER",
           isActive: true,
         },
       }),
 
       this.prisma.booking.groupBy({
-        by: ['serviceId'],
+        by: ["serviceId"],
         where: {
           locationId: location.id,
           dateTime: { gte: start, lt: end },
@@ -864,8 +870,8 @@ export class OwnerService {
         const meta = topServicesMeta.find((s) => s.id === row.serviceId);
         return {
           serviceId: row.serviceId,
-          name: meta?.name ?? 'Unknown service',
-          kind: meta?.kind ?? 'BASE',
+          name: meta?.name ?? "Unknown service",
+          kind: meta?.kind ?? "BASE",
           bookingsCount: row._count._all,
         };
       });
@@ -874,19 +880,21 @@ export class OwnerService {
 
     const compensationDefaults = this.getDefaultCompensationSettings();
 
-    const compensation = await this.prisma.locationCompensationSettings.findUnique({
-      where: { locationId: location.id },
-      select: {
-        washerBasePercent: true,
-        washerAddonPercent: true,
-        adminBaseSalaryRub: true,
-      },
-    });
+    const compensation =
+      await this.prisma.locationCompensationSettings.findUnique({
+        where: { locationId: location.id },
+        select: {
+          washerBasePercent: true,
+          washerAddonPercent: true,
+          adminBaseSalaryRub: true,
+        },
+      });
 
     const washerBasePercent =
       compensation?.washerBasePercent ?? compensationDefaults.washerBasePercent;
     const washerAddonPercent =
-      compensation?.washerAddonPercent ?? compensationDefaults.washerAddonPercent;
+      compensation?.washerAddonPercent ??
+      compensationDefaults.washerAddonPercent;
     const defaultAdminBaseSalaryRub =
       compensation?.adminBaseSalaryRub ??
       compensationDefaults.adminBaseSalaryRub;
@@ -894,7 +902,7 @@ export class OwnerService {
     const activeAdmins = await this.prisma.user.findMany({
       where: {
         locationId: location.id,
-        role: 'ADMIN',
+        role: "ADMIN",
         isActive: true,
       },
       select: {
@@ -1125,8 +1133,7 @@ export class OwnerService {
           ? admin.compensationProfile.adminBaseSalaryRub
           : null;
 
-      const monthlySalaryRub =
-        salaryOverride ?? defaultAdminBaseSalaryRub;
+      const monthlySalaryRub = salaryOverride ?? defaultAdminBaseSalaryRub;
 
       adminSalaryExpense += this.getAdminSalaryForPeriod(
         monthlySalaryRub,
@@ -1217,7 +1224,7 @@ export class OwnerService {
     const location = await this.getLocation();
     const now = new Date();
 
-    if (period === 'day') {
+    if (period === "day") {
       const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       const points: Array<{
         key: string;
@@ -1252,7 +1259,7 @@ export class OwnerService {
 
         points.push({
           key: `${hour}`,
-          label: hour.toString().padStart(2, '0'),
+          label: hour.toString().padStart(2, "0"),
           revenue: revenueAgg._sum.amountRub ?? 0,
           suspiciousEvents,
         });
@@ -1260,12 +1267,12 @@ export class OwnerService {
 
       return {
         period,
-        unit: 'hour',
+        unit: "hour",
         points,
       };
     }
 
-    if (period === 'month') {
+    if (period === "month") {
       const start = new Date(now.getFullYear(), now.getMonth(), 1);
       const daysInMonth = new Date(
         now.getFullYear(),
@@ -1281,11 +1288,7 @@ export class OwnerService {
       }> = [];
 
       for (let day = 1; day <= daysInMonth; day++) {
-        const slotStart = new Date(
-          start.getFullYear(),
-          start.getMonth(),
-          day,
-        );
+        const slotStart = new Date(start.getFullYear(), start.getMonth(), day);
         const slotEnd = new Date(
           start.getFullYear(),
           start.getMonth(),
@@ -1319,7 +1322,7 @@ export class OwnerService {
 
       return {
         period,
-        unit: 'day',
+        unit: "day",
         points,
       };
     }
@@ -1362,7 +1365,7 @@ export class OwnerService {
 
     return {
       period,
-      unit: 'month',
+      unit: "month",
       points,
     };
   }
@@ -1374,7 +1377,7 @@ export class OwnerService {
 
     const [paymentsByMethod, paymentsByKind] = await Promise.all([
       this.prisma.payment.groupBy({
-        by: ['methodType'],
+        by: ["methodType"],
         where: {
           booking: { locationId: location.id },
           paidAt: { gte: start, lt: end },
@@ -1384,7 +1387,7 @@ export class OwnerService {
       }),
 
       this.prisma.payment.groupBy({
-        by: ['kind'],
+        by: ["kind"],
         where: {
           booking: { locationId: location.id },
           paidAt: { gte: start, lt: end },
@@ -1436,8 +1439,7 @@ export class OwnerService {
           methods.cash.amountRub +
           methods.card.amountRub +
           methods.contract.amountRub,
-        count:
-          methods.cash.count + methods.card.count + methods.contract.count,
+        count: methods.cash.count + methods.card.count + methods.contract.count,
       },
     };
   }
@@ -1453,11 +1455,11 @@ export class OwnerService {
     const { start, end } = this.getRange(period);
     const limit = this.parsePositiveLimit(params.limit, 50, 200);
 
-    const requestedType = (params.type ?? '').trim() as AuditType;
+    const requestedType = (params.type ?? "").trim() as AuditType;
     const filterType = this.suspiciousAuditTypes.includes(requestedType)
       ? requestedType
       : undefined;
-    const filterUserId = (params.userId ?? '').trim() || undefined;
+    const filterUserId = (params.userId ?? "").trim() || undefined;
 
     const where: Prisma.AuditEventWhereInput = {
       locationId: location.id,
@@ -1469,7 +1471,7 @@ export class OwnerService {
     const [events, typeGroups, userGroups] = await Promise.all([
       this.prisma.auditEvent.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: { createdAt: "desc" },
         take: limit,
         include: {
           user: {
@@ -1483,12 +1485,12 @@ export class OwnerService {
         },
       }),
       this.prisma.auditEvent.groupBy({
-        by: ['type'],
+        by: ["type"],
         where,
         _count: { _all: true },
       }),
       this.prisma.auditEvent.groupBy({
-        by: ['userId'],
+        by: ["userId"],
         where,
         _count: { _all: true },
       }),
@@ -1524,8 +1526,8 @@ export class OwnerService {
         const user = users.find((u) => u.id === row.userId);
         return {
           userId: row.userId,
-          userName: user?.name ?? 'Система / не указан',
-          phone: user?.phone ?? '',
+          userName: user?.name ?? "Система / не указан",
+          phone: user?.phone ?? "",
           role: user?.role ?? null,
           count: row._count._all,
         };
@@ -1557,7 +1559,7 @@ export class OwnerService {
         createdAt: event.createdAt,
         type: event.type,
         typeLabel: this.auditTypeLabel(event.type),
-        reason: event.reason ?? '',
+        reason: event.reason ?? "",
         locationId: event.locationId,
         shiftId: event.shiftId,
         bookingId: event.bookingId,
@@ -1566,7 +1568,7 @@ export class OwnerService {
         user: event.user
           ? {
               id: event.user.id,
-              name: event.user.name ?? 'Без имени',
+              name: event.user.name ?? "Без имени",
               phone: event.user.phone,
               role: event.user.role,
             }
@@ -1581,7 +1583,7 @@ export class OwnerService {
     const users = await this.prisma.user.findMany({
       where: {
         locationId: location.id,
-        role: { in: ['ADMIN', 'WASHER'] },
+        role: { in: ["ADMIN", "WASHER"] },
       },
       select: {
         id: true,
@@ -1594,12 +1596,12 @@ export class OwnerService {
         lastLoginAt: true,
       },
       orderBy: {
-        createdAt: 'desc',
+        createdAt: "desc",
       },
     });
 
-    const admins = users.filter((u) => u.role === 'ADMIN');
-    const washers = users.filter((u) => u.role === 'WASHER');
+    const admins = users.filter((u) => u.role === "ADMIN");
+    const washers = users.filter((u) => u.role === "WASHER");
 
     return {
       location: {
@@ -1626,7 +1628,7 @@ export class OwnerService {
     const employees = await this.prisma.user.findMany({
       where: {
         locationId: location.id,
-        role: { in: ['ADMIN', 'WASHER'] },
+        role: { in: ["ADMIN", "WASHER"] },
       },
       select: {
         id: true,
@@ -1636,15 +1638,15 @@ export class OwnerService {
         isActive: true,
         lastLoginAt: true,
       },
-      orderBy: [{ role: 'asc' }, { name: 'asc' }],
+      orderBy: [{ role: "asc" }, { name: "asc" }],
     });
 
     const adminIds = employees
-      .filter((e) => e.role === 'ADMIN')
+      .filter((e) => e.role === "ADMIN")
       .map((e) => e.id);
 
     const washerIds = employees
-      .filter((e) => e.role === 'WASHER')
+      .filter((e) => e.role === "WASHER")
       .map((e) => e.id);
 
     const [
@@ -1661,7 +1663,7 @@ export class OwnerService {
       adminIds.length === 0
         ? []
         : this.prisma.shift.groupBy({
-            by: ['adminId'],
+            by: ["adminId"],
             where: {
               locationId: location.id,
               openedAt: { gte: start, lt: end },
@@ -1672,7 +1674,7 @@ export class OwnerService {
       adminIds.length === 0
         ? []
         : this.prisma.auditEvent.groupBy({
-            by: ['userId'],
+            by: ["userId"],
             where: {
               locationId: location.id,
               createdAt: { gte: start, lt: end },
@@ -1685,7 +1687,7 @@ export class OwnerService {
       adminIds.length === 0
         ? []
         : this.prisma.auditEvent.groupBy({
-            by: ['userId'],
+            by: ["userId"],
             where: {
               locationId: location.id,
               createdAt: { gte: start, lt: end },
@@ -1698,7 +1700,7 @@ export class OwnerService {
       adminIds.length === 0
         ? []
         : this.prisma.booking.groupBy({
-            by: ['shiftId'],
+            by: ["shiftId"],
             where: {
               locationId: location.id,
               dateTime: { gte: start, lt: end },
@@ -1938,14 +1940,13 @@ export class OwnerService {
       compensationDefaults.adminBaseSalaryRub;
 
     for (const employee of employees) {
-      if (employee.role !== 'ADMIN') continue;
+      if (employee.role !== "ADMIN") continue;
 
       const profile = adminCompensationProfiles.find(
         (x) => x.userId === employee.id,
       );
 
-      const monthlySalaryRub =
-        profile?.adminBaseSalaryRub ?? baseMonthlySalary;
+      const monthlySalaryRub = profile?.adminBaseSalaryRub ?? baseMonthlySalary;
 
       const salaryRub = this.getAdminSalaryForPeriod(
         monthlySalaryRub,
@@ -1975,8 +1976,7 @@ export class OwnerService {
       }
 
       const totalRevenue = baseRevenue + addonRevenue;
-      const totalBonus =
-        (booking.adminBaseBonusRubSnapshot ?? 0) + addonBonus;
+      const totalBonus = (booking.adminBaseBonusRubSnapshot ?? 0) + addonBonus;
 
       adminSalesRevenueRubMap.set(
         adminId,
@@ -2017,7 +2017,7 @@ export class OwnerService {
         discountGroups.find((x) => x.userId === employee.id)?._count._all ?? 0;
 
       const suspiciousActions =
-        employee.role === 'ADMIN'
+        employee.role === "ADMIN"
           ? (suspiciousGroups.find((x) => x.userId === employee.id)?._count
               ._all ?? 0)
           : 0;
@@ -2028,35 +2028,35 @@ export class OwnerService {
       const carsServiced = washerCarsServicedMap.get(employee.id) ?? 0;
 
       const salesRevenueRub =
-        employee.role === 'ADMIN'
+        employee.role === "ADMIN"
           ? (adminSalesRevenueRubMap.get(employee.id) ?? 0)
           : 0;
 
       const bonusRub =
-        employee.role === 'ADMIN'
+        employee.role === "ADMIN"
           ? (adminBonusRubMap.get(employee.id) ?? 0)
           : 0;
 
       const salaryRub =
-        employee.role === 'ADMIN'
+        employee.role === "ADMIN"
           ? (adminSalaryRubMap.get(employee.id) ?? 0)
           : 0;
 
       const earnedRub =
-        employee.role === 'ADMIN'
+        employee.role === "ADMIN"
           ? bonusRub + salaryRub
           : (washerEarnedRubMap.get(employee.id) ?? 0);
 
       return {
         id: employee.id,
-        name: employee.name ?? 'Без имени',
+        name: employee.name ?? "Без имени",
         phone: employee.phone,
         role: employee.role,
         isActive: employee.isActive,
         lastLoginAt: employee.lastLoginAt,
         stats: {
           shiftsOpened:
-            employee.role === 'WASHER' ? washerShiftsWorked : adminShiftsOpened,
+            employee.role === "WASHER" ? washerShiftsWorked : adminShiftsOpened,
           bookingsHandled,
           discountsGiven,
           suspiciousActions,
@@ -2069,8 +2069,8 @@ export class OwnerService {
       };
     });
 
-    const admins = analytics.filter((x) => x.role === 'ADMIN');
-    const washers = analytics.filter((x) => x.role === 'WASHER');
+    const admins = analytics.filter((x) => x.role === "ADMIN");
+    const washers = analytics.filter((x) => x.role === "WASHER");
 
     return {
       location: {
@@ -2098,8 +2098,8 @@ export class OwnerService {
   }) {
     const location = await this.getLocation();
 
-    const name = this.normalizeName(body.name ?? '');
-    const phone = this.normalizePhone(body.phone ?? '');
+    const name = this.normalizeName(body.name ?? "");
+    const phone = this.normalizePhone(body.phone ?? "");
     const role = this.parseEmployeeRole(body.role);
     const password = this.validatePassword(body.password);
     const passwordHash = await this.hashPassword(password);
@@ -2111,7 +2111,7 @@ export class OwnerService {
 
     if (existing) {
       throw new ConflictException(
-        'Пользователь с таким телефоном уже существует.',
+        "Пользователь с таким телефоном уже существует.",
       );
     }
 
@@ -2153,21 +2153,21 @@ export class OwnerService {
     const location = await this.getLocation();
     await this.getEmployeeOrThrow(id, location.id);
 
-    const hasName = typeof body.name === 'string';
-    const hasPhone = typeof body.phone === 'string';
+    const hasName = typeof body.name === "string";
+    const hasPhone = typeof body.phone === "string";
 
     if (!hasName && !hasPhone) {
-      throw new BadRequestException('Нужно передать name и/или phone.');
+      throw new BadRequestException("Нужно передать name и/или phone.");
     }
 
     const data: { name?: string; phone?: string } = {};
 
     if (hasName) {
-      data.name = this.normalizeName(body.name ?? '');
+      data.name = this.normalizeName(body.name ?? "");
     }
 
     if (hasPhone) {
-      const normalizedPhone = this.normalizePhone(body.phone ?? '');
+      const normalizedPhone = this.normalizePhone(body.phone ?? "");
 
       const existing = await this.prisma.user.findFirst({
         where: {
@@ -2179,7 +2179,7 @@ export class OwnerService {
 
       if (existing) {
         throw new ConflictException(
-          'Пользователь с таким телефоном уже существует.',
+          "Пользователь с таким телефоном уже существует.",
         );
       }
 
@@ -2273,14 +2273,14 @@ export class OwnerService {
   async createService(body: {
     name?: string;
     description?: string;
-    kind?: 'BASE' | 'ADDON';
+    kind?: "BASE" | "ADDON";
     imageKey?:
-      | 'EXTERIOR_WASH'
-      | 'FULL_WASH'
-      | 'WAX'
-      | 'TIRES'
-      | 'INTERIOR'
-      | 'LEATHER_CARE';
+      | "EXTERIOR_WASH"
+      | "FULL_WASH"
+      | "WAX"
+      | "TIRES"
+      | "INTERIOR"
+      | "LEATHER_CARE";
     priceRub?: number;
     durationMin?: number;
     hasBodyTypePricing?: boolean;
@@ -2293,7 +2293,7 @@ export class OwnerService {
   }) {
     const location = await this.getLocation();
 
-    const name = this.normalizeName(body.name ?? '');
+    const name = this.normalizeName(body.name ?? "");
     const description = this.normalizeDescription(body.description);
     const kind = this.parseServiceKind(body.kind);
     const imageKey = this.parseServiceImageKey(body.imageKey);
@@ -2301,18 +2301,20 @@ export class OwnerService {
     const durationMin = this.normalizeDurationMin(body.durationMin);
     const hasBodyTypePricing = body.hasBodyTypePricing === true;
     const bodyTypePrices = this.normalizeBodyTypePrices(body.bodyTypePrices);
-    const includedAddonIds = this.normalizeIncludedAddonIds(body.includedAddonIds);
+    const includedAddonIds = this.normalizeIncludedAddonIds(
+      body.includedAddonIds,
+    );
     const isPublished = body.isPublished ?? true;
 
     if (hasBodyTypePricing && bodyTypePrices.length === 0) {
       throw new BadRequestException(
-        'Если включена градация по типу кузова, нужно передать bodyTypePrices.',
+        "Если включена градация по типу кузова, нужно передать bodyTypePrices.",
       );
     }
 
     if (kind === ServiceKind.ADDON && includedAddonIds.length > 0) {
       throw new BadRequestException(
-        'includedAddonIds можно задавать только для базовой услуги.',
+        "includedAddonIds можно задавать только для базовой услуги.",
       );
     }
 
@@ -2328,7 +2330,7 @@ export class OwnerService {
 
       if (addons.length !== includedAddonIds.length) {
         throw new BadRequestException(
-          'Все includedAddonIds должны существовать в текущей локации и быть ADDON.',
+          "Все includedAddonIds должны существовать в текущей локации и быть ADDON.",
         );
       }
     }
@@ -2395,12 +2397,12 @@ export class OwnerService {
       name?: string;
       description?: string;
       imageKey?:
-        | 'EXTERIOR_WASH'
-        | 'FULL_WASH'
-        | 'WAX'
-        | 'TIRES'
-        | 'INTERIOR'
-        | 'LEATHER_CARE';
+        | "EXTERIOR_WASH"
+        | "FULL_WASH"
+        | "WAX"
+        | "TIRES"
+        | "INTERIOR"
+        | "LEATHER_CARE";
       priceRub?: number;
       durationMin?: number;
       hasBodyTypePricing?: boolean;
@@ -2415,9 +2417,9 @@ export class OwnerService {
     const location = await this.getLocation();
     const existing = await this.getServiceOrThrow(id, location.id);
 
-    const hasName = typeof body.name === 'string';
-    const hasDescription = typeof body.description === 'string';
-    const hasImageKey = typeof body.imageKey === 'string';
+    const hasName = typeof body.name === "string";
+    const hasDescription = typeof body.description === "string";
+    const hasImageKey = typeof body.imageKey === "string";
     const hasPriceRub = body.priceRub !== undefined;
     const hasDurationMin = body.durationMin !== undefined;
     const hasHasBodyTypePricing = body.hasBodyTypePricing !== undefined;
@@ -2437,14 +2439,14 @@ export class OwnerService {
       !hasIsPublished
     ) {
       throw new BadRequestException(
-        'Нужно передать хотя бы одно поле для обновления.',
+        "Нужно передать хотя бы одно поле для обновления.",
       );
     }
 
     const data: Prisma.ServiceUpdateInput = {};
 
     if (hasName) {
-      data.name = this.normalizeName(body.name ?? '');
+      data.name = this.normalizeName(body.name ?? "");
     }
 
     if (hasDescription) {
@@ -2474,7 +2476,7 @@ export class OwnerService {
     if (hasIncludedAddonIds) {
       if (existing.kind !== ServiceKind.BASE) {
         throw new BadRequestException(
-          'includedAddonIds можно задавать только для базовой услуги.',
+          "includedAddonIds можно задавать только для базовой услуги.",
         );
       }
 
@@ -2494,7 +2496,7 @@ export class OwnerService {
 
         if (addons.length !== includedAddonIds.length) {
           throw new BadRequestException(
-            'Все includedAddonIds должны существовать в текущей локации и быть ADDON.',
+            "Все includedAddonIds должны существовать в текущей локации и быть ADDON.",
           );
         }
       }
@@ -2529,7 +2531,7 @@ export class OwnerService {
         bodyTypePrices!.length === 0
       ) {
         throw new BadRequestException(
-          'Если включена градация по типу кузова, нужно передать bodyTypePrices.',
+          "Если включена градация по типу кузова, нужно передать bodyTypePrices.",
         );
       }
 
@@ -2596,7 +2598,8 @@ export class OwnerService {
 
   async getSettings() {
     const location = await this.getLocationForSettings();
-    const { contacts, ownerSettings } = await this.readSettingsSnapshot(location);
+    const { contacts, ownerSettings } =
+      await this.readSettingsSnapshot(location);
 
     return {
       location: {
@@ -2632,7 +2635,8 @@ export class OwnerService {
     };
   }) {
     const location = await this.getLocationForSettings();
-    const { contacts, ownerSettings } = await this.readSettingsSnapshot(location);
+    const { contacts, ownerSettings } =
+      await this.readSettingsSnapshot(location);
 
     const next: OwnerSettingsConfig = {
       communication: {
@@ -2648,7 +2652,9 @@ export class OwnerService {
         },
       },
       monitoring: {
-        suspiciousAuditTypes: [...ownerSettings.monitoring.suspiciousAuditTypes],
+        suspiciousAuditTypes: [
+          ...ownerSettings.monitoring.suspiciousAuditTypes,
+        ],
         notifyPhone: ownerSettings.monitoring.notifyPhone,
         notifyTelegram: ownerSettings.monitoring.notifyTelegram,
         notifyPush: ownerSettings.monitoring.notifyPush,
@@ -2656,14 +2662,14 @@ export class OwnerService {
     };
 
     if (body.communication) {
-      if (typeof body.communication.washStartTemplate === 'string') {
+      if (typeof body.communication.washStartTemplate === "string") {
         next.communication.washStartTemplate = this.normalizeOptionalText(
           body.communication.washStartTemplate,
           1000,
         );
       }
 
-      if (typeof body.communication.washFinishTemplate === 'string') {
+      if (typeof body.communication.washFinishTemplate === "string") {
         next.communication.washFinishTemplate = this.normalizeOptionalText(
           body.communication.washFinishTemplate,
           1000,
@@ -2672,14 +2678,14 @@ export class OwnerService {
 
       if (body.communication.campaigns) {
         if (
-          typeof body.communication.campaigns.promotionsEnabled === 'boolean'
+          typeof body.communication.campaigns.promotionsEnabled === "boolean"
         ) {
           next.communication.campaigns.promotionsEnabled =
             body.communication.campaigns.promotionsEnabled;
         }
 
         if (
-          typeof body.communication.campaigns.discountsEnabled === 'boolean'
+          typeof body.communication.campaigns.discountsEnabled === "boolean"
         ) {
           next.communication.campaigns.discountsEnabled =
             body.communication.campaigns.discountsEnabled;
@@ -2687,7 +2693,7 @@ export class OwnerService {
 
         if (
           typeof body.communication.campaigns.holidayGreetingsEnabled ===
-          'boolean'
+          "boolean"
         ) {
           next.communication.campaigns.holidayGreetingsEnabled =
             body.communication.campaigns.holidayGreetingsEnabled;
@@ -2705,19 +2711,19 @@ export class OwnerService {
           normalized.length > 0 ? normalized : [...this.suspiciousAuditTypes];
       }
 
-      if (typeof body.monitoring.notifyPhone === 'string') {
+      if (typeof body.monitoring.notifyPhone === "string") {
         next.monitoring.notifyPhone = this.normalizeOptionalPhone(
           body.monitoring.notifyPhone,
         );
       }
 
-      if (typeof body.monitoring.notifyTelegram === 'string') {
+      if (typeof body.monitoring.notifyTelegram === "string") {
         next.monitoring.notifyTelegram = this.normalizeTelegramHandle(
           body.monitoring.notifyTelegram,
         );
       }
 
-      if (typeof body.monitoring.notifyPush === 'boolean') {
+      if (typeof body.monitoring.notifyPush === "boolean") {
         next.monitoring.notifyPush = body.monitoring.notifyPush;
       }
     }
@@ -2731,7 +2737,7 @@ export class OwnerService {
       where: {
         tenantId_key: {
           tenantId: location.tenantId,
-          key: 'OWNER_SETTINGS',
+          key: "OWNER_SETTINGS",
         },
       },
       update: {
@@ -2740,7 +2746,7 @@ export class OwnerService {
       },
       create: {
         tenantId: location.tenantId,
-        key: 'OWNER_SETTINGS',
+        key: "OWNER_SETTINGS",
         enabled: true,
         params: normalizedFinal as any,
       },
@@ -2808,33 +2814,30 @@ export class OwnerService {
     const next = {
       washerBasePercent:
         body.washerBasePercent !== undefined
-          ? this.normalizePercent(body.washerBasePercent, 'washerBasePercent')
+          ? this.normalizePercent(body.washerBasePercent, "washerBasePercent")
           : currentComp.washerBasePercent,
       washerAddonPercent:
         body.washerAddonPercent !== undefined
-          ? this.normalizePercent(body.washerAddonPercent, 'washerAddonPercent')
+          ? this.normalizePercent(body.washerAddonPercent, "washerAddonPercent")
           : currentComp.washerAddonPercent,
       adminBaseSalaryRub:
         body.adminBaseSalaryRub !== undefined
           ? this.normalizeMoneyRub(
               body.adminBaseSalaryRub,
-              'adminBaseSalaryRub',
+              "adminBaseSalaryRub",
             )
           : currentComp.adminBaseSalaryRub,
       adminBasePercent:
         body.adminBasePercent !== undefined
-          ? this.normalizePercent(body.adminBasePercent, 'adminBasePercent')
+          ? this.normalizePercent(body.adminBasePercent, "adminBasePercent")
           : currentComp.adminBasePercent,
       adminAddonPercent:
         body.adminAddonPercent !== undefined
-          ? this.normalizePercent(body.adminAddonPercent, 'adminAddonPercent')
+          ? this.normalizePercent(body.adminAddonPercent, "adminAddonPercent")
           : currentComp.adminAddonPercent,
       adminUpsellPercent:
         body.adminUpsellPercent !== undefined
-          ? this.normalizePercent(
-              body.adminUpsellPercent,
-              'adminUpsellPercent',
-            )
+          ? this.normalizePercent(body.adminUpsellPercent, "adminUpsellPercent")
           : currentComp.adminUpsellPercent,
     };
 
@@ -2864,6 +2867,821 @@ export class OwnerService {
     return this.getCompensationSettings();
   }
 
+  async getOwnerClients(params: {
+    period?: string;
+    q?: string;
+    limit?: string;
+  }) {
+    const period = this.parsePeriod(params.period);
+    const location = await this.getLocation();
+    const { start, end } = this.getRange(period);
+    const limit = this.parsePositiveLimit(params.limit, 100, 300);
+    const q = (params.q ?? "").trim();
+    const normalizedPlate = q
+      .toUpperCase()
+      .replace(/\s+/g, "")
+      .replace(/-/g, "");
+
+    const searchOr: Prisma.ClientWhereInput[] = q
+      ? [
+          {
+            name: {
+              contains: q,
+              mode: Prisma.QueryMode.insensitive,
+            },
+          },
+          {
+            phone: {
+              contains: q,
+            },
+          },
+          {
+            cars: {
+              some: {
+                plateDisplay: {
+                  contains: q,
+                  mode: Prisma.QueryMode.insensitive,
+                },
+              },
+            },
+          },
+          ...(normalizedPlate
+            ? [
+                {
+                  cars: {
+                    some: {
+                      plateNormalized: {
+                        contains: normalizedPlate,
+                        mode: Prisma.QueryMode.insensitive,
+                      },
+                    },
+                  },
+                } satisfies Prisma.ClientWhereInput,
+              ]
+            : []),
+        ]
+      : [];
+
+    const clientWhere: Prisma.ClientWhereInput = {
+      locations: { some: { locationId: location.id } },
+      ...(searchOr.length > 0 ? { OR: searchOr } : {}),
+    };
+
+    const [
+      clientsTotal,
+      newClients,
+      withContacts,
+      genderGroups,
+      bodyTypeGroups,
+      clientsRaw,
+      recentBookings,
+    ] = await Promise.all([
+      this.prisma.clientLocation.count({
+        where: { locationId: location.id },
+      }),
+
+      this.prisma.clientLocation.count({
+        where: {
+          locationId: location.id,
+          createdAt: { gte: start, lt: end },
+        },
+      }),
+
+      this.prisma.client.count({
+        where: {
+          locations: { some: { locationId: location.id } },
+          OR: [{ phone: { not: "" } }, { name: { not: null } }],
+        },
+      }),
+
+      this.prisma.client.groupBy({
+        by: ["gender"],
+        where: {
+          locations: { some: { locationId: location.id } },
+        },
+        _count: { _all: true },
+      }),
+
+      this.prisma.car.groupBy({
+        by: ["bodyType"],
+        where: {
+          client: {
+            locations: { some: { locationId: location.id } },
+          },
+          bodyType: { not: null },
+        },
+        _count: { _all: true },
+      }),
+
+      this.prisma.client.findMany({
+        where: clientWhere,
+        orderBy: { createdAt: "desc" },
+        take: limit,
+        include: {
+          locations: {
+            where: { locationId: location.id },
+            select: {
+              isBlocked: true,
+              blockReason: true,
+              lastVisitAt: true,
+              createdAt: true,
+            },
+          },
+          cars: {
+            select: {
+              id: true,
+              makeDisplay: true,
+              modelDisplay: true,
+              plateDisplay: true,
+              bodyType: true,
+              color: true,
+              year: true,
+            },
+            orderBy: { createdAt: "desc" },
+          },
+          bookings: {
+            where: { locationId: location.id },
+            orderBy: { dateTime: "desc" },
+            include: {
+              car: {
+                select: {
+                  id: true,
+                  makeDisplay: true,
+                  modelDisplay: true,
+                  plateDisplay: true,
+                  bodyType: true,
+                  color: true,
+                  year: true,
+                },
+              },
+              service: {
+                select: {
+                  id: true,
+                  name: true,
+                  kind: true,
+                  priceRub: true,
+                  durationMin: true,
+                },
+              },
+              payments: {
+                select: {
+                  amountRub: true,
+                  methodType: true,
+                  kind: true,
+                  paidAt: true,
+                },
+              },
+              addons: {
+                select: {
+                  qty: true,
+                  priceRubSnapshot: true,
+                  service: {
+                    select: { id: true, name: true },
+                  },
+                },
+              },
+              photos: {
+                select: {
+                  id: true,
+                  kind: true,
+                  url: true,
+                  note: true,
+                  createdAt: true,
+                },
+                orderBy: { createdAt: "desc" },
+              },
+            },
+          },
+        },
+      }),
+
+      this.prisma.booking.findMany({
+        where: {
+          locationId: location.id,
+          clientId: { not: null },
+        },
+        orderBy: { dateTime: "desc" },
+        take: 50,
+        include: {
+          client: { select: { id: true, name: true, phone: true } },
+          car: {
+            select: {
+              id: true,
+              makeDisplay: true,
+              modelDisplay: true,
+              plateDisplay: true,
+              bodyType: true,
+              color: true,
+              year: true,
+            },
+          },
+          service: {
+            select: {
+              id: true,
+              name: true,
+              priceRub: true,
+              durationMin: true,
+            },
+          },
+          payments: {
+            select: {
+              amountRub: true,
+              methodType: true,
+              kind: true,
+              paidAt: true,
+            },
+          },
+          photos: {
+            select: {
+              id: true,
+              kind: true,
+              url: true,
+              note: true,
+              createdAt: true,
+            },
+            orderBy: { createdAt: "desc" },
+          },
+        },
+      }),
+    ]);
+
+    const sumPayments = (
+      payments: Array<{
+        amountRub: number;
+        methodType: PaymentMethodType;
+        paidAt?: Date;
+      }>,
+      filter?: (payment: {
+        amountRub: number;
+        methodType: PaymentMethodType;
+        paidAt?: Date;
+      }) => boolean,
+    ) =>
+      payments
+        .filter((payment) => (filter ? filter(payment) : true))
+        .reduce((sum, payment) => sum + (payment.amountRub ?? 0), 0);
+
+    const isInPeriod = (date: Date) => date >= start && date < end;
+
+    const paymentMethodsSummary = (
+      payments: Array<{
+        amountRub: number;
+        methodType: PaymentMethodType;
+      }>,
+    ) => {
+      const result = { cash: 0, card: 0, contract: 0 };
+
+      for (const payment of payments) {
+        if (payment.methodType === PaymentMethodType.CASH) {
+          result.cash += payment.amountRub ?? 0;
+        }
+        if (payment.methodType === PaymentMethodType.CARD) {
+          result.card += payment.amountRub ?? 0;
+        }
+        if (payment.methodType === PaymentMethodType.CONTRACT) {
+          result.contract += payment.amountRub ?? 0;
+        }
+      }
+
+      return result;
+    };
+
+    const clients = clientsRaw.map((client) => {
+      const locationLink = client.locations[0] ?? null;
+      const bookings = client.bookings;
+      const completedBookings = bookings.filter(
+        (booking) => booking.status === BookingStatus.COMPLETED,
+      );
+
+      const allPayments = bookings.flatMap((booking) => booking.payments);
+      const periodPayments = allPayments.filter((payment) =>
+        isInPeriod(payment.paidAt),
+      );
+
+      const totalSpent = sumPayments(allPayments);
+      const periodSpent = sumPayments(periodPayments);
+      const contractDebtRub = sumPayments(
+        allPayments,
+        (payment) => payment.methodType === PaymentMethodType.CONTRACT,
+      );
+
+      const lastVisit = bookings[0] ?? null;
+      const lastVisitAt =
+        locationLink?.lastVisitAt ??
+        lastVisit?.finishedAt ??
+        lastVisit?.dateTime ??
+        null;
+
+      const recentVisits = bookings.slice(0, 20).map((booking) => {
+        const amountRub = sumPayments(booking.payments);
+        const afterPhoto =
+          booking.photos.find((photo) => photo.kind === "AFTER") ?? null;
+        const beforePhoto =
+          booking.photos.find((photo) => photo.kind === "BEFORE") ?? null;
+
+        const plannedDurationMin =
+          booking.serviceDurationMinSnapshot ??
+          booking.service?.durationMin ??
+          0;
+
+        const actualDurationMin =
+          booking.startedAt && booking.finishedAt
+            ? Math.max(
+                0,
+                Math.round(
+                  (booking.finishedAt.getTime() - booking.startedAt.getTime()) /
+                    60000,
+                ),
+              )
+            : 0;
+
+        return {
+          id: booking.id,
+          status: booking.status,
+          dateTime: booking.dateTime,
+          startedAt: booking.startedAt,
+          finishedAt: booking.finishedAt,
+          amountRub,
+          paymentMethods: paymentMethodsSummary(booking.payments),
+          service: {
+            id: booking.service?.id ?? booking.serviceId,
+            name:
+              booking.serviceNameSnapshot ?? booking.service?.name ?? "Услуга",
+            priceRub:
+              booking.servicePriceRubSnapshot ?? booking.service?.priceRub ?? 0,
+            durationMin: plannedDurationMin,
+          },
+          addons: booking.addons.map((addon) => ({
+            serviceId: addon.service?.id,
+            name: addon.service?.name ?? "Доп. услуга",
+            qty: addon.qty ?? 1,
+            priceRub: addon.priceRubSnapshot ?? 0,
+          })),
+          car: booking.car
+            ? {
+                id: booking.car.id,
+                make: booking.car.makeDisplay,
+                model: booking.car.modelDisplay,
+                plate: booking.car.plateDisplay,
+                bodyType: booking.car.bodyType,
+                color: booking.car.color,
+                year: booking.car.year,
+              }
+            : null,
+          photos: {
+            beforeUrl: beforePhoto?.url ?? null,
+            afterUrl: afterPhoto?.url ?? null,
+            all: booking.photos.map((photo) => ({
+              id: photo.id,
+              kind: photo.kind,
+              url: photo.url,
+              note: photo.note,
+              createdAt: photo.createdAt,
+            })),
+          },
+          timeControl: {
+            plannedDurationMin,
+            actualDurationMin,
+            deltaMin:
+              plannedDurationMin > 0 && actualDurationMin > 0
+                ? actualDurationMin - plannedDurationMin
+                : 0,
+          },
+        };
+      });
+
+      return {
+        clientId: client.id,
+        name: client.name ?? "Без имени",
+        phone: client.phone,
+        gender: client.gender,
+        carsCount: client.cars.length,
+        cars: client.cars.map((car) => ({
+          id: car.id,
+          make: car.makeDisplay,
+          model: car.modelDisplay,
+          plate: car.plateDisplay,
+          bodyType: car.bodyType,
+          color: car.color,
+          year: car.year,
+        })),
+        totalSpent,
+        periodSpent,
+        contractDebtRub,
+        visits: completedBookings.length,
+        visitsTotal: bookings.length,
+        lastVisitAt,
+        averageCheck:
+          completedBookings.length > 0
+            ? Math.round(totalSpent / completedBookings.length)
+            : 0,
+        isBlocked: locationLink?.isBlocked ?? false,
+        blockReason: locationLink?.blockReason ?? null,
+        createdAt: client.createdAt,
+        recentVisits,
+      };
+    });
+
+    const topClients = [...clients]
+      .sort((a, b) => b.totalSpent - a.totalSpent)
+      .slice(0, 10)
+      .map((client) => ({
+        clientId: client.clientId,
+        name: client.name,
+        phone: client.phone,
+        totalSpent: client.totalSpent,
+        periodSpent: client.periodSpent,
+        visits: client.visits,
+      }));
+
+    const clientsByVisits = [...clients]
+      .sort((a, b) => b.visits - a.visits)
+      .slice(0, 10)
+      .map((client) => ({
+        clientId: client.clientId,
+        name: client.name,
+        phone: client.phone,
+        visits: client.visits,
+        totalSpent: client.totalSpent,
+      }));
+
+    const recentVisits = recentBookings.map((booking) => {
+      const amountRub = booking.payments.reduce(
+        (sum, payment) => sum + (payment.amountRub ?? 0),
+        0,
+      );
+      const afterPhoto =
+        booking.photos.find((photo) => photo.kind === "AFTER") ?? null;
+      const beforePhoto =
+        booking.photos.find((photo) => photo.kind === "BEFORE") ?? null;
+
+      return {
+        bookingId: booking.id,
+        clientId: booking.clientId,
+        clientName: booking.client?.name ?? "Без имени",
+        clientPhone: booking.client?.phone ?? "",
+        car: booking.car
+          ? {
+              id: booking.car.id,
+              make: booking.car.makeDisplay,
+              model: booking.car.modelDisplay,
+              plate: booking.car.plateDisplay,
+              bodyType: booking.car.bodyType,
+              color: booking.car.color,
+              year: booking.car.year,
+            }
+          : null,
+        service: {
+          id: booking.service.id,
+          name: booking.serviceNameSnapshot ?? booking.service.name,
+          priceRub:
+            booking.servicePriceRubSnapshot ?? booking.service.priceRub ?? 0,
+          durationMin:
+            booking.serviceDurationMinSnapshot ?? booking.service.durationMin,
+        },
+        status: booking.status,
+        amountRub,
+        paymentMethods: paymentMethodsSummary(booking.payments),
+        dateTime: booking.dateTime,
+        startedAt: booking.startedAt,
+        finishedAt: booking.finishedAt,
+        photoUrl: afterPhoto?.url ?? beforePhoto?.url ?? null,
+      };
+    });
+
+    const byGender = genderGroups.map((row) => ({
+      gender: row.gender ?? "UNKNOWN",
+      label:
+        row.gender === "MALE"
+          ? "Мужчины"
+          : row.gender === "FEMALE"
+            ? "Женщины"
+            : "Не указан",
+      count: row._count._all,
+    }));
+
+    const byBodyType = bodyTypeGroups
+      .map((row) => ({
+        bodyType: row.bodyType ?? "Не указан",
+        count: row._count._all,
+      }))
+      .sort((a, b) => b.count - a.count);
+
+    return {
+      location: {
+        id: location.id,
+        name: location.name,
+      },
+      period,
+      range: { start, end },
+      filters: { q, limit },
+      totals: {
+        clientsTotal,
+        newClients,
+        withContacts,
+        returnedClients: clients.filter((client) => client.visits > 1).length,
+        blockedClients: clients.filter((client) => client.isBlocked).length,
+      },
+      analytics: {
+        byGender,
+        byBodyType,
+        byVisits: clientsByVisits,
+        topClients,
+      },
+      topClients,
+      recentVisits,
+      clients,
+    };
+  }
+
+
+  async getOwnerClientDetail(clientId: string, rawPeriod?: string) {
+    const id = (clientId ?? "").trim();
+    if (!id) {
+      throw new BadRequestException("clientId обязателен.");
+    }
+
+    const period = this.parsePeriod(rawPeriod);
+    const location = await this.getLocation();
+    const { start, end } = this.getRange(period);
+
+    const client = await this.prisma.client.findFirst({
+      where: {
+        id,
+        locations: { some: { locationId: location.id } },
+      },
+      include: {
+        locations: {
+          where: { locationId: location.id },
+          select: {
+            isBlocked: true,
+            blockReason: true,
+            blockedAt: true,
+            lastVisitAt: true,
+            createdAt: true,
+          },
+        },
+        cars: {
+          select: {
+            id: true,
+            makeDisplay: true,
+            modelDisplay: true,
+            plateDisplay: true,
+            bodyType: true,
+            color: true,
+            year: true,
+          },
+          orderBy: { createdAt: "desc" },
+        },
+        bookings: {
+          where: { locationId: location.id },
+          orderBy: { dateTime: "desc" },
+          include: {
+            car: {
+              select: {
+                id: true,
+                makeDisplay: true,
+                modelDisplay: true,
+                plateDisplay: true,
+                bodyType: true,
+                color: true,
+                year: true,
+              },
+            },
+            service: {
+              select: {
+                id: true,
+                name: true,
+                kind: true,
+                priceRub: true,
+                durationMin: true,
+              },
+            },
+            payments: {
+              select: {
+                amountRub: true,
+                methodType: true,
+                kind: true,
+                paidAt: true,
+              },
+              orderBy: { paidAt: "desc" },
+            },
+            addons: {
+              select: {
+                qty: true,
+                priceRubSnapshot: true,
+                durationMinSnapshot: true,
+                isUpsell: true,
+                service: {
+                  select: { id: true, name: true },
+                },
+              },
+            },
+            photos: {
+              select: {
+                id: true,
+                kind: true,
+                url: true,
+                note: true,
+                createdAt: true,
+              },
+              orderBy: { createdAt: "desc" },
+            },
+          },
+        },
+      },
+    });
+
+    if (!client) {
+      throw new NotFoundException("Клиент не найден.");
+    }
+
+    const sumPayments = (
+      payments: Array<{
+        amountRub: number;
+        methodType: PaymentMethodType;
+        paidAt: Date;
+      }>,
+      filter?: (payment: {
+        amountRub: number;
+        methodType: PaymentMethodType;
+        paidAt: Date;
+      }) => boolean,
+    ) =>
+      payments
+        .filter((payment) => (filter ? filter(payment) : true))
+        .reduce((sum, payment) => sum + (payment.amountRub ?? 0), 0);
+
+    const paymentMethodsSummary = (
+      payments: Array<{
+        amountRub: number;
+        methodType: PaymentMethodType;
+      }>,
+    ) => {
+      const result = { cash: 0, card: 0, contract: 0 };
+
+      for (const payment of payments) {
+        if (payment.methodType === PaymentMethodType.CASH) {
+          result.cash += payment.amountRub ?? 0;
+        }
+        if (payment.methodType === PaymentMethodType.CARD) {
+          result.card += payment.amountRub ?? 0;
+        }
+        if (payment.methodType === PaymentMethodType.CONTRACT) {
+          result.contract += payment.amountRub ?? 0;
+        }
+      }
+
+      return result;
+    };
+
+    const isInPeriod = (date: Date) => date >= start && date < end;
+    const locationLink = client.locations[0] ?? null;
+    const completedBookings = client.bookings.filter(
+      (booking) => booking.status === BookingStatus.COMPLETED,
+    );
+    const allPayments = client.bookings.flatMap((booking) => booking.payments);
+    const periodPayments = allPayments.filter((payment) =>
+      isInPeriod(payment.paidAt),
+    );
+
+    const totalSpent = sumPayments(allPayments);
+    const periodSpent = sumPayments(periodPayments);
+    const contractDebtRub = sumPayments(
+      allPayments,
+      (payment) => payment.methodType === PaymentMethodType.CONTRACT,
+    );
+
+    const visits = client.bookings.map((booking) => {
+      const amountRub = sumPayments(booking.payments);
+      const afterPhoto =
+        booking.photos.find((photo) => photo.kind === "AFTER") ?? null;
+      const beforePhoto =
+        booking.photos.find((photo) => photo.kind === "BEFORE") ?? null;
+
+      const plannedDurationMin =
+        booking.serviceDurationMinSnapshot ??
+        booking.service?.durationMin ??
+        0;
+
+      const actualDurationMin =
+        booking.startedAt && booking.finishedAt
+          ? Math.max(
+              0,
+              Math.round(
+                (booking.finishedAt.getTime() - booking.startedAt.getTime()) /
+                  60000,
+              ),
+            )
+          : 0;
+
+      return {
+        id: booking.id,
+        status: booking.status,
+        dateTime: booking.dateTime,
+        startedAt: booking.startedAt,
+        finishedAt: booking.finishedAt,
+        amountRub,
+        paymentMethods: paymentMethodsSummary(booking.payments),
+        service: {
+          id: booking.service?.id ?? booking.serviceId,
+          name: booking.serviceNameSnapshot ?? booking.service?.name ?? "Услуга",
+          priceRub:
+            booking.servicePriceRubSnapshot ?? booking.service?.priceRub ?? 0,
+          durationMin: plannedDurationMin,
+        },
+        addons: booking.addons.map((addon) => ({
+          serviceId: addon.service?.id,
+          name: addon.service?.name ?? "Доп. услуга",
+          qty: addon.qty ?? 1,
+          priceRub: addon.priceRubSnapshot ?? 0,
+          durationMin: addon.durationMinSnapshot ?? 0,
+          isUpsell: addon.isUpsell,
+        })),
+        car: booking.car
+          ? {
+              id: booking.car.id,
+              make: booking.car.makeDisplay,
+              model: booking.car.modelDisplay,
+              plate: booking.car.plateDisplay,
+              bodyType: booking.car.bodyType,
+              color: booking.car.color,
+              year: booking.car.year,
+            }
+          : null,
+        photos: {
+          beforeUrl: beforePhoto?.url ?? null,
+          afterUrl: afterPhoto?.url ?? null,
+          all: booking.photos.map((photo) => ({
+            id: photo.id,
+            kind: photo.kind,
+            url: photo.url,
+            note: photo.note,
+            createdAt: photo.createdAt,
+          })),
+        },
+        timeControl: {
+          plannedDurationMin,
+          actualDurationMin,
+          deltaMin:
+            plannedDurationMin > 0 && actualDurationMin > 0
+              ? actualDurationMin - plannedDurationMin
+              : 0,
+        },
+      };
+    });
+
+    const lastVisit = client.bookings[0] ?? null;
+    const lastVisitAt =
+      locationLink?.lastVisitAt ??
+      lastVisit?.finishedAt ??
+      lastVisit?.dateTime ??
+      null;
+
+    return {
+      location: {
+        id: location.id,
+        name: location.name,
+      },
+      period,
+      range: { start, end },
+      client: {
+        clientId: client.id,
+        name: client.name ?? "Без имени",
+        phone: client.phone,
+        gender: client.gender,
+        birthDate: client.birthDate,
+        createdAt: client.createdAt,
+        isBlocked: locationLink?.isBlocked ?? false,
+        blockReason: locationLink?.blockReason ?? null,
+        blockedAt: locationLink?.blockedAt ?? null,
+        lastVisitAt,
+        carsCount: client.cars.length,
+        cars: client.cars.map((car) => ({
+          id: car.id,
+          make: car.makeDisplay,
+          model: car.modelDisplay,
+          plate: car.plateDisplay,
+          bodyType: car.bodyType,
+          color: car.color,
+          year: car.year,
+        })),
+        totals: {
+          totalSpent,
+          periodSpent,
+          contractDebtRub,
+          visits: completedBookings.length,
+          visitsTotal: client.bookings.length,
+          averageCheck:
+            completedBookings.length > 0
+              ? Math.round(totalSpent / completedBookings.length)
+              : 0,
+        },
+        paymentMethods: paymentMethodsSummary(allPayments),
+        visits,
+      },
+    };
+  }
 
   async getOwnerAlerts(params: {
     period?: string;
@@ -2874,7 +3692,8 @@ export class OwnerService {
     const location = await this.getLocation();
     const { start, end } = this.getRange(period);
     const limit = this.parsePositiveLimit(params.limit, 20, 100);
-    const unreadOnly = (params.unreadOnly ?? '').trim().toLowerCase() === 'true';
+    const unreadOnly =
+      (params.unreadOnly ?? "").trim().toLowerCase() === "true";
 
     const where: Prisma.OwnerAlertWhereInput = {
       locationId: location.id,
@@ -2882,31 +3701,32 @@ export class OwnerService {
       ...(unreadOnly ? { isRead: false } : {}),
     };
 
-    const [alerts, unreadTotal, criticalUnreadTotal, typeGroups] = await Promise.all([
-      this.prisma.ownerAlert.findMany({
-        where,
-        orderBy: { createdAt: 'desc' },
-        take: limit,
-      }),
-      this.prisma.ownerAlert.count({
-        where: {
-          locationId: location.id,
-          isRead: false,
-        },
-      }),
-      this.prisma.ownerAlert.count({
-        where: {
-          locationId: location.id,
-          isRead: false,
-          severity: 'CRITICAL',
-        },
-      }),
-      this.prisma.ownerAlert.groupBy({
-        by: ['type'],
-        where,
-        _count: { _all: true },
-      }),
-    ]);
+    const [alerts, unreadTotal, criticalUnreadTotal, typeGroups] =
+      await Promise.all([
+        this.prisma.ownerAlert.findMany({
+          where,
+          orderBy: { createdAt: "desc" },
+          take: limit,
+        }),
+        this.prisma.ownerAlert.count({
+          where: {
+            locationId: location.id,
+            isRead: false,
+          },
+        }),
+        this.prisma.ownerAlert.count({
+          where: {
+            locationId: location.id,
+            isRead: false,
+            severity: "CRITICAL",
+          },
+        }),
+        this.prisma.ownerAlert.groupBy({
+          by: ["type"],
+          where,
+          _count: { _all: true },
+        }),
+      ]);
 
     return {
       location: {
@@ -2954,9 +3774,9 @@ export class OwnerService {
   }
 
   async markOwnerAlertRead(id: string) {
-    const alertId = (id ?? '').trim();
+    const alertId = (id ?? "").trim();
     if (!alertId) {
-      throw new BadRequestException('id обязателен.');
+      throw new BadRequestException("id обязателен.");
     }
 
     const location = await this.getLocation();
@@ -2970,7 +3790,7 @@ export class OwnerService {
     });
 
     if (!existing) {
-      throw new NotFoundException('Уведомление не найдено.');
+      throw new NotFoundException("Уведомление не найдено.");
     }
 
     const updated = await this.prisma.ownerAlert.update({
@@ -2993,10 +3813,10 @@ export class OwnerService {
 
   private ownerAlertTypeLabel(type: string): string {
     switch (type) {
-      case 'CASH_MISMATCH':
-        return 'Расхождение кассы';
-      case 'SUSPICIOUS_EVENT':
-        return 'Важное событие';
+      case "CASH_MISMATCH":
+        return "Расхождение кассы";
+      case "SUSPICIOUS_EVENT":
+        return "Важное событие";
       default:
         return type;
     }
@@ -3004,12 +3824,12 @@ export class OwnerService {
 
   private ownerAlertSeverityLabel(severity: string): string {
     switch (severity) {
-      case 'CRITICAL':
-        return 'Критично';
-      case 'WARNING':
-        return 'Внимание';
-      case 'INFO':
-        return 'Информация';
+      case "CRITICAL":
+        return "Критично";
+      case "WARNING":
+        return "Внимание";
+      case "INFO":
+        return "Информация";
       default:
         return severity;
     }

@@ -160,6 +160,32 @@ class OwnerApiClient {
     return decoded;
   }
 
+  Future<Map<String, dynamic>> getOwnerClients({
+    String period = 'month',
+    String q = '',
+    int limit = 50,
+  }) async {
+    final query = <String, String>{'period': period, 'limit': '$limit'};
+
+    final safeQ = q.trim();
+    if (safeQ.isNotEmpty) {
+      query['q'] = safeQ;
+    }
+
+    final res = await http.get(_u('/owner/clients', query)).timeout(_timeout);
+
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw Exception('Owner clients request failed: ${res.statusCode}');
+    }
+
+    final decoded = jsonDecode(res.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw Exception('Owner clients response is not an object');
+    }
+
+    return decoded;
+  }
+
   Future<Map<String, dynamic>> getOwnerAlerts({
     String period = 'month',
     bool unreadOnly = false,

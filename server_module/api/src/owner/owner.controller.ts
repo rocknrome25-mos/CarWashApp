@@ -6,33 +6,54 @@ import {
   Patch,
   Post,
   Query,
-} from '@nestjs/common';
-import { OwnerService } from './owner.service';
+} from "@nestjs/common";
+import { OwnerService } from "./owner.service";
 
-@Controller('owner')
+@Controller("owner")
 export class OwnerController {
   constructor(private readonly ownerService: OwnerService) {}
 
-  @Get('summary')
-  getSummary(@Query('period') period?: string) {
+  @Get("summary")
+  getSummary(@Query("period") period?: string) {
     return this.ownerService.getSummary(period);
   }
 
-  @Get('chart')
-  getChart(@Query('period') period?: string) {
+  @Get("chart")
+  getChart(@Query("period") period?: string) {
     return this.ownerService.getChart(period);
   }
 
-  @Get('finance')
-  getFinance(@Query('period') period?: string) {
+  @Get("finance")
+  getFinance(@Query("period") period?: string) {
     return this.ownerService.getFinance(period);
   }
 
-  @Get('alerts')
+  @Get("clients")
+  getOwnerClients(
+    @Query("period") period?: string,
+    @Query("q") q?: string,
+    @Query("limit") limit?: string,
+  ) {
+    return this.ownerService.getOwnerClients({
+      period,
+      q,
+      limit,
+    });
+  }
+
+  @Get("clients/:clientId")
+  getOwnerClientDetail(
+    @Param("clientId") clientId: string,
+    @Query("period") period?: string,
+  ) {
+    return this.ownerService.getOwnerClientDetail(clientId, period);
+  }
+
+  @Get("alerts")
   getOwnerAlerts(
-    @Query('period') period?: string,
-    @Query('unreadOnly') unreadOnly?: string,
-    @Query('limit') limit?: string,
+    @Query("period") period?: string,
+    @Query("unreadOnly") unreadOnly?: string,
+    @Query("limit") limit?: string,
   ) {
     return this.ownerService.getOwnerAlerts({
       period,
@@ -41,17 +62,17 @@ export class OwnerController {
     });
   }
 
-  @Post('alerts/:id/read')
-  markOwnerAlertRead(@Param('id') id: string) {
+  @Post("alerts/:id/read")
+  markOwnerAlertRead(@Param("id") id: string) {
     return this.ownerService.markOwnerAlertRead(id);
   }
 
-  @Get('suspicious-events')
+  @Get("suspicious-events")
   getSuspiciousEvents(
-    @Query('period') period?: string,
-    @Query('type') type?: string,
-    @Query('userId') userId?: string,
-    @Query('limit') limit?: string,
+    @Query("period") period?: string,
+    @Query("type") type?: string,
+    @Query("userId") userId?: string,
+    @Query("limit") limit?: string,
   ) {
     return this.ownerService.getSuspiciousEvents({
       period,
@@ -61,17 +82,17 @@ export class OwnerController {
     });
   }
 
-  @Get('employees')
+  @Get("employees")
   getEmployees() {
     return this.ownerService.getEmployees();
   }
 
-  @Get('employees/analytics')
-  getEmployeeAnalytics(@Query('period') period?: string) {
+  @Get("employees/analytics")
+  getEmployeeAnalytics(@Query("period") period?: string) {
     return this.ownerService.getEmployeeAnalytics(period);
   }
 
-  @Post('employees')
+  @Post("employees")
   createEmployee(
     @Body()
     body: {
@@ -84,9 +105,9 @@ export class OwnerController {
     return this.ownerService.createEmployee(body);
   }
 
-  @Patch('employees/:id')
+  @Patch("employees/:id")
   updateEmployee(
-    @Param('id') id: string,
+    @Param("id") id: string,
     @Body()
     body: {
       name?: string;
@@ -96,14 +117,14 @@ export class OwnerController {
     return this.ownerService.updateEmployee(id, body);
   }
 
-  @Post('employees/:id/toggle')
-  toggleEmployee(@Param('id') id: string) {
+  @Post("employees/:id/toggle")
+  toggleEmployee(@Param("id") id: string) {
     return this.ownerService.toggleEmployee(id);
   }
 
-  @Post('employees/:id/reset-password')
+  @Post("employees/:id/reset-password")
   resetEmployeePassword(
-    @Param('id') id: string,
+    @Param("id") id: string,
     @Body()
     body: {
       password?: string;
@@ -112,20 +133,20 @@ export class OwnerController {
     return this.ownerService.resetEmployeePassword(id, body);
   }
 
-  @Post('services')
+  @Post("services")
   createService(
     @Body()
     body: {
       name?: string;
       description?: string;
-      kind?: 'BASE' | 'ADDON';
+      kind?: "BASE" | "ADDON";
       imageKey?:
-        | 'EXTERIOR_WASH'
-        | 'FULL_WASH'
-        | 'WAX'
-        | 'TIRES'
-        | 'INTERIOR'
-        | 'LEATHER_CARE';
+        | "EXTERIOR_WASH"
+        | "FULL_WASH"
+        | "WAX"
+        | "TIRES"
+        | "INTERIOR"
+        | "LEATHER_CARE";
       priceRub?: number;
       durationMin?: number;
       hasBodyTypePricing?: boolean;
@@ -140,20 +161,20 @@ export class OwnerController {
     return this.ownerService.createService(body);
   }
 
-  @Patch('services/:id')
+  @Patch("services/:id")
   updateService(
-    @Param('id') id: string,
+    @Param("id") id: string,
     @Body()
     body: {
       name?: string;
       description?: string;
       imageKey?:
-        | 'EXTERIOR_WASH'
-        | 'FULL_WASH'
-        | 'WAX'
-        | 'TIRES'
-        | 'INTERIOR'
-        | 'LEATHER_CARE';
+        | "EXTERIOR_WASH"
+        | "FULL_WASH"
+        | "WAX"
+        | "TIRES"
+        | "INTERIOR"
+        | "LEATHER_CARE";
       priceRub?: number;
       durationMin?: number;
       hasBodyTypePricing?: boolean;
@@ -168,17 +189,17 @@ export class OwnerController {
     return this.ownerService.updateService(id, body);
   }
 
-  @Post('services/:id/toggle')
-  toggleService(@Param('id') id: string) {
+  @Post("services/:id/toggle")
+  toggleService(@Param("id") id: string) {
     return this.ownerService.toggleService(id);
   }
 
-  @Get('settings')
+  @Get("settings")
   getSettings() {
     return this.ownerService.getSettings();
   }
 
-  @Patch('settings')
+  @Patch("settings")
   updateSettings(
     @Body()
     body: {
@@ -202,12 +223,12 @@ export class OwnerController {
     return this.ownerService.updateSettings(body);
   }
 
-  @Get('compensation-settings')
+  @Get("compensation-settings")
   getCompensationSettings() {
     return this.ownerService.getCompensationSettings();
   }
 
-  @Patch('compensation-settings')
+  @Patch("compensation-settings")
   updateCompensationSettings(
     @Body()
     body: {
@@ -222,7 +243,7 @@ export class OwnerController {
     return this.ownerService.updateCompensationSettings(body);
   }
 
-  @Post('change-password')
+  @Post("change-password")
   changeOwnerPassword(
     @Body()
     body: {
