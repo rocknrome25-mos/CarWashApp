@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
@@ -30,10 +31,23 @@ class _OwnerDashboardTabState extends State<OwnerDashboardTab> {
   late Future<Map<String, dynamic>> _alertsFuture;
   late Future<Map<String, dynamic>> _suspiciousFuture;
 
+  Timer? _autoRefreshTimer;
+
   @override
   void initState() {
     super.initState();
     _load();
+
+    _autoRefreshTimer = Timer.periodic(const Duration(seconds: 60), (_) {
+      if (!mounted) return;
+      setState(_load);
+    });
+  }
+
+  @override
+  void dispose() {
+    _autoRefreshTimer?.cancel();
+    super.dispose();
   }
 
   void _load() {

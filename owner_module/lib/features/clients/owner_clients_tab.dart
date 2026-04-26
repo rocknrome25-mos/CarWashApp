@@ -17,23 +17,34 @@ class OwnerClientsTab extends StatefulWidget {
 class _OwnerClientsTabState extends State<OwnerClientsTab> {
   final OwnerApiClient _api = OwnerApiClient();
   final TextEditingController _searchController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
+  final GlobalKey _clientsSectionKey = GlobalKey();
 
   late Future<Map<String, dynamic>> _future;
   Timer? _searchDebounce;
+  Timer? _autoRefreshTimer;
 
   String _period = 'month';
   String _query = '';
+  String _segmentFilter = 'ALL';
 
   @override
   void initState() {
     super.initState();
     _future = _load();
+
+    _autoRefreshTimer = Timer.periodic(const Duration(seconds: 60), (_) {
+      if (!mounted) return;
+      setState(() => _future = _load());
+    });
   }
 
   @override
   void dispose() {
+    _autoRefreshTimer?.cancel();
     _searchDebounce?.cancel();
     _searchController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -42,9 +53,7 @@ class _OwnerClientsTabState extends State<OwnerClientsTab> {
   }
 
   Future<void> _reload() async {
-    setState(() {
-      _future = _load();
-    });
+    setState(() => _future = _load());
     await _future;
   }
 
@@ -53,6 +62,22 @@ class _OwnerClientsTabState extends State<OwnerClientsTab> {
     setState(() {
       _period = value;
       _future = _load();
+    });
+  }
+
+  void _changeSegmentFilter(String value) {
+    if (_segmentFilter == value) return;
+    setState(() => _segmentFilter = value);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final context = _clientsSectionKey.currentContext;
+      if (context == null) return;
+      Scrollable.ensureVisible(
+        context,
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeOutCubic,
+        alignment: 0.05,
+      );
     });
   }
 
@@ -67,6 +92,14 @@ class _OwnerClientsTabState extends State<OwnerClientsTab> {
     });
   }
 
+  void _clearSearch() {
+    _searchController.clear();
+    setState(() {
+      _query = '';
+      _future = _load();
+    });
+  }
+
   void _openClientDetail(Map<String, dynamic> client) {
     final clientId = (client['clientId'] ?? '').toString();
     if (clientId.isEmpty) return;
@@ -76,6 +109,26 @@ class _OwnerClientsTabState extends State<OwnerClientsTab> {
         builder: (_) => _OwnerClientDetailPage(
           clientId: clientId,
           fallbackName: (client['name'] ?? 'Клиент').toString(),
+          period: _period,
+        ),
+      ),
+    );
+  }
+
+  void _openVisitClientDetail(Map<String, dynamic> visit) {
+    final clientId = (visit['clientId'] ?? '').toString();
+    if (clientId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('У визита не указан клиент')),
+      );
+      return;
+    }
+
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _OwnerClientDetailPage(
+          clientId: clientId,
+          fallbackName: (visit['clientName'] ?? 'Клиент').toString(),
           period: _period,
         ),
       ),
@@ -122,15 +175,38 @@ class _OwnerClientsTabState extends State<OwnerClientsTab> {
           final totals = _map(data['totals']);
           final analytics = _map(data['analytics']);
 
-          final clients = _list(data['clients']);
-          final topClients = _list(data['topClients']);
+          final rawClients = _list(data['clients']);
+          final clients = rawClients.map(_clientWithComputedSegment).toList();
+
+          final filteredClients = clients
+              .where((client) => _passesSegmentFilter(client, _segmentFilter))
+              .toList();
+
+          final sortedClients = _sortClientsForDisplay(
+            filteredClients,
+            _segmentFilter,
+          );
+
+          final topClients = _list(
+            data['topClients'],
+          ).map(_clientWithComputedSegment).toList();
           final recentVisits = _list(data['recentVisits'] ?? data['gallery']);
           final byGender = _list(analytics['byGender']);
           final byBodyType = _list(analytics['byBodyType']);
 
+          final vipCount = clients.where((c) => c['isVip'] == true).length;
+          final frequentCount = clients
+              .where((c) => c['segment'] == 'FREQUENT')
+              .length;
+          final rareCount = clients.where((c) => c['segment'] == 'RARE').length;
+          final lostCount = clients.where((c) => c['isLost'] == true).length;
+          final debtCount = clients.where((c) => c['hasDebt'] == true).length;
+          final selectedLabel = _segmentFilterTitle(_segmentFilter);
+
           return RefreshIndicator(
             onRefresh: _reload,
             child: ListView(
+              controller: _scrollController,
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
               children: [
                 Row(
@@ -173,30 +249,6 @@ class _OwnerClientsTabState extends State<OwnerClientsTab> {
                   onSelectionChanged: (value) => _changePeriod(value.first),
                 ),
                 const SizedBox(height: 16),
-                TextField(
-                  controller: _searchController,
-                  decoration: InputDecoration(
-                    hintText: 'Поиск: имя, телефон, номер авто',
-                    prefixIcon: const Icon(Icons.search),
-                    suffixIcon: _searchController.text.trim().isEmpty
-                        ? null
-                        : IconButton(
-                            icon: const Icon(Icons.close),
-                            onPressed: () {
-                              _searchController.clear();
-                              setState(() {
-                                _query = '';
-                                _future = _load();
-                              });
-                            },
-                          ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                  ),
-                  onChanged: _onSearchChanged,
-                ),
-                const SizedBox(height: 16),
                 _ResponsiveMetricGrid(
                   children: [
                     _MetricTile(
@@ -218,10 +270,28 @@ class _OwnerClientsTabState extends State<OwnerClientsTab> {
                       icon: Icons.contact_phone_outlined,
                     ),
                     _MetricTile(
-                      title: 'Повторные',
-                      value: '${_asInt(totals['returnedClients'])}',
-                      subtitle: 'Больше 1 визита',
+                      title: 'VIP',
+                      value: '$vipCount',
+                      subtitle: 'Лучшие по тратам',
+                      icon: Icons.diamond_outlined,
+                    ),
+                    _MetricTile(
+                      title: 'Частые',
+                      value: '$frequentCount',
+                      subtitle: 'Регулярные визиты',
                       icon: Icons.repeat,
+                    ),
+                    _MetricTile(
+                      title: 'Пропали',
+                      value: '$lostCount',
+                      subtitle: 'Нет визитов 30+ дней',
+                      icon: Icons.person_off_outlined,
+                    ),
+                    _MetricTile(
+                      title: 'Должники',
+                      value: '$debtCount',
+                      subtitle: 'Есть CONTRACT',
+                      icon: Icons.warning_amber_outlined,
                     ),
                     _MetricTile(
                       title: 'Заблокированы',
@@ -231,8 +301,8 @@ class _OwnerClientsTabState extends State<OwnerClientsTab> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 24),
                 if (topClients.isNotEmpty) ...[
+                  const SizedBox(height: 24),
                   const _SectionHeader(
                     title: 'Топ клиенты',
                     subtitle: 'Кто принёс больше всего денег',
@@ -244,9 +314,9 @@ class _OwnerClientsTabState extends State<OwnerClientsTab> {
                       onTap: () => _openClientDetail(client),
                     ),
                   ),
-                  const SizedBox(height: 24),
                 ],
                 if (recentVisits.isNotEmpty) ...[
+                  const SizedBox(height: 24),
                   const _SectionHeader(
                     title: 'Галерея последних визитов',
                     subtitle: 'Фото, авто, сумма, оплата и время завершения',
@@ -259,13 +329,17 @@ class _OwnerClientsTabState extends State<OwnerClientsTab> {
                       itemCount: recentVisits.length,
                       separatorBuilder: (_, __) => const SizedBox(width: 12),
                       itemBuilder: (context, index) {
-                        return _RecentVisitCard(visit: recentVisits[index]);
+                        final visit = recentVisits[index];
+                        return _RecentVisitCard(
+                          visit: visit,
+                          onTap: () => _openVisitClientDetail(visit),
+                        );
                       },
                     ),
                   ),
-                  const SizedBox(height: 24),
                 ],
                 if (byGender.isNotEmpty || byBodyType.isNotEmpty) ...[
+                  const SizedBox(height: 24),
                   const _SectionHeader(
                     title: 'Срезы базы',
                     subtitle: 'Пол и типы кузова',
@@ -293,19 +367,71 @@ class _OwnerClientsTabState extends State<OwnerClientsTab> {
                           .toList(),
                     ),
                   ],
-                  const SizedBox(height: 24),
                 ],
-                _SectionHeader(
-                  title: 'Все клиенты',
-                  subtitle: clients.isEmpty
-                      ? 'Клиентов по текущему фильтру нет'
-                      : 'Нажмите на клиента, чтобы открыть детальную карточку',
+                const SizedBox(height: 24),
+                KeyedSubtree(
+                  key: _clientsSectionKey,
+                  child: const _SectionHeader(
+                    title: 'Поиск и фильтр клиентов',
+                    subtitle: 'Найдите клиента и выберите нужный сегмент',
+                  ),
                 ),
                 const SizedBox(height: 12),
-                if (clients.isEmpty)
-                  const _EmptyCard(text: 'Клиенты не найдены')
+                TextField(
+                  controller: _searchController,
+                  decoration: InputDecoration(
+                    hintText: 'Поиск: имя, телефон, номер авто',
+                    prefixIcon: const Icon(Icons.search),
+                    suffixIcon: _searchController.text.trim().isEmpty
+                        ? null
+                        : IconButton(
+                            icon: const Icon(Icons.close),
+                            onPressed: _clearSearch,
+                          ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
+                  onChanged: _onSearchChanged,
+                ),
+                const SizedBox(height: 14),
+                _SegmentFilterBar(
+                  selected: _segmentFilter,
+                  onChanged: _changeSegmentFilter,
+                  counts: {
+                    'ALL': clients.length,
+                    'VIP': vipCount,
+                    'FREQUENT': frequentCount,
+                    'LOST': lostCount,
+                    'DEBT': debtCount,
+                    'RARE': rareCount,
+                  },
+                ),
+                const SizedBox(height: 10),
+                _ActiveFilterInfoCard(
+                  title: selectedLabel,
+                  shown: sortedClients.length,
+                  total: clients.length,
+                  onReset: _segmentFilter == 'ALL'
+                      ? null
+                      : () => _changeSegmentFilter('ALL'),
+                ),
+                const SizedBox(height: 16),
+                _SectionHeader(
+                  title: selectedLabel,
+                  subtitle: sortedClients.isEmpty
+                      ? 'Клиентов по текущему фильтру нет'
+                      : 'Показано ${sortedClients.length} из ${clients.length}. Нажмите на клиента, чтобы открыть карточку',
+                ),
+                const SizedBox(height: 12),
+                if (sortedClients.isEmpty)
+                  _EmptyCard(
+                    text: _segmentFilter == 'ALL'
+                        ? 'Клиенты не найдены'
+                        : 'В сегменте “$selectedLabel” клиентов нет',
+                  )
                 else
-                  ...clients.map(
+                  ...sortedClients.map(
                     (client) => _ClientListCard(
                       client: client,
                       onTap: () => _openClientDetail(client),
@@ -364,9 +490,7 @@ class _OwnerClientDetailPageState extends State<_OwnerClientDetailPage> {
   }
 
   Future<void> _reload() async {
-    setState(() {
-      _future = _load();
-    });
+    setState(() => _future = _load());
     await _future;
   }
 
@@ -416,7 +540,7 @@ class _OwnerClientDetailPageState extends State<_OwnerClientDetailPage> {
           }
 
           final data = snapshot.data ?? const <String, dynamic>{};
-          final client = _map(data['client']);
+          final client = _clientWithComputedSegment(_map(data['client']));
           final totals = _map(client['totals']);
           final paymentMethods = _map(client['paymentMethods']);
           final cars = _list(client['cars']);
@@ -425,6 +549,8 @@ class _OwnerClientDetailPageState extends State<_OwnerClientDetailPage> {
           final isBlocked = client['isBlocked'] == true;
           final name = (client['name'] ?? 'Без имени').toString();
           final phone = (client['phone'] ?? '').toString();
+          final debt = _asInt(client['contractDebtRub']);
+          final daysSinceLastVisit = _asInt(client['daysSinceLastVisit']);
 
           return RefreshIndicator(
             onRefresh: _reload,
@@ -465,6 +591,7 @@ class _OwnerClientDetailPageState extends State<_OwnerClientDetailPage> {
                             spacing: 8,
                             runSpacing: 8,
                             children: [
+                              _SegmentBadge(client: client),
                               _SmallChip(
                                 text: isBlocked ? 'Заблокирован' : 'Активен',
                                 background: isBlocked
@@ -475,6 +602,15 @@ class _OwnerClientDetailPageState extends State<_OwnerClientDetailPage> {
                                 text:
                                     'Последний визит: ${_formatDateTime(client['lastVisitAt'])}',
                               ),
+                              if (daysSinceLastVisit > 0)
+                                _SmallChip(
+                                  text: 'Не был $daysSinceLastVisit дн.',
+                                ),
+                              if (debt > 0)
+                                _SmallChip(
+                                  text: 'Долг: ${_rub(debt)}',
+                                  background: const Color(0xFFFEF3C7),
+                                ),
                             ],
                           ),
                           if (isBlocked &&
@@ -500,31 +636,46 @@ class _OwnerClientDetailPageState extends State<_OwnerClientDetailPage> {
                   children: [
                     _MetricTile(
                       title: 'Потратил всего',
-                      value: _rub(_asInt(totals['totalSpent'])),
+                      value: _rub(
+                        _asInt(totals['totalSpent'] ?? client['totalSpent']),
+                      ),
                       subtitle: 'Все оплаты',
                       icon: Icons.payments_outlined,
                     ),
                     _MetricTile(
                       title: 'За период',
-                      value: _rub(_asInt(totals['periodSpent'])),
+                      value: _rub(
+                        _asInt(totals['periodSpent'] ?? client['periodSpent']),
+                      ),
                       subtitle: _periodLabel(widget.period),
                       icon: Icons.trending_up,
                     ),
                     _MetricTile(
                       title: 'Визиты',
-                      value: '${_asInt(totals['visits'])}',
-                      subtitle: 'Завершённые',
+                      value: '${_asInt(totals['visits'] ?? client['visits'])}',
+                      subtitle:
+                          client['visitsFrequencyLabel']?.toString() ??
+                          'Завершённые',
                       icon: Icons.local_car_wash_outlined,
                     ),
                     _MetricTile(
                       title: 'Средний чек',
-                      value: _rub(_asInt(totals['averageCheck'])),
+                      value: _rub(
+                        _asInt(
+                          totals['averageCheck'] ?? client['averageCheck'],
+                        ),
+                      ),
                       subtitle: 'По визитам',
                       icon: Icons.receipt_long_outlined,
                     ),
                     _MetricTile(
                       title: 'Контракт / долг',
-                      value: _rub(_asInt(totals['contractDebtRub'])),
+                      value: _rub(
+                        _asInt(
+                          totals['contractDebtRub'] ??
+                              client['contractDebtRub'],
+                        ),
+                      ),
                       subtitle: 'Оплата CONTRACT',
                       icon: Icons.warning_amber_outlined,
                     ),
@@ -546,7 +697,27 @@ class _OwnerClientDetailPageState extends State<_OwnerClientDetailPage> {
                 if (cars.isEmpty)
                   const _EmptyCard(text: 'Авто не указаны')
                 else
-                  ...cars.map((car) => _CarCard(car: car)),
+                  ...cars.map((car) => _CarCard(car: car, visits: visits)),
+                if (visits.any(
+                  (visit) => _visitBestPhotoUrl(visit) != null,
+                )) ...[
+                  const SizedBox(height: 24),
+                  const _SectionHeader(
+                    title: 'Фото авто по визитам',
+                    subtitle:
+                        'Последние фотографии, разложенные по автомобилям',
+                  ),
+                  const SizedBox(height: 12),
+                  if (cars.isEmpty)
+                    _CarVisitPhotosSection(
+                      car: const <String, dynamic>{},
+                      visits: visits,
+                    )
+                  else
+                    ...cars.map(
+                      (car) => _CarVisitPhotosSection(car: car, visits: visits),
+                    ),
+                ],
                 const SizedBox(height: 24),
                 const _SectionHeader(
                   title: 'История визитов',
@@ -567,6 +738,106 @@ class _OwnerClientDetailPageState extends State<_OwnerClientDetailPage> {
   }
 }
 
+class _SegmentFilterBar extends StatelessWidget {
+  final String selected;
+  final ValueChanged<String> onChanged;
+  final Map<String, int> counts;
+
+  const _SegmentFilterBar({
+    required this.selected,
+    required this.onChanged,
+    required this.counts,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final filters = [
+      ('ALL', 'Все', Icons.people_outline),
+      ('VIP', 'VIP', Icons.diamond_outlined),
+      ('FREQUENT', 'Частые', Icons.repeat),
+      ('RARE', 'Редкие', Icons.hourglass_empty),
+      ('LOST', 'Пропали', Icons.person_off_outlined),
+      ('DEBT', 'Должники', Icons.warning_amber_outlined),
+    ].where((item) => item.$1 == 'ALL' || (counts[item.$1] ?? 0) > 0).toList();
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: filters.map((item) {
+          final isSelected = selected == item.$1;
+          final count = counts[item.$1] ?? 0;
+          return Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: ChoiceChip(
+              selected: isSelected,
+              onSelected: (_) => onChanged(item.$1),
+              avatar: Icon(item.$3, size: 18),
+              label: Text('${item.$2} $count'),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+
+class _ActiveFilterInfoCard extends StatelessWidget {
+  final String title;
+  final int shown;
+  final int total;
+  final VoidCallback? onReset;
+
+  const _ActiveFilterInfoCard({
+    required this.title,
+    required this.shown,
+    required this.total,
+    required this.onReset,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.filter_alt_outlined, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Фильтр: $title • показано $shown из $total',
+              style: theme.textTheme.bodyMedium,
+            ),
+          ),
+          if (onReset != null)
+            TextButton(onPressed: onReset, child: const Text('Сбросить')),
+        ],
+      ),
+    );
+  }
+}
+
+class _SegmentBadge extends StatelessWidget {
+  final Map<String, dynamic> client;
+
+  const _SegmentBadge({required this.client});
+
+  @override
+  Widget build(BuildContext context) {
+    final segment = (client['segment'] ?? 'REGULAR').toString();
+    final label = (client['segmentLabel'] ?? _segmentLabel(segment)).toString();
+    final background = _segmentColor(segment);
+
+    return _SmallChip(text: label, background: background);
+  }
+}
+
 class _ClientListCard extends StatelessWidget {
   final Map<String, dynamic> client;
   final VoidCallback onTap;
@@ -582,6 +853,7 @@ class _ClientListCard extends StatelessWidget {
     final firstCar = cars.isNotEmpty ? cars.first : const <String, dynamic>{};
     final isBlocked = client['isBlocked'] == true;
     final debt = _asInt(client['contractDebtRub']);
+    final daysSinceLastVisit = _asInt(client['daysSinceLastVisit']);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -598,11 +870,14 @@ class _ClientListCard extends StatelessWidget {
                   Expanded(
                     child: Text(name, style: theme.textTheme.titleMedium),
                   ),
-                  if (isBlocked)
+                  _SegmentBadge(client: client),
+                  if (isBlocked) ...[
+                    const SizedBox(width: 8),
                     const _SmallChip(
                       text: 'Блок',
                       background: Color(0xFFFEE2E2),
                     ),
+                  ],
                   const SizedBox(width: 8),
                   const Icon(Icons.chevron_right),
                 ],
@@ -631,8 +906,20 @@ class _ClientListCard extends StatelessWidget {
                     text: 'Сумма: ${_rub(_asInt(client['totalSpent']))}',
                   ),
                   _SmallChip(
+                    text:
+                        'Средний чек: ${_rub(_asInt(client['averageCheck']))}',
+                  ),
+                  _SmallChip(
                     text: 'Период: ${_rub(_asInt(client['periodSpent']))}',
                   ),
+                  _SmallChip(
+                    text:
+                        (client['visitsFrequencyLabel'] ??
+                                'Частота не определена')
+                            .toString(),
+                  ),
+                  if (daysSinceLastVisit > 0)
+                    _SmallChip(text: 'Не был $daysSinceLastVisit дн.'),
                   if (debt > 0)
                     _SmallChip(
                       text: 'Долг: ${_rub(debt)}',
@@ -673,7 +960,12 @@ class _TopClientCard extends StatelessWidget {
             color: Color(0xFF059669),
           ),
         ),
-        title: Text((client['name'] ?? 'Без имени').toString()),
+        title: Row(
+          children: [
+            Expanded(child: Text((client['name'] ?? 'Без имени').toString())),
+            _SegmentBadge(client: client),
+          ],
+        ),
         subtitle: Text(
           '${client['phone'] ?? ''} • ${_asInt(client['visits'])} визитов',
         ),
@@ -688,8 +980,9 @@ class _TopClientCard extends StatelessWidget {
 
 class _RecentVisitCard extends StatelessWidget {
   final Map<String, dynamic> visit;
+  final VoidCallback? onTap;
 
-  const _RecentVisitCard({required this.visit});
+  const _RecentVisitCard({required this.visit, this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -702,65 +995,80 @@ class _RecentVisitCard extends StatelessWidget {
       width: 260,
       child: Card(
         clipBehavior: Clip.antiAlias,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-              height: 104,
-              width: double.infinity,
-              child: photoUrl == null
-                  ? Container(
-                      color: const Color(0xFFF3F4F6),
-                      child: const Center(
-                        child: Icon(Icons.image_not_supported_outlined),
-                      ),
-                    )
-                  : Image.network(
-                      photoUrl,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Container(
+        child: InkWell(
+          onTap: onTap,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                height: 104,
+                width: double.infinity,
+                child: photoUrl == null
+                    ? Container(
                         color: const Color(0xFFF3F4F6),
                         child: const Center(
-                          child: Icon(Icons.broken_image_outlined),
+                          child: Icon(Icons.image_not_supported_outlined),
+                        ),
+                      )
+                    : Image.network(
+                        photoUrl,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Container(
+                          color: const Color(0xFFF3F4F6),
+                          child: const Center(
+                            child: Icon(Icons.broken_image_outlined),
+                          ),
                         ),
                       ),
-                    ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    (car['plate'] ?? 'Номер не указан').toString(),
-                    style: theme.textTheme.titleMedium,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    (visit['clientName'] ?? 'Клиент').toString(),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: const Color(0xFF6B7280),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    '${service['name'] ?? 'Услуга'} • ${_rub(_asInt(visit['amountRub'] ?? visit['amount']))}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    _formatDateTime(visit['finishedAt'] ?? visit['dateTime']),
-                    style: theme.textTheme.bodySmall,
-                  ),
-                ],
               ),
-            ),
-          ],
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      (car['plate'] ?? 'Номер не указан').toString(),
+                      style: theme.textTheme.titleMedium,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      (visit['clientName'] ?? 'Клиент').toString(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: const Color(0xFF6B7280),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '${service['name'] ?? 'Услуга'} • ${_rub(_asInt(visit['amountRub'] ?? visit['amount']))}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            _formatDateTime(
+                              visit['finishedAt'] ?? visit['dateTime'],
+                            ),
+                            style: theme.textTheme.bodySmall,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        const Icon(Icons.open_in_new, size: 16),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -874,27 +1182,224 @@ class _VisitDetailCard extends StatelessWidget {
 
 class _CarCard extends StatelessWidget {
   final Map<String, dynamic> car;
+  final List<Map<String, dynamic>> visits;
 
-  const _CarCard({required this.car});
+  const _CarCard({required this.car, this.visits = const []});
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final photoUrl = _latestCarPhotoUrl(car, visits);
+    final plate = (car['plate'] ?? 'Номер не указан').toString();
+    final make = (car['make'] ?? '').toString();
+    final model = (car['model'] ?? '').toString();
+    final bodyType = (car['bodyType'] ?? 'кузов не указан').toString();
+    final year = (car['year'] ?? '').toString();
 
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
-      child: ListTile(
-        leading: const CircleAvatar(
-          backgroundColor: Color(0xFFEFF6FF),
-          child: Icon(Icons.directions_car_outlined, color: Color(0xFF2563EB)),
+      clipBehavior: Clip.antiAlias,
+      child: Row(
+        children: [
+          SizedBox(
+            width: 104,
+            height: 92,
+            child: photoUrl == null
+                ? Container(
+                    color: const Color(0xFFEFF6FF),
+                    child: const Icon(
+                      Icons.directions_car_outlined,
+                      color: Color(0xFF2563EB),
+                    ),
+                  )
+                : Image.network(
+                    photoUrl,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => Container(
+                      color: const Color(0xFFEFF6FF),
+                      child: const Icon(
+                        Icons.broken_image_outlined,
+                        color: Color(0xFF2563EB),
+                      ),
+                    ),
+                  ),
+          ),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(plate, style: theme.textTheme.titleMedium),
+                  const SizedBox(height: 4),
+                  Text(
+                    '$make $model • $bodyType',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: const Color(0xFF6B7280),
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (year.trim().isNotEmpty && year != 'null') ...[
+                    const SizedBox(height: 6),
+                    _SmallChip(text: 'Год: $year'),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CarVisitPhotosSection extends StatelessWidget {
+  final Map<String, dynamic> car;
+  final List<Map<String, dynamic>> visits;
+
+  const _CarVisitPhotosSection({required this.car, required this.visits});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final filteredVisits = visits
+        .where((visit) => car.isEmpty || _visitMatchesCar(visit, car))
+        .where((visit) => _visitBestPhotoUrl(visit) != null)
+        .toList();
+
+    if (filteredVisits.isEmpty) return const SizedBox.shrink();
+
+    final plate = car.isEmpty
+        ? 'Все авто'
+        : (car['plate'] ?? 'Номер не указан').toString();
+    final subtitle = car.isEmpty
+        ? '${filteredVisits.length} фото'
+        : '${car['make'] ?? ''} ${car['model'] ?? ''} • ${filteredVisits.length} фото';
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(plate, style: theme.textTheme.titleMedium),
+                      const SizedBox(height: 4),
+                      Text(
+                        subtitle,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: const Color(0xFF6B7280),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.photo_library_outlined, size: 20),
+              ],
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 188,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: filteredVisits.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 10),
+                itemBuilder: (context, index) {
+                  return _VisitPhotoStripCard(visit: filteredVisits[index]);
+                },
+              ),
+            ),
+          ],
         ),
-        title: Text((car['plate'] ?? 'Номер не указан').toString()),
-        subtitle: Text(
-          '${car['make'] ?? ''} ${car['model'] ?? ''} • ${car['bodyType'] ?? 'кузов не указан'}',
-        ),
-        trailing: Text(
-          (car['year'] ?? '').toString(),
-          style: theme.textTheme.bodySmall,
+      ),
+    );
+  }
+}
+
+class _VisitPhotoStripCard extends StatelessWidget {
+  final Map<String, dynamic> visit;
+
+  const _VisitPhotoStripCard({required this.visit});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final service = _map(visit['service']);
+    final car = _map(visit['car']);
+    final photoUrl = _visitBestPhotoUrl(visit);
+    final photos = _map(visit['photos']);
+    final beforeUrl = _resolvePhotoUrl((photos['beforeUrl'] ?? '').toString());
+    final afterUrl = _resolvePhotoUrl((photos['afterUrl'] ?? '').toString());
+
+    return SizedBox(
+      width: 180,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Material(
+          color: const Color(0xFFF8FAFC),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                height: 104,
+                width: double.infinity,
+                child: photoUrl == null
+                    ? Container(
+                        color: const Color(0xFFF3F4F6),
+                        child: const Center(
+                          child: Icon(Icons.image_not_supported_outlined),
+                        ),
+                      )
+                    : Image.network(
+                        photoUrl,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Container(
+                          color: const Color(0xFFF3F4F6),
+                          child: const Center(
+                            child: Icon(Icons.broken_image_outlined),
+                          ),
+                        ),
+                      ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      (car['plate'] ?? _visitPlate(visit) ?? 'Авто').toString(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleSmall,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${service['name'] ?? 'Услуга'} • ${_rub(_asInt(visit['amountRub']))}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall,
+                    ),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        if (beforeUrl != null) const _SmallChip(text: 'До'),
+                        if (afterUrl != null) const _SmallChip(text: 'После'),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -908,30 +1413,52 @@ class _PaymentMethodsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cash = _asInt(methods['cash']);
+    final card = _asInt(methods['card']);
+    final contract = _asInt(methods['contract']);
+    final total = cash + card + contract;
+
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(14),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(
-              child: _PaymentMethodTile(
-                title: 'Наличные',
-                value: _rub(_asInt(methods['cash'])),
-                icon: Icons.payments_outlined,
-              ),
+            Row(
+              children: [
+                Expanded(
+                  child: _PaymentMethodTile(
+                    title: 'Наличные',
+                    value: _rub(cash),
+                    subtitle: _percentLabel(cash, total),
+                    icon: Icons.payments_outlined,
+                  ),
+                ),
+                Expanded(
+                  child: _PaymentMethodTile(
+                    title: 'Карта',
+                    value: _rub(card),
+                    subtitle: _percentLabel(card, total),
+                    icon: Icons.credit_card,
+                  ),
+                ),
+                Expanded(
+                  child: _PaymentMethodTile(
+                    title: 'Контракт',
+                    value: _rub(contract),
+                    subtitle: _percentLabel(contract, total),
+                    icon: Icons.description_outlined,
+                  ),
+                ),
+              ],
             ),
-            Expanded(
-              child: _PaymentMethodTile(
-                title: 'Карта',
-                value: _rub(_asInt(methods['card'])),
-                icon: Icons.credit_card,
-              ),
-            ),
-            Expanded(
-              child: _PaymentMethodTile(
-                title: 'Контракт',
-                value: _rub(_asInt(methods['contract'])),
-                icon: Icons.description_outlined,
+            const SizedBox(height: 12),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(99),
+              child: LinearProgressIndicator(
+                value: total <= 0 ? 0 : cash / total,
+                minHeight: 8,
+                backgroundColor: const Color(0xFFE5E7EB),
               ),
             ),
           ],
@@ -944,11 +1471,13 @@ class _PaymentMethodsCard extends StatelessWidget {
 class _PaymentMethodTile extends StatelessWidget {
   final String title;
   final String value;
+  final String subtitle;
   final IconData icon;
 
   const _PaymentMethodTile({
     required this.title,
     required this.value,
+    required this.subtitle,
     required this.icon,
   });
 
@@ -963,6 +1492,13 @@ class _PaymentMethodTile extends StatelessWidget {
         Text(title, style: theme.textTheme.bodySmall),
         const SizedBox(height: 4),
         Text(value, style: theme.textTheme.titleSmall),
+        const SizedBox(height: 2),
+        Text(
+          subtitle,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: const Color(0xFF6B7280),
+          ),
+        ),
       ],
     );
   }
@@ -1176,7 +1712,9 @@ Map<String, dynamic> _map(dynamic value) {
 }
 
 List<Map<String, dynamic>> _list(dynamic value) {
-  return ((value as List?) ?? const [])
+  if (value is! List) return <Map<String, dynamic>>[];
+
+  return value
       .whereType<Map>()
       .map((e) => Map<String, dynamic>.from(e))
       .toList();
@@ -1225,4 +1763,252 @@ String? _resolvePhotoUrl(String raw) {
   if (value.startsWith('http://') || value.startsWith('https://')) return value;
   if (value.startsWith('/')) return '${AppConfig.defaultBaseUrl}$value';
   return '${AppConfig.defaultBaseUrl}/$value';
+}
+
+String? _latestCarPhotoUrl(
+  Map<String, dynamic> car,
+  List<Map<String, dynamic>> visits,
+) {
+  for (final visit in visits) {
+    if (_visitMatchesCar(visit, car)) {
+      final url = _visitBestPhotoUrl(visit);
+      if (url != null) return url;
+    }
+  }
+  return null;
+}
+
+bool _visitMatchesCar(Map<String, dynamic> visit, Map<String, dynamic> car) {
+  final visitCar = _map(visit['car']);
+  final carId = (car['id'] ?? '').toString();
+  final visitCarId = (visitCar['id'] ?? '').toString();
+  if (carId.isNotEmpty && visitCarId.isNotEmpty && carId == visitCarId) {
+    return true;
+  }
+
+  final carPlate = (car['plate'] ?? '').toString().trim().toUpperCase();
+  final visitPlate = _visitPlate(visit)?.trim().toUpperCase() ?? '';
+  return carPlate.isNotEmpty && visitPlate.isNotEmpty && carPlate == visitPlate;
+}
+
+String? _visitPlate(Map<String, dynamic> visit) {
+  final visitCar = _map(visit['car']);
+  final plate = (visitCar['plate'] ?? '').toString().trim();
+  return plate.isEmpty || plate == 'null' ? null : plate;
+}
+
+String? _visitBestPhotoUrl(Map<String, dynamic> visit) {
+  final photos = _map(visit['photos']);
+
+  final afterUrl = _resolvePhotoUrl((photos['afterUrl'] ?? '').toString());
+  if (afterUrl != null) return afterUrl;
+
+  final beforeUrl = _resolvePhotoUrl((photos['beforeUrl'] ?? '').toString());
+  if (beforeUrl != null) return beforeUrl;
+
+  final photoUrl = _resolvePhotoUrl((visit['photoUrl'] ?? '').toString());
+  if (photoUrl != null) return photoUrl;
+
+  final allPhotos = _list(photos['all']);
+  for (final photo in allPhotos) {
+    final url = _resolvePhotoUrl((photo['url'] ?? '').toString());
+    if (url != null) return url;
+  }
+
+  return null;
+}
+
+Map<String, dynamic> _clientWithComputedSegment(Map<String, dynamic> client) {
+  final result = Map<String, dynamic>.from(client);
+  final totals = _map(result['totals']);
+
+  final totalSpent = _asInt(result['totalSpent'] ?? totals['totalSpent']);
+  final periodSpent = _asInt(result['periodSpent'] ?? totals['periodSpent']);
+  final visits = _asInt(result['visits'] ?? totals['visits']);
+  final visitsTotal = _asInt(
+    result['visitsTotal'] ?? totals['visitsTotal'] ?? visits,
+  );
+  final averageCheck = _asInt(result['averageCheck'] ?? totals['averageCheck']);
+  final contractDebtRub = _asInt(
+    result['contractDebtRub'] ?? totals['contractDebtRub'],
+  );
+
+  final daysSinceLastVisit = _daysSince(result['lastVisitAt']);
+  final hasDebt = contractDebtRub > 0;
+  final isLost = daysSinceLastVisit >= 30 && visitsTotal > 0;
+  final isVip = totalSpent >= 50000 || visits >= 10 || averageCheck >= 7000;
+
+  String segment;
+  if (hasDebt) {
+    segment = 'DEBT';
+  } else if (isLost) {
+    segment = 'LOST';
+  } else if (isVip) {
+    segment = 'VIP';
+  } else if (visits >= 5 || (daysSinceLastVisit <= 14 && visits >= 2)) {
+    segment = 'FREQUENT';
+  } else if (visits <= 1 || daysSinceLastVisit >= 45) {
+    segment = 'RARE';
+  } else {
+    segment = 'REGULAR';
+  }
+
+  final frequencyLabel = _frequencyLabel(
+    visits: visits,
+    daysSinceLastVisit: daysSinceLastVisit,
+  );
+
+  result['totalSpent'] = totalSpent;
+  result['periodSpent'] = periodSpent;
+  result['visits'] = visits;
+  result['visitsTotal'] = visitsTotal;
+  result['averageCheck'] = averageCheck;
+  result['contractDebtRub'] = contractDebtRub;
+  result['daysSinceLastVisit'] = daysSinceLastVisit;
+  result['hasDebt'] = hasDebt;
+  result['isLost'] = isLost;
+  result['isVip'] = isVip;
+  result['segment'] = result['segment'] ?? segment;
+  result['segmentLabel'] = result['segmentLabel'] ?? _segmentLabel(segment);
+  result['visitsFrequencyLabel'] =
+      result['visitsFrequencyLabel'] ?? frequencyLabel;
+
+  return result;
+}
+
+bool _passesSegmentFilter(Map<String, dynamic> client, String filter) {
+  if (filter == 'ALL') return true;
+  if (filter == 'DEBT') return client['hasDebt'] == true;
+  if (filter == 'LOST') return client['isLost'] == true;
+  if (filter == 'VIP') return client['isVip'] == true;
+  return (client['segment'] ?? '').toString() == filter;
+}
+
+List<Map<String, dynamic>> _sortClientsForDisplay(
+  List<Map<String, dynamic>> clients,
+  String filter,
+) {
+  final result = [...clients];
+
+  result.sort((a, b) {
+    final groupCompare = _segmentSortRank(
+      a,
+      filter,
+    ).compareTo(_segmentSortRank(b, filter));
+    if (groupCompare != 0) return groupCompare;
+
+    final spentCompare = _asInt(
+      b['totalSpent'],
+    ).compareTo(_asInt(a['totalSpent']));
+    if (spentCompare != 0) return spentCompare;
+
+    final visitsCompare = _asInt(b['visits']).compareTo(_asInt(a['visits']));
+    if (visitsCompare != 0) return visitsCompare;
+
+    final lastA = DateTime.tryParse((a['lastVisitAt'] ?? '').toString());
+    final lastB = DateTime.tryParse((b['lastVisitAt'] ?? '').toString());
+
+    if (lastA != null && lastB != null) {
+      return lastB.compareTo(lastA);
+    }
+
+    return 0;
+  });
+
+  return result;
+}
+
+int _segmentSortRank(Map<String, dynamic> client, String filter) {
+  if (filter != 'ALL') return 0;
+
+  final hasDebt = client['hasDebt'] == true;
+  final isVip = client['isVip'] == true;
+  final isLost = client['isLost'] == true;
+  final segment = (client['segment'] ?? '').toString();
+
+  if (hasDebt) return 0;
+  if (isVip) return 1;
+  if (segment == 'FREQUENT') return 2;
+  if (segment == 'REGULAR') return 3;
+  if (isLost || segment == 'LOST') return 4;
+  if (segment == 'RARE') return 5;
+
+  return 6;
+}
+
+int _daysSince(dynamic raw) {
+  final value = (raw ?? '').toString().trim();
+  if (value.isEmpty || value == 'null') return 0;
+  final dt = DateTime.tryParse(value);
+  if (dt == null) return 0;
+  final now = DateTime.now();
+  return now.difference(dt.toLocal()).inDays.clamp(0, 9999);
+}
+
+String _segmentFilterTitle(String segment) {
+  switch (segment) {
+    case 'VIP':
+      return 'VIP клиенты';
+    case 'FREQUENT':
+      return 'Частые клиенты';
+    case 'RARE':
+      return 'Редкие клиенты';
+    case 'LOST':
+      return 'Пропавшие клиенты';
+    case 'DEBT':
+      return 'Клиенты с долгом';
+    case 'ALL':
+    default:
+      return 'Все клиенты';
+  }
+}
+
+String _segmentLabel(String segment) {
+  switch (segment) {
+    case 'VIP':
+      return '💎 VIP';
+    case 'FREQUENT':
+      return '🟢 Частый';
+    case 'RARE':
+      return '🔴 Редкий';
+    case 'LOST':
+      return '⚠️ Пропал';
+    case 'DEBT':
+      return '🟠 Должник';
+    case 'REGULAR':
+    default:
+      return '🟡 Обычный';
+  }
+}
+
+Color _segmentColor(String segment) {
+  switch (segment) {
+    case 'VIP':
+      return const Color(0xFFEDE9FE);
+    case 'FREQUENT':
+      return const Color(0xFFDCFCE7);
+    case 'RARE':
+      return const Color(0xFFFEE2E2);
+    case 'LOST':
+      return const Color(0xFFFFEDD5);
+    case 'DEBT':
+      return const Color(0xFFFEF3C7);
+    case 'REGULAR':
+    default:
+      return const Color(0xFFEFF6FF);
+  }
+}
+
+String _frequencyLabel({required int visits, required int daysSinceLastVisit}) {
+  if (visits <= 0) return 'Визитов нет';
+  if (visits == 1) return 'Разовый клиент';
+  if (daysSinceLastVisit <= 7) return 'Раз в неделю';
+  if (daysSinceLastVisit <= 31) return 'Раз в месяц';
+  if (daysSinceLastVisit <= 90) return 'Редко';
+  return 'Давно не был';
+}
+
+String _percentLabel(int value, int total) {
+  if (total <= 0) return '0%';
+  return '${((value / total) * 100).round()}%';
 }

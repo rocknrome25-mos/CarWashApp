@@ -36,7 +36,7 @@ class _OwnerShellPageState extends State<OwnerShellPage> {
     super.initState();
     _loadAlerts(showCriticalPopup: true);
     _alertsTimer = Timer.periodic(
-      const Duration(seconds: 30),
+      const Duration(seconds: 60),
       (_) => _loadAlerts(showCriticalPopup: true),
     );
   }
