@@ -411,43 +411,82 @@ class OwnerServiceCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _ServicePreviewCard(
-      data: data,
-      trailing: Column(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          _StatusPill(
-            text: data['isActive'] == true ? 'Активен' : 'Отключён',
-            background: data['isActive'] == true
-                ? const Color(0xFFDCFCE7)
-                : const Color(0xFFFEE2E2),
-          ),
-          const SizedBox(height: 10),
-          PopupMenuButton<String>(
-            onSelected: (value) {
-              if (value == 'edit') {
-                onEdit();
-              } else if (value == 'toggle') {
-                onToggle();
-              }
-            },
-            itemBuilder: (context) => [
-              const PopupMenuItem(value: 'edit', child: Text('Редактировать')),
-              PopupMenuItem(
-                value: 'toggle',
-                child: Text(
-                  data['isActive'] == true ? 'Отключить' : 'Включить',
-                ),
-              ),
-            ],
-            child: OutlinedButton.icon(
-              onPressed: isBusy ? null : null,
-              icon: const Icon(Icons.more_horiz),
-              label: const Text('Действия'),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: _ServicePreviewCard(
+        data: data,
+        trailing: _ServiceActions(
+          isActive: data['isActive'] == true,
+          isBusy: isBusy,
+          onEdit: onEdit,
+          onToggle: onToggle,
+        ),
+      ),
+    );
+  }
+}
+
+class _ServiceActions extends StatelessWidget {
+  final bool isActive;
+  final bool isBusy;
+  final VoidCallback onEdit;
+  final VoidCallback onToggle;
+
+  const _ServiceActions({
+    required this.isActive,
+    required this.isBusy,
+    required this.onEdit,
+    required this.onToggle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      alignment: WrapAlignment.end,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        _StatusPill(
+          text: isActive ? 'Активен' : 'Отключён',
+          background: isActive
+              ? const Color(0xFFDCFCE7)
+              : const Color(0xFFFEE2E2),
+        ),
+        PopupMenuButton<String>(
+          enabled: !isBusy,
+          onSelected: (value) {
+            if (value == 'edit') {
+              onEdit();
+            } else if (value == 'toggle') {
+              onToggle();
+            }
+          },
+          itemBuilder: (context) => [
+            const PopupMenuItem(value: 'edit', child: Text('Редактировать')),
+            PopupMenuItem(
+              value: 'toggle',
+              child: Text(isActive ? 'Отключить' : 'Включить'),
+            ),
+          ],
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              border: Border.all(color: const Color(0xFFE5E7EB)),
+              borderRadius: BorderRadius.circular(24),
+              color: Colors.white,
+            ),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.more_horiz, size: 18),
+                SizedBox(width: 6),
+                Text('Действия'),
+              ],
             ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
@@ -1469,104 +1508,152 @@ class _ServicePreviewCard extends StatelessWidget {
     final bodyTypePricingLabel = _bodyTypePricingLabel();
     final includedAddons = _includedAddonsLabel();
 
-    return Card(
-      margin: EdgeInsets.zero,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isNarrow = constraints.maxWidth < 560;
+
+        final iconBlock = Container(
+          width: 68,
+          height: 68,
+          decoration: BoxDecoration(
+            color: const Color(0xFFF3F4F6),
+            borderRadius: BorderRadius.circular(18),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(_imageIcon(imageKey), size: 26),
+              const SizedBox(height: 4),
+              Text(
+                _imageLabel(imageKey),
+                style: theme.textTheme.labelSmall,
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        );
+
+        final content = Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              width: 68,
-              height: 68,
-              decoration: BoxDecoration(
-                color: const Color(0xFFF3F4F6),
-                borderRadius: BorderRadius.circular(18),
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(_imageIcon(imageKey), size: 26),
-                  const SizedBox(height: 4),
-                  Text(
-                    _imageLabel(imageKey),
-                    style: theme.textTheme.labelSmall,
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
+            Text(
+              name,
+              style: theme.textTheme.titleMedium,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
             ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(name, style: theme.textTheme.titleMedium),
-                  const SizedBox(height: 6),
-                  if (description.isNotEmpty)
-                    Text(
-                      description,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: const Color(0xFF6B7280),
-                      ),
-                    ),
-                  if (description.isNotEmpty) const SizedBox(height: 10),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
+            const SizedBox(height: 6),
+            if (description.isNotEmpty)
+              Text(
+                description,
+                maxLines: 4,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: const Color(0xFF6B7280),
+                ),
+              ),
+            if (description.isNotEmpty) const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _ChipLabel(
+                  text: _kindLabel(kind),
+                  background: const Color(0xFFEFF6FF),
+                  foreground: const Color(0xFF1D4ED8),
+                ),
+                _ChipLabel(
+                  text: _priceLabel(),
+                  background: const Color(0xFFF0FDF4),
+                  foreground: const Color(0xFF15803D),
+                ),
+                _ChipLabel(
+                  text: '$durationMin мин',
+                  background: const Color(0xFFFFF7ED),
+                  foreground: const Color(0xFF9A3412),
+                  icon: Icons.schedule_outlined,
+                ),
+                _ChipLabel(
+                  text: isPublished ? 'Опубликовано' : 'Черновик',
+                  background: isPublished
+                      ? const Color(0xFFECFDF5)
+                      : const Color(0xFFFEF3C7),
+                  foreground: isPublished
+                      ? const Color(0xFF047857)
+                      : const Color(0xFF92400E),
+                ),
+              ],
+            ),
+            if (bodyTypePricingLabel.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Text(
+                bodyTypePricingLabel,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: const Color(0xFF6B7280),
+                ),
+              ),
+            ],
+            if (includedAddons.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Включает: $includedAddons',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: const Color(0xFF6B7280),
+                ),
+              ),
+            ],
+          ],
+        );
+
+        return Card(
+          margin: EdgeInsets.zero,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: isNarrow
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _ChipLabel(
-                        text: _kindLabel(kind),
-                        background: const Color(0xFFEFF6FF),
-                        foreground: const Color(0xFF1D4ED8),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          iconBlock,
+                          const SizedBox(width: 14),
+                          Expanded(child: content),
+                        ],
                       ),
-                      _ChipLabel(
-                        text: _priceLabel(),
-                        background: const Color(0xFFF0FDF4),
-                        foreground: const Color(0xFF15803D),
-                      ),
-                      _ChipLabel(
-                        text: '$durationMin мин',
-                        background: const Color(0xFFFFF7ED),
-                        foreground: const Color(0xFF9A3412),
-                        icon: Icons.schedule_outlined,
-                      ),
-                      _ChipLabel(
-                        text: isPublished ? 'Опубликовано' : 'Черновик',
-                        background: isPublished
-                            ? const Color(0xFFECFDF5)
-                            : const Color(0xFFFEF3C7),
-                        foreground: isPublished
-                            ? const Color(0xFF047857)
-                            : const Color(0xFF92400E),
-                      ),
+                      if (trailing != null) ...[
+                        const SizedBox(height: 14),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: trailing!,
+                        ),
+                      ],
+                    ],
+                  )
+                : Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      iconBlock,
+                      const SizedBox(width: 14),
+                      Expanded(child: content),
+                      if (trailing != null) ...[
+                        const SizedBox(width: 10),
+                        ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 180),
+                          child: trailing!,
+                        ),
+                      ],
                     ],
                   ),
-                  if (bodyTypePricingLabel.isNotEmpty) ...[
-                    const SizedBox(height: 10),
-                    Text(
-                      bodyTypePricingLabel,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: const Color(0xFF6B7280),
-                      ),
-                    ),
-                  ],
-                  if (includedAddons.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      'Включает: $includedAddons',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: const Color(0xFF6B7280),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            if (trailing != null) ...[const SizedBox(width: 10), trailing!],
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 }
@@ -1585,7 +1672,7 @@ class _StatusPill extends StatelessWidget {
         color: background,
         borderRadius: BorderRadius.circular(20),
       ),
-      child: Text(text, style: Theme.of(context).textTheme.bodySmall),
+      child: Text(style: Theme.of(context).textTheme.bodySmall, text),
     );
   }
 }
