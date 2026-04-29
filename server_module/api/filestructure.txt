@@ -1,6 +1,9 @@
+|-- .dockerignore
 |-- .env
 |-- .gitignore
 |-- .prettierrc
+|-- docker-compose.prod.yml
+|-- Dockerfile
 |-- eslint.config.mjs
 |-- nest-cli.json
 |-- package-lock.json

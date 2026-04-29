@@ -1,0 +1,10 @@
+services:
+  api:
+    image: ghcr.io/rocknrome25-mos/carwashapp-api:latest
+    container_name: carwash-api
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - .env
+    volumes:
+      - ./uploads:/app/uploads

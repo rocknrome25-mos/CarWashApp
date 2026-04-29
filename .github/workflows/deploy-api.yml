@@ -1,0 +1,73 @@
+name: Deploy API to VM-2
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "server_module/api/**"
+      - ".github/workflows/deploy-api.yml"
+
+env:
+  IMAGE_NAME: ghcr.io/rocknrome25-mos/carwashapp-api:latest
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push API image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./server_module/api
+          file: ./server_module/api/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_NAME }}
+
+      - name: Deploy on VM-2
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VM2_HOST }}
+          username: ${{ secrets.VM2_USER }}
+          key: ${{ secrets.VM2_SSH_KEY }}
+          script: |
+            set -e
+
+            cd /home/roman/carwash-api
+
+            cat > docker-compose.prod.yml <<'EOF'
+            services:
+              api:
+                image: ghcr.io/rocknrome25-mos/carwashapp-api:latest
+                container_name: carwash-api
+                restart: unless-stopped
+                network_mode: host
+                env_file:
+                  - .env
+                volumes:
+                  - ./uploads:/app/uploads
+            EOF
+
+            echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ secrets.GHCR_USERNAME }}" --password-stdin
+
+            docker compose -f docker-compose.prod.yml pull
+            docker compose -f docker-compose.prod.yml up -d
+
+            docker image prune -f
+
+            sleep 5
+            curl -f http://localhost:3000/health
