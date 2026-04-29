@@ -47,7 +47,7 @@ jobs:
           echo "${{ secrets.VM2_SSH_KEY_B64 }}" | base64 -d > ~/.ssh/deploy_vm2
           chmod 600 ~/.ssh/deploy_vm2
 
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/deploy_vm2 ${{ secrets.VM2_USER }}@${{ secrets.VM2_HOST }} << 'EOF'
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/deploy_vm2 roman@82.202.159.69 << 'EOF'
             set -e
 
             cd /home/roman/carwash-api
