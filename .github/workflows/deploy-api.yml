@@ -39,17 +39,20 @@ jobs:
           tags: ${{ env.IMAGE_NAME }}
 
       - name: Deploy on VM-2
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.VM2_HOST }}
-          username: ${{ secrets.VM2_USER }}
-          key: ${{ secrets.VM2_SSH_KEY }}
-          script: |
+        run: |
+          set -e
+
+          mkdir -p ~/.ssh
+
+          echo "${{ secrets.VM2_SSH_KEY_B64 }}" | base64 -d > ~/.ssh/deploy_vm2
+          chmod 600 ~/.ssh/deploy_vm2
+
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/deploy_vm2 ${{ secrets.VM2_USER }}@${{ secrets.VM2_HOST }} << 'EOF'
             set -e
 
             cd /home/roman/carwash-api
 
-            cat > docker-compose.prod.yml <<'EOF'
+            cat > docker-compose.prod.yml <<'COMPOSE'
             services:
               api:
                 image: ghcr.io/rocknrome25-mos/carwashapp-api:latest
@@ -60,7 +63,7 @@ jobs:
                   - .env
                 volumes:
                   - ./uploads:/app/uploads
-            EOF
+            COMPOSE
 
             echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ secrets.GHCR_USERNAME }}" --password-stdin
 
@@ -71,3 +74,4 @@ jobs:
 
             sleep 5
             curl -f http://localhost:3000/health
+          EOF
