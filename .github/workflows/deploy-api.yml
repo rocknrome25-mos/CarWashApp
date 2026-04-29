@@ -52,23 +52,12 @@ jobs:
 
             cd /home/roman/carwash-api
 
-            cat > docker-compose.prod.yml <<'COMPOSE'
-            services:
-              api:
-                image: ghcr.io/rocknrome25-mos/carwashapp-api:latest
-                container_name: carwash-api
-                restart: unless-stopped
-                network_mode: host
-                env_file:
-                  - .env
-                volumes:
-                  - ./uploads:/app/uploads
-            COMPOSE
-
             echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ secrets.GHCR_USERNAME }}" --password-stdin
 
-            docker compose -f docker-compose.prod.yml pull
-            docker compose -f docker-compose.prod.yml up -d
+            docker pull ghcr.io/rocknrome25-mos/carwashapp-api:latest
+
+            docker compose -f docker-compose.prod.yml down || true
+            docker compose -f docker-compose.prod.yml up -d --force-recreate
 
             docker image prune -f
 
