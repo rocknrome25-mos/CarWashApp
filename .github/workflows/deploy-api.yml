@@ -9,7 +9,7 @@ on:
       - ".github/workflows/deploy-api.yml"
 
 env:
-  IMAGE_NAME: ghcr.io/rocknrome25-mos/carwashapp-api:latest
+  IMAGE_BASE: ghcr.io/rocknrome25-mos/carwashapp-api
 
 jobs:
   build-and-deploy:
@@ -22,6 +22,12 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Prepare image tags
+        run: |
+          echo "IMAGE_TAG=${GITHUB_SHA::7}" >> $GITHUB_ENV
+          echo "IMAGE_LATEST=${IMAGE_BASE}:latest" >> $GITHUB_ENV
+          echo "IMAGE_VERSIONED=${IMAGE_BASE}:${GITHUB_SHA::7}" >> $GITHUB_ENV
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
@@ -36,7 +42,9 @@ jobs:
           context: ./server_module/api
           file: ./server_module/api/Dockerfile
           push: true
-          tags: ${{ env.IMAGE_NAME }}
+          tags: |
+            ${{ env.IMAGE_LATEST }}
+            ${{ env.IMAGE_VERSIONED }}
 
       - name: Deploy on VM-2
         run: |
@@ -47,14 +55,16 @@ jobs:
           echo "${{ secrets.VM2_SSH_KEY_B64 }}" | base64 -d > ~/.ssh/deploy_vm2
           chmod 600 ~/.ssh/deploy_vm2
 
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/deploy_vm2 roman@82.202.159.69 << 'EOF'
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/deploy_vm2 roman@82.202.159.69 << EOF
             set -e
 
             cd /home/roman/carwash-api
 
             echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ secrets.GHCR_USERNAME }}" --password-stdin
 
-            docker pull ghcr.io/rocknrome25-mos/carwashapp-api:latest
+            docker pull "${{ env.IMAGE_VERSIONED }}"
+
+            sed -i 's|image: ghcr.io/rocknrome25-mos/carwashapp-api:.*|image: ${{ env.IMAGE_VERSIONED }}|' docker-compose.prod.yml
 
             docker compose -f docker-compose.prod.yml down || true
             docker compose -f docker-compose.prod.yml up -d --force-recreate
