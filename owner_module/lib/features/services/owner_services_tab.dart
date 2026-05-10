@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 import '../../core/config/app_config.dart';
+import '../../core/theme/app_theme.dart';
 
 class OwnerServicesTab extends StatefulWidget {
   const OwnerServicesTab({super.key});
@@ -1345,19 +1346,58 @@ class _PreviewBlock extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final cs = theme.colorScheme;
 
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(16),
+
       decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0xFFE5E7EB)),
+        color: cs.bg2,
+
+        borderRadius: BorderRadius.circular(22),
+
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.60)),
+
+        boxShadow: [
+          BoxShadow(
+            blurRadius: 14,
+            offset: const Offset(0, 6),
+            color: Colors.black.withValues(alpha: 0.025),
+          ),
+        ],
       ),
+
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: theme.textTheme.titleMedium),
-          const SizedBox(height: 12),
+          Row(
+            children: [
+              Container(
+                width: 4,
+                height: 20,
+
+                decoration: BoxDecoration(
+                  color: cs.primary,
+                  borderRadius: BorderRadius.circular(99),
+                ),
+              ),
+
+              const SizedBox(width: 10),
+
+              Expanded(
+                child: Text(
+                  title,
+
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 14),
+
           child,
         ],
       ),
@@ -1733,22 +1773,60 @@ class _ServiceInfoTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final cs = theme.colorScheme;
 
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(16),
+
       decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFE5E7EB)),
+        color: cs.bg3,
+
+        borderRadius: BorderRadius.circular(20),
+
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
+
+        boxShadow: [
+          BoxShadow(
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+            color: Colors.black.withValues(alpha: 0.02),
+          ),
+        ],
       ),
+
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: theme.textTheme.bodySmall),
-          const SizedBox(height: 8),
-          Text(value, style: theme.textTheme.titleLarge),
+          Text(
+            title,
+
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: cs.onSurfaceVariant,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+
+          const SizedBox(height: 10),
+
+          Text(
+            value,
+
+            style: theme.textTheme.titleLarge?.copyWith(
+              color: cs.onSurface,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+
           const SizedBox(height: 6),
-          Text(subtitle, style: theme.textTheme.bodySmall),
+
+          Text(
+            subtitle,
+
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: cs.onSurfaceVariant,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
         ],
       ),
     );
@@ -1762,8 +1840,29 @@ class _EmptyBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      child: Padding(padding: const EdgeInsets.all(16), child: Text(text)),
+    final cs = Theme.of(context).colorScheme;
+
+    return Container(
+      width: double.infinity,
+
+      padding: const EdgeInsets.all(18),
+
+      decoration: BoxDecoration(
+        color: cs.bg2,
+
+        borderRadius: BorderRadius.circular(22),
+
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.60)),
+      ),
+
+      child: Text(
+        text,
+
+        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+          color: cs.onSurfaceVariant,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
     );
   }
 }

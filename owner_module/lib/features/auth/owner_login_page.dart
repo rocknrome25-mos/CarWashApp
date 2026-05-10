@@ -1,8 +1,17 @@
 import 'package:flutter/material.dart';
+
+import '../../core/data/app_repository.dart';
 import '../shell/owner_shell_page.dart';
 
 class OwnerLoginPage extends StatefulWidget {
-  const OwnerLoginPage({super.key});
+  final AppRepository repo;
+  final VoidCallback onSuccess;
+
+  const OwnerLoginPage({
+    super.key,
+    required this.repo,
+    required this.onSuccess,
+  });
 
   @override
   State<OwnerLoginPage> createState() => _OwnerLoginPageState();
@@ -13,12 +22,15 @@ class _OwnerLoginPageState extends State<OwnerLoginPage> {
 
   Future<void> _enterDemo() async {
     setState(() => _loading = true);
+
     await Future.delayed(const Duration(milliseconds: 500));
+
     if (!mounted) return;
 
     Navigator.of(context).pushReplacement(
       MaterialPageRoute<void>(
-        builder: (_) => const OwnerShellPage(),
+        builder: (_) =>
+            OwnerShellPage(repo: widget.repo, onLogout: widget.onSuccess),
       ),
     );
   }
@@ -71,8 +83,9 @@ class _OwnerLoginPageState extends State<OwnerLoginPage> {
                             child: FilledButton(
                               onPressed: _loading ? null : _enterDemo,
                               child: Padding(
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 14),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                ),
                                 child: _loading
                                     ? const SizedBox(
                                         width: 18,

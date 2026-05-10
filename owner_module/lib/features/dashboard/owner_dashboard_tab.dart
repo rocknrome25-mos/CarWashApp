@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 
 import '../../core/api/owner_api_client.dart';
 import '../../core/config/app_config.dart';
+import '../../core/theme/app_theme.dart';
 import 'widgets/owner_data_card.dart';
 import 'widgets/owner_info_tile.dart';
 import 'widgets/owner_legend_dot.dart';
@@ -86,6 +87,7 @@ class _OwnerDashboardTabState extends State<OwnerDashboardTab> {
 
   Future<void> _refresh() async {
     setState(_load);
+
     await Future.wait([
       _summaryFuture,
       _chartFuture,
@@ -98,6 +100,7 @@ class _OwnerDashboardTabState extends State<OwnerDashboardTab> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final cs = theme.colorScheme;
 
     return SafeArea(
       top: false,
@@ -111,7 +114,7 @@ class _OwnerDashboardTabState extends State<OwnerDashboardTab> {
             Text(
               'Статистика бизнеса по мойке ЖК Рассказово',
               style: theme.textTheme.bodyMedium?.copyWith(
-                color: const Color(0xFF6B7280),
+                color: cs.onSurfaceVariant,
               ),
             ),
             const SizedBox(height: 16),
@@ -195,6 +198,7 @@ class _OwnerChartSectionState extends State<_OwnerChartSection> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final cs = theme.colorScheme;
 
     final points = ((widget.data['points'] as List?) ?? const [])
         .whereType<Map>()
@@ -202,7 +206,10 @@ class _OwnerChartSectionState extends State<_OwnerChartSection> {
         .toList();
 
     if (points.isEmpty) {
-      return const Text('Нет данных для графика');
+      return Text(
+        'Нет данных для графика',
+        style: theme.textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
+      );
     }
 
     final maxRevenue = points.fold<double>(
@@ -240,8 +247,16 @@ class _OwnerChartSectionState extends State<_OwnerChartSection> {
           ],
         ),
         const SizedBox(height: 16),
-        SizedBox(
+        Container(
           height: 290,
+          padding: const EdgeInsets.fromLTRB(8, 14, 8, 10),
+          decoration: BoxDecoration(
+            color: cs.bg3,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: cs.outlineVariant.withValues(alpha: 0.65),
+            ),
+          ),
           child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: SizedBox(
@@ -337,11 +352,11 @@ class _OwnerChartSectionState extends State<_OwnerChartSection> {
                                     style: theme.textTheme.bodySmall?.copyWith(
                                       fontSize: 11,
                                       color: _selectedIndex == i
-                                          ? const Color(0xFF111827)
-                                          : const Color(0xFF6B7280),
+                                          ? cs.onSurface
+                                          : cs.onSurfaceVariant,
                                       fontWeight: _selectedIndex == i
-                                          ? FontWeight.w600
-                                          : FontWeight.w400,
+                                          ? FontWeight.w800
+                                          : FontWeight.w500,
                                     ),
                                   ),
                                 ),
@@ -369,7 +384,7 @@ class _OwnerChartSectionState extends State<_OwnerChartSection> {
           Text(
             'Нажмите на столбик, чтобы посмотреть детали.',
             style: theme.textTheme.bodySmall?.copyWith(
-              color: const Color(0xFF6B7280),
+              color: cs.onSurfaceVariant,
             ),
           ),
       ],
@@ -389,9 +404,7 @@ class _OwnerChartSectionState extends State<_OwnerChartSection> {
 
   String _axisLabel(Map<String, dynamic> point, int index) {
     final raw = (point['label'] ?? '').toString().trim();
-    if (raw.isEmpty) {
-      return '${index + 1}';
-    }
+    if (raw.isEmpty) return '${index + 1}';
 
     switch (widget.period) {
       case OwnerSummaryPeriod.day:
@@ -440,14 +453,15 @@ class _SelectedPointCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final cs = theme.colorScheme;
 
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFE5E7EB)),
+        color: cs.bg3,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.65)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -486,10 +500,12 @@ class _OwnerSummarySection extends StatelessWidget {
     final metrics = Map<String, dynamic>.from(
       (data['metrics'] as Map?) ?? const {},
     );
+
     final topServices = ((data['topServices'] as List?) ?? const [])
         .whereType<Map>()
         .map((e) => Map<String, dynamic>.from(e))
         .toList();
+
     final activeShift = data['activeShift'] as Map?;
 
     final revenue = _intValue(metrics['revenue']);
@@ -797,7 +813,10 @@ class _OwnerAlertsSection extends StatelessWidget {
     final criticalUnreadTotal = _intValue(totals['criticalUnreadTotal']);
 
     if (alerts.isEmpty) {
-      return const Text('Нет уведомлений за выбранный период');
+      return Text(
+        'Нет уведомлений за выбранный период',
+        style: theme.textTheme.bodyMedium,
+      );
     }
 
     return Column(
@@ -839,6 +858,7 @@ class _OwnerAlertCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final cs = theme.colorScheme;
 
     final title = (alert['title'] ?? 'Уведомление').toString();
     final message = (alert['message'] ?? '').toString();
@@ -851,14 +871,14 @@ class _OwnerAlertCard extends StatelessWidget {
     final Color border;
 
     if (severity == 'CRITICAL') {
-      background = const Color(0xFFFEF2F2);
-      border = const Color(0xFFFCA5A5);
+      background = cs.errorContainer.withValues(alpha: 0.42);
+      border = cs.error.withValues(alpha: 0.42);
     } else if (severity == 'WARNING') {
       background = const Color(0xFFFFFBEB);
       border = const Color(0xFFFCD34D);
     } else {
-      background = const Color(0xFFF8FAFC);
-      border = const Color(0xFFE5E7EB);
+      background = cs.bg3;
+      border = cs.outlineVariant.withValues(alpha: 0.65);
     }
 
     return Container(
@@ -867,7 +887,7 @@ class _OwnerAlertCard extends StatelessWidget {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: background,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: border),
       ),
       child: Column(
@@ -884,7 +904,7 @@ class _OwnerAlertCard extends StatelessWidget {
           Text(
             createdAt,
             style: theme.textTheme.bodySmall?.copyWith(
-              color: const Color(0xFF6B7280),
+              color: cs.onSurfaceVariant,
             ),
           ),
           if (message.trim().isNotEmpty) ...[
@@ -905,47 +925,61 @@ class _AlertBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: isRead ? const Color(0xFFE5E7EB) : const Color(0xFF111827),
+        color: isRead ? cs.bg4 : cs.onSurface,
         borderRadius: BorderRadius.circular(20),
       ),
       child: Text(
         isRead ? 'Прочитано' : text,
-        style: const TextStyle(
-          color: Colors.white,
+        style: TextStyle(
+          color: isRead ? cs.onSurface : Colors.white,
           fontSize: 12,
-          fontWeight: FontWeight.w600,
+          fontWeight: FontWeight.w700,
         ),
       ),
     );
   }
 }
 
-class _OwnerSuspiciousSection extends StatelessWidget {
+class _OwnerSuspiciousSection extends StatefulWidget {
   final Map<String, dynamic> data;
 
   const _OwnerSuspiciousSection({required this.data});
 
   @override
+  State<_OwnerSuspiciousSection> createState() =>
+      _OwnerSuspiciousSectionState();
+}
+
+class _OwnerSuspiciousSectionState extends State<_OwnerSuspiciousSection> {
+  bool _showAllEvents = false;
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final cs = theme.colorScheme;
 
-    final byType = ((data['byType'] as List?) ?? const [])
+    final byType = ((widget.data['byType'] as List?) ?? const [])
         .whereType<Map>()
         .map((e) => Map<String, dynamic>.from(e))
         .toList();
 
-    final byUser = ((data['byUser'] as List?) ?? const [])
+    final byUser = ((widget.data['byUser'] as List?) ?? const [])
         .whereType<Map>()
         .map((e) => Map<String, dynamic>.from(e))
         .toList();
 
-    final events = ((data['events'] as List?) ?? const [])
+    final events = ((widget.data['events'] as List?) ?? const [])
         .whereType<Map>()
         .map((e) => Map<String, dynamic>.from(e))
         .toList();
+
+    final visibleEvents = _showAllEvents ? events.take(12) : events.take(2);
+    final hiddenCount = events.length > 2 ? events.length - 2 : 0;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -953,7 +987,7 @@ class _OwnerSuspiciousSection extends StatelessWidget {
         Text('По типам', style: theme.textTheme.titleMedium),
         const SizedBox(height: 10),
         if (byType.isEmpty)
-          const Text('Нет данных по типам событий')
+          Text('Нет данных по типам событий', style: theme.textTheme.bodyMedium)
         else
           ...byType.map(
             (item) => OwnerSummaryRow(
@@ -961,11 +995,15 @@ class _OwnerSuspiciousSection extends StatelessWidget {
               value: '${_intValue(item['count'])}',
             ),
           ),
+
         const SizedBox(height: 18),
         Text('По администраторам', style: theme.textTheme.titleMedium),
         const SizedBox(height: 10),
         if (byUser.isEmpty)
-          const Text('Нет данных по администраторам')
+          Text(
+            'Нет данных по администраторам',
+            style: theme.textTheme.bodyMedium,
+          )
         else
           ...byUser.map(
             (item) => OwnerSummaryRow(
@@ -973,13 +1011,62 @@ class _OwnerSuspiciousSection extends StatelessWidget {
               value: '${_intValue(item['count'])}',
             ),
           ),
+
         const SizedBox(height: 18),
-        Text('Последние события', style: theme.textTheme.titleMedium),
+
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Последние события',
+                style: theme.textTheme.titleMedium,
+              ),
+            ),
+            if (events.length > 2)
+              Text(
+                '${events.length}',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: cs.onSurfaceVariant,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+          ],
+        ),
+
         const SizedBox(height: 10),
+
         if (events.isEmpty)
-          const Text('Нет событий за выбранный период')
-        else
-          ...events.take(12).map((event) => _SuspiciousEventCard(event: event)),
+          Text(
+            'Нет событий за выбранный период',
+            style: theme.textTheme.bodyMedium,
+          )
+        else ...[
+          ...visibleEvents.map((event) => _SuspiciousEventCard(event: event)),
+
+          if (events.length > 2) ...[
+            const SizedBox(height: 2),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () {
+                  setState(() {
+                    _showAllEvents = !_showAllEvents;
+                  });
+                },
+                icon: Icon(
+                  _showAllEvents
+                      ? Icons.keyboard_arrow_up
+                      : Icons.keyboard_arrow_down,
+                ),
+                label: Text(
+                  _showAllEvents
+                      ? 'Свернуть события'
+                      : 'Показать ещё $hiddenCount',
+                ),
+              ),
+            ),
+          ],
+        ],
       ],
     );
   }
@@ -1011,6 +1098,7 @@ class _SuspiciousEventCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final cs = theme.colorScheme;
 
     final user = Map<String, dynamic>.from((event['user'] as Map?) ?? const {});
 
@@ -1032,9 +1120,9 @@ class _SuspiciousEventCard extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFE5E7EB)),
+        color: cs.bg3,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.65)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1044,14 +1132,14 @@ class _SuspiciousEventCard extends StatelessWidget {
           Text(
             roleLabel.isEmpty ? userName : '$userName · $roleLabel',
             style: theme.textTheme.bodySmall?.copyWith(
-              color: const Color(0xFF6B7280),
+              color: cs.onSurfaceVariant,
             ),
           ),
           const SizedBox(height: 4),
           Text(
             createdAt,
             style: theme.textTheme.bodySmall?.copyWith(
-              color: const Color(0xFF6B7280),
+              color: cs.onSurfaceVariant,
             ),
           ),
           if (reason != null) ...[

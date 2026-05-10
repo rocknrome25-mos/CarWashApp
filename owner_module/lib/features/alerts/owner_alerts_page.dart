@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/api/owner_api_client.dart';
+import '../../core/theme/app_theme.dart';
 
 class OwnerAlertsPage extends StatefulWidget {
   const OwnerAlertsPage({super.key});
@@ -72,6 +73,7 @@ class _OwnerAlertsPageState extends State<OwnerAlertsPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final cs = theme.colorScheme;
 
     return Scaffold(
       appBar: AppBar(
@@ -98,20 +100,36 @@ class _OwnerAlertsPageState extends State<OwnerAlertsPage> {
                 return Center(
                   child: Padding(
                     padding: const EdgeInsets.all(24),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          'Ошибка загрузки: ${snapshot.error}',
-                          textAlign: TextAlign.center,
+                    child: Container(
+                      padding: const EdgeInsets.all(18),
+                      decoration: BoxDecoration(
+                        color: cs.bg2, // Карточка ошибки
+                        borderRadius: BorderRadius.circular(22),
+                        border: Border.all(
+                          color: cs.error.withValues(alpha: 0.30),
                         ),
-                        const SizedBox(height: 12),
-                        FilledButton.icon(
-                          onPressed: _reload,
-                          icon: const Icon(Icons.refresh),
-                          label: const Text('Повторить'),
-                        ),
-                      ],
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.error_outline, color: cs.error, size: 34),
+                          const SizedBox(height: 12),
+                          Text(
+                            'Ошибка загрузки: ${snapshot.error}',
+                            textAlign: TextAlign.center,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: cs.error,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          FilledButton.icon(
+                            onPressed: _reload,
+                            icon: const Icon(Icons.refresh),
+                            label: const Text('Повторить'),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 );
@@ -160,7 +178,7 @@ class _OwnerAlertsPageState extends State<OwnerAlertsPage> {
                     Text(
                       'Критические события, кассовые расхождения и важные действия администраторов.',
                       style: theme.textTheme.bodyMedium?.copyWith(
-                        color: const Color(0xFF6B7280),
+                        color: cs.onSurfaceVariant,
                       ),
                     ),
                     const SizedBox(height: 16),
@@ -231,6 +249,7 @@ class _AlertCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final cs = theme.colorScheme;
 
     final title = (alert['title'] ?? 'Уведомление').toString();
     final message = (alert['message'] ?? '').toString();
@@ -241,72 +260,119 @@ class _AlertCard extends StatelessWidget {
 
     final severityData = _severityData(severity);
 
-    return Card(
+    return Container(
       margin: const EdgeInsets.only(bottom: 12),
-      child: Container(
-        decoration: BoxDecoration(
-          border: Border(left: BorderSide(color: severityData.color, width: 5)),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(severityData.icon, color: severityData.color),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(title, style: theme.textTheme.titleMedium),
-                  ),
-                  if (!isRead)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 9,
-                        vertical: 5,
-                      ),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFDBEAFE),
-                        borderRadius: BorderRadius.circular(99),
-                      ),
-                      child: const Text(
-                        'Новое',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Color(0xFF1D4ED8),
-                          fontWeight: FontWeight.w600,
+      decoration: BoxDecoration(
+        color: cs.bg2, // Карточка уведомления
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.60)),
+        boxShadow: [
+          BoxShadow(
+            blurRadius: 14,
+            offset: const Offset(0, 6),
+            color: Colors.black.withValues(alpha: 0.025),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(22),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              width: 5,
+              color: severityData.color, // Линия важности
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 38,
+                          height: 38,
+                          decoration: BoxDecoration(
+                            color: severityData.color.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Icon(
+                            severityData.icon,
+                            color: severityData.color,
+                            size: 22,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            title,
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                        if (!isRead)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 9,
+                              vertical: 5,
+                            ),
+                            decoration: BoxDecoration(
+                              color: cs.primary.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(99),
+                            ),
+                            child: Text(
+                              'Новое',
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: cs.primary,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                    if (message.trim().isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        message,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: cs.onSurface.withValues(alpha: 0.86),
                         ),
                       ),
+                    ],
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _SmallChip(
+                          text: severityData.label,
+                          color: severityData.color,
+                        ),
+                        if (type.trim().isNotEmpty)
+                          _SmallChip(text: _typeLabel(type)),
+                        if (createdAt.trim().isNotEmpty)
+                          _SmallChip(text: createdAt),
+                      ],
                     ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              if (message.trim().isNotEmpty)
-                Text(message, style: theme.textTheme.bodyMedium),
-              const SizedBox(height: 10),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  _SmallChip(text: severityData.label),
-                  if (type.trim().isNotEmpty)
-                    _SmallChip(text: _typeLabel(type)),
-                  if (createdAt.trim().isNotEmpty) _SmallChip(text: createdAt),
-                ],
-              ),
-              if (!isRead) ...[
-                const SizedBox(height: 14),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: FilledButton.icon(
-                    onPressed: onMarkRead,
-                    icon: const Icon(Icons.done),
-                    label: const Text('Прочитано'),
-                  ),
+                    if (!isRead) ...[
+                      const SizedBox(height: 14),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: FilledButton.icon(
+                          onPressed: onMarkRead,
+                          icon: const Icon(Icons.done),
+                          label: const Text('Прочитано'),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
-              ],
-            ],
-          ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -370,18 +436,29 @@ class _SeverityData {
 
 class _SmallChip extends StatelessWidget {
   final String text;
+  final Color? color;
 
-  const _SmallChip({required this.text});
+  const _SmallChip({required this.text, this.color});
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final effectiveColor = color ?? cs.onSurfaceVariant;
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: const Color(0xFFF3F4F6),
+        color: effectiveColor.withValues(alpha: 0.10), // Фон chip
         borderRadius: BorderRadius.circular(99),
+        border: Border.all(color: effectiveColor.withValues(alpha: 0.18)),
       ),
-      child: Text(text, style: Theme.of(context).textTheme.bodySmall),
+      child: Text(
+        text,
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+          color: effectiveColor,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
     );
   }
 }
@@ -400,25 +477,39 @@ class _MetricTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final cs = theme.colorScheme;
 
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFE5E7EB)),
+        color: cs.bg3, // Метрика
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.60)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: theme.textTheme.bodySmall),
-          const SizedBox(height: 8),
-          Text(value, style: theme.textTheme.titleLarge),
+          Text(
+            title,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: cs.onSurfaceVariant,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            value,
+            style: theme.textTheme.titleLarge?.copyWith(
+              color: cs.onSurface,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
           const SizedBox(height: 6),
           Text(
             subtitle,
             style: theme.textTheme.bodySmall?.copyWith(
-              color: const Color(0xFF6B7280),
+              color: cs.onSurfaceVariant,
+              fontWeight: FontWeight.w600,
             ),
           ),
         ],
@@ -434,8 +525,23 @@ class _EmptyBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      child: Padding(padding: const EdgeInsets.all(16), child: Text(text)),
+    final cs = Theme.of(context).colorScheme;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: cs.bg2, // Пустое состояние
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.60)),
+      ),
+      child: Text(
+        text,
+        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+          color: cs.onSurfaceVariant,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
     );
   }
 }

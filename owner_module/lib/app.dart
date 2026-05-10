@@ -1,17 +1,26 @@
 import 'package:flutter/material.dart';
+import 'core/data/app_repository.dart';
 import 'core/theme/app_theme.dart';
-import 'features/auth/owner_login_page.dart';
+import 'features/shell/owner_shell_page.dart';
 
-class OwnerApp extends StatelessWidget {
-  const OwnerApp({super.key});
+class OwnerModuleApp extends StatefulWidget {
+  final AppRepository repo;
+  final VoidCallback onLogout;
 
+  const OwnerModuleApp({super.key, required this.repo, required this.onLogout});
+
+  @override
+  State<OwnerModuleApp> createState() => _OwnerModuleAppState();
+}
+
+class _OwnerModuleAppState extends State<OwnerModuleApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Owner',
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.light,
-      home: const OwnerLoginPage(),
+      title: 'Автомойка - Владелец',
+      theme: AppTheme.dark(),
+      home: OwnerShellPage(repo: widget.repo, onLogout: widget.onLogout),
     );
   }
 }

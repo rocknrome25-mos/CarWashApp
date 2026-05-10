@@ -3,17 +3,20 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../core/api/owner_api_client.dart';
-import '../auth/owner_login_page.dart';
+import '../../core/data/app_repository.dart';
+import '../alerts/owner_alerts_page.dart';
 import '../clients/owner_clients_tab.dart';
 import '../dashboard/owner_dashboard_tab.dart';
 import '../services/owner_services_tab.dart';
 import '../settings/owner_settings_tab.dart';
 import '../staff/owner_employees_tab.dart';
-import '../alerts/owner_alerts_page.dart';
 import 'widgets/owner_top_brand_block.dart';
 
 class OwnerShellPage extends StatefulWidget {
-  const OwnerShellPage({super.key});
+  final AppRepository repo;
+  final VoidCallback onLogout;
+
+  const OwnerShellPage({super.key, required this.repo, required this.onLogout});
 
   @override
   State<OwnerShellPage> createState() => _OwnerShellPageState();
@@ -34,7 +37,9 @@ class _OwnerShellPageState extends State<OwnerShellPage> {
   @override
   void initState() {
     super.initState();
+
     _loadAlerts(showCriticalPopup: true);
+
     _alertsTimer = Timer.periodic(
       const Duration(seconds: 60),
       (_) => _loadAlerts(showCriticalPopup: true),
@@ -48,10 +53,7 @@ class _OwnerShellPageState extends State<OwnerShellPage> {
   }
 
   void _logout() {
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute<void>(builder: (_) => const OwnerLoginPage()),
-      (route) => false,
-    );
+    widget.onLogout();
   }
 
   void _openSupport() {
@@ -183,7 +185,7 @@ class _OwnerShellPageState extends State<OwnerShellPage> {
         await _api.markOwnerAlertRead(id);
         await _loadAlerts(showCriticalPopup: false);
       } catch (_) {
-        // ignore
+        // Игнорируем ошибку чтения уведомления.
       }
     }
 
@@ -198,6 +200,7 @@ class _OwnerShellPageState extends State<OwnerShellPage> {
     ).push(MaterialPageRoute<void>(builder: (_) => const OwnerAlertsPage()));
 
     if (!mounted) return;
+
     await _loadAlerts(showCriticalPopup: false);
   }
 
