@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../../core/data/app_repository.dart';
-import '../shell/owner_shell_page.dart';
 
 class OwnerLoginPage extends StatefulWidget {
   final AppRepository repo;
@@ -27,75 +26,139 @@ class _OwnerLoginPageState extends State<OwnerLoginPage> {
 
     if (!mounted) return;
 
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute<void>(
-        builder: (_) =>
-            OwnerShellPage(repo: widget.repo, onLogout: widget.onSuccess),
-      ),
-    );
+    widget.onSuccess();
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final cs = theme.colorScheme;
 
     return Scaffold(
       body: SafeArea(
         child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 420),
-            child: Padding(
-              padding: const EdgeInsets.all(24),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 440),
+
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.center,
+
                 children: [
-                  Text(
-                    'Кабинет владельца',
-                    style: theme.textTheme.headlineMedium,
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'ЖК Рассказово\nг. Москва, бульвар Андрея Тарковского, д. 10',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: const Color(0xFF6B7280),
+                  // Логотип / иконка
+                  Container(
+                    width: 94,
+                    height: 94,
+
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFEEE8),
+                      borderRadius: BorderRadius.circular(28),
+
+                      boxShadow: [
+                        BoxShadow(
+                          blurRadius: 16,
+                          offset: const Offset(0, 8),
+                          color: Colors.black.withValues(alpha: 0.05),
+                        ),
+                      ],
+                    ),
+
+                    child: Icon(
+                      Icons.bar_chart_rounded,
+                      size: 46,
+                      color: Colors.deepOrange.shade400,
                     ),
                   ),
-                  const SizedBox(height: 32),
+
+                  const SizedBox(height: 28),
+
+                  // Заголовок
+                  Text(
+                    'Кабинет владельца',
+
+                    textAlign: TextAlign.center,
+
+                    style: theme.textTheme.headlineMedium?.copyWith(
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  // Подзаголовок
+                  Text(
+                    'ЖК Рассказово\nг. Москва, бульвар Андрея Тарковского, д. 10',
+
+                    textAlign: TextAlign.center,
+
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: cs.onSurfaceVariant,
+                      height: 1.45,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+
+                  const SizedBox(height: 36),
+
+                  // Карточка входа
                   Card(
+                    elevation: 0,
+
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(28),
+                    ),
+
                     child: Padding(
-                      padding: const EdgeInsets.all(20),
+                      padding: const EdgeInsets.all(24),
+
                       child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                        crossAxisAlignment: CrossAxisAlignment.center,
+
                         children: [
                           Text(
                             'Вход в модуль',
-                            style: theme.textTheme.titleLarge,
+
+                            textAlign: TextAlign.center,
+
+                            style: theme.textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.w900,
+                            ),
                           ),
-                          const SizedBox(height: 10),
+
+                          const SizedBox(height: 14),
+
                           Text(
-                            'Пока используем тестовый вход без реальной авторизации.',
-                            style: theme.textTheme.bodyMedium,
+                            'Пока используем тестовый вход\nбез реальной авторизации.',
+
+                            textAlign: TextAlign.center,
+
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: cs.onSurfaceVariant,
+                              height: 1.5,
+                            ),
                           ),
-                          const SizedBox(height: 20),
+
+                          const SizedBox(height: 26),
+
                           SizedBox(
                             width: double.infinity,
+                            height: 56,
+
                             child: FilledButton(
                               onPressed: _loading ? null : _enterDemo,
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 14,
-                                ),
-                                child: _loading
-                                    ? const SizedBox(
-                                        width: 18,
-                                        height: 18,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                        ),
-                                      )
-                                    : const Text('Войти'),
-                              ),
+
+                              child: _loading
+                                  ? const SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Text('Войти'),
                             ),
                           ),
                         ],

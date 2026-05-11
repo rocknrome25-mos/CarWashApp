@@ -24,7 +24,7 @@ class _Root extends StatefulWidget {
 }
 
 class _RootState extends State<_Root> {
-  bool _authed = true;
+  bool _authed = false;
   AppRepository? repo;
   String? _startupError;
 

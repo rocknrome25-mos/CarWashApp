@@ -40,7 +40,7 @@ class OwnerPeriodSwitcher extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final periods = OwnerSummaryPeriod.values;
+    const periods = OwnerSummaryPeriod.values;
 
     return Container(
       width: double.infinity,
