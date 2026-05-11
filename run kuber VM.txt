@@ -1,0 +1,25 @@
+flutter run -d chrome --dart-define=BASE_URL=http://82.202.159.69:3000
+
+
+ssh roman@82.202.159.69
+
+
+
+DB pass: StrongPassword123
+
+
+=========================
+
+ssh -i $env:USERPROFILE\.ssh\deploy_vm2 roman@82.202.159.69
+
+
+ssh roman@82.202.159.69
+
+или
+ssh -i C:\Users\ROMAN\.ssh\deploy_vm2 roman@82.202.159.69
+
+============================
+
+запуск в терминале VS Code: 
+
+flutter run -d chrome --web-port=5555 --dart-define=BASE_URL=http://82.202.159.69:3000

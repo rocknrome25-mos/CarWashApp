@@ -126,7 +126,16 @@ class ApiRepository implements AppRepository {
     cache.set(key, list, ttl: const Duration(minutes: 5));
 
     if (currentLocation == null && list.isNotEmpty) {
-      await setCurrentLocation(list.first);
+      final raskazovo = list.where((e) {
+        final name = e.name.toLowerCase();
+        return name.contains('рассказово');
+      }).toList();
+
+      if (raskazovo.isNotEmpty) {
+        await setCurrentLocation(raskazovo.first);
+      } else {
+        await setCurrentLocation(list.first);
+      }
     }
 
     return list;

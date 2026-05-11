@@ -190,7 +190,18 @@ class _OwnerClientsTabState extends State<OwnerClientsTab> {
           final topClients = _list(
             data['topClients'],
           ).map(_clientWithComputedSegment).toList();
-          final recentVisits = _list(data['recentVisits'] ?? data['gallery']);
+          final recentVisits =
+              _list(data['recentVisits'] ?? data['gallery'])
+                  .where(
+                    (visit) =>
+                        (visit['status'] ?? '').toString() == 'COMPLETED',
+                  )
+                  .toList()
+                ..sort((a, b) {
+                  final da = _visitComparableDate(a);
+                  final db = _visitComparableDate(b);
+                  return db.compareTo(da);
+                });
           final byGender = _list(analytics['byGender']);
           final byBodyType = _list(analytics['byBodyType']);
 
@@ -544,7 +555,18 @@ class _OwnerClientDetailPageState extends State<_OwnerClientDetailPage> {
           final totals = _map(client['totals']);
           final paymentMethods = _map(client['paymentMethods']);
           final cars = _list(client['cars']);
-          final visits = _list(client['visits']);
+          final visits =
+              _list(client['visits'])
+                  .where(
+                    (visit) =>
+                        (visit['status'] ?? '').toString() == 'COMPLETED',
+                  )
+                  .toList()
+                ..sort((a, b) {
+                  final da = _visitComparableDate(a);
+                  final db = _visitComparableDate(b);
+                  return db.compareTo(da);
+                });
 
           final isBlocked = client['isBlocked'] == true;
           final name = (client['name'] ?? 'Без имени').toString();
@@ -1190,26 +1212,35 @@ class _CarCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final photoUrl = _latestCarPhotoUrl(car, visits);
+
     final plate = (car['plate'] ?? 'Номер не указан').toString();
-    final make = (car['make'] ?? '').toString();
-    final model = (car['model'] ?? '').toString();
+    final make = (car['make'] ?? '').toString().trim();
+    final model = (car['model'] ?? '').toString().trim();
     final bodyType = (car['bodyType'] ?? 'кузов не указан').toString();
     final year = (car['year'] ?? '').toString();
 
+    final carTitle = [
+      make,
+      model,
+    ].where((e) => e.isNotEmpty && e != '—' && e != 'null').join(' ');
+
     return Card(
-      margin: const EdgeInsets.only(bottom: 10),
+      margin: const EdgeInsets.only(bottom: 14),
       clipBehavior: Clip.antiAlias,
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: 104,
-            height: 92,
+          AspectRatio(
+            aspectRatio: 16 / 9,
             child: photoUrl == null
                 ? Container(
                     color: const Color(0xFFEFF6FF),
-                    child: const Icon(
-                      Icons.directions_car_outlined,
-                      color: Color(0xFF2563EB),
+                    child: const Center(
+                      child: Icon(
+                        Icons.directions_car_outlined,
+                        size: 54,
+                        color: Color(0xFF2563EB),
+                      ),
                     ),
                   )
                 : Image.network(
@@ -1217,35 +1248,45 @@ class _CarCard extends StatelessWidget {
                     fit: BoxFit.cover,
                     errorBuilder: (_, __, ___) => Container(
                       color: const Color(0xFFEFF6FF),
-                      child: const Icon(
-                        Icons.broken_image_outlined,
-                        color: Color(0xFF2563EB),
+                      child: const Center(
+                        child: Icon(
+                          Icons.broken_image_outlined,
+                          size: 48,
+                          color: Color(0xFF2563EB),
+                        ),
                       ),
                     ),
                   ),
           ),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(plate, style: theme.textTheme.titleMedium),
-                  const SizedBox(height: 4),
-                  Text(
-                    '$make $model • $bodyType',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: const Color(0xFF6B7280),
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
+          Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(plate, style: theme.textTheme.titleLarge),
+                const SizedBox(height: 6),
+                Text(
+                  carTitle.isEmpty ? bodyType : '$carTitle • $bodyType',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: const Color(0xFF6B7280),
                   ),
-                  if (year.trim().isNotEmpty && year != 'null') ...[
-                    const SizedBox(height: 6),
-                    _SmallChip(text: 'Год: $year'),
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _SmallChip(text: bodyType),
+                    if (year.trim().isNotEmpty && year != 'null')
+                      _SmallChip(text: 'Год: $year'),
+                    if (photoUrl != null)
+                      const _SmallChip(
+                        text: 'Фото авто',
+                        background: Color(0xFFDCFCE7),
+                      ),
                   ],
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         ],
@@ -1769,13 +1810,33 @@ String? _latestCarPhotoUrl(
   Map<String, dynamic> car,
   List<Map<String, dynamic>> visits,
 ) {
-  for (final visit in visits) {
-    if (_visitMatchesCar(visit, car)) {
-      final url = _visitBestPhotoUrl(visit);
-      if (url != null) return url;
-    }
+  final matchingVisits = visits
+      .where((visit) => _visitMatchesCar(visit, car))
+      .where((visit) => _visitBestPhotoUrl(visit) != null)
+      .toList();
+
+  matchingVisits.sort((a, b) {
+    final da = _visitComparableDate(a);
+    final db = _visitComparableDate(b);
+    return db.compareTo(da);
+  });
+
+  for (final visit in matchingVisits) {
+    final url = _visitBestPhotoUrl(visit);
+    if (url != null) return url;
   }
+
   return null;
+}
+
+DateTime _visitComparableDate(Map<String, dynamic> visit) {
+  final finishedAt = DateTime.tryParse((visit['finishedAt'] ?? '').toString());
+
+  if (finishedAt != null) return finishedAt;
+
+  final dateTime = DateTime.tryParse((visit['dateTime'] ?? '').toString());
+
+  return dateTime ?? DateTime(1970);
 }
 
 bool _visitMatchesCar(Map<String, dynamic> visit, Map<String, dynamic> car) {

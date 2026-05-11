@@ -90,8 +90,9 @@ class _StatsPageState extends State<StatsPage>
       if (!mounted) return;
       setState(() => error = e.toString());
     } finally {
-      if (!mounted) return;
-      setState(() => loading = false);
+      if (mounted) {
+        setState(() => loading = false);
+      }
     }
   }
 

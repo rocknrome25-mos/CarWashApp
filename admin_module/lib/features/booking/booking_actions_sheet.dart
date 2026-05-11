@@ -1035,6 +1035,7 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
     final createdAt = DateTime.tryParse(
       (p['createdAt'] ?? '').toString(),
     )?.toLocal();
+
     final time = createdAt == null ? '' : DateFormat('HH:mm').format(createdAt);
 
     return InkWell(
@@ -1048,96 +1049,85 @@ class _BookingActionsSheetState extends State<BookingActionsSheet> {
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.5)),
         ),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: _photoThumb(p),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    _kindRu(kind),
-                    style: const TextStyle(fontWeight: FontWeight.w900),
-                  ),
-                  if (note.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      note,
-                      style: TextStyle(
-                        color: cs.onSurface.withValues(alpha: 0.75),
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 6),
-                  Text(
-                    'Нажми на фото, чтобы открыть',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: cs.onSurface.withValues(alpha: 0.55),
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 10),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (time.isNotEmpty)
-                  Text(
-                    time,
-                    style: TextStyle(
-                      color: cs.onSurface.withValues(alpha: 0.65),
-                      fontWeight: FontWeight.w900,
-                      fontSize: 12,
-                    ),
-                  )
-                else
-                  const SizedBox(height: 14),
-                const SizedBox(height: 8),
-                GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: loading ? null : () => _confirmDeletePhoto(p),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 7,
-                    ),
-                    decoration: BoxDecoration(
-                      color: cs.surfaceContainerHighest.withValues(alpha: 0.2),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: cs.outlineVariant.withValues(alpha: 0.55),
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.delete_outline,
-                          size: 18,
-                          color: cs.onSurface.withValues(alpha: 0.85),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: SizedBox(width: 84, height: 84, child: _photoThumb(p)),
+                ),
+
+                const SizedBox(width: 12),
+
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _kindRu(kind),
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 15,
                         ),
-                        const SizedBox(width: 6),
+                      ),
+
+                      if (note.isNotEmpty) ...[
+                        const SizedBox(height: 6),
                         Text(
-                          'Удалить',
+                          note,
                           style: TextStyle(
-                            fontWeight: FontWeight.w900,
-                            color: cs.onSurface.withValues(alpha: 0.9),
+                            color: cs.onSurface.withValues(alpha: 0.75),
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+
+                      const SizedBox(height: 8),
+
+                      Text(
+                        'Нажми на фото, чтобы открыть',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: cs.onSurface.withValues(alpha: 0.55),
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+
+                      if (time.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          time,
+                          style: TextStyle(
+                            color: cs.onSurface.withValues(alpha: 0.65),
+                            fontWeight: FontWeight.w800,
                             fontSize: 12,
                           ),
                         ),
                       ],
-                    ),
+                    ],
                   ),
                 ),
               ],
+            ),
+
+            const SizedBox(height: 12),
+
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: loading ? null : () => _confirmDeletePhoto(p),
+                icon: const Icon(Icons.delete_outline),
+                label: const Text('Удалить'),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(44),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+              ),
             ),
           ],
         ),

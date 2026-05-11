@@ -153,11 +153,12 @@ class _SchedulePageState extends State<SchedulePage>
         setState(() => error = e.toString());
       }
     } finally {
-      if (!mounted) return;
-      setState(() {
-        loading = false;
-        refreshing = false;
-      });
+      if (mounted) {
+        setState(() {
+          loading = false;
+          refreshing = false;
+        });
+      }
     }
   }
 

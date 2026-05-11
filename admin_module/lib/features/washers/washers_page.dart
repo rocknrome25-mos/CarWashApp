@@ -37,10 +37,9 @@ class _WashersPageState extends State<WashersPage> {
 
   DateTime get _from => _todayOnly(DateTime.now());
 
-  DateTime get _to =>
-      _todayOnly(DateTime.now().add(const Duration(days: 7))).add(
-        const Duration(days: 1),
-      );
+  DateTime get _to => _todayOnly(
+    DateTime.now().add(const Duration(days: 7)),
+  ).add(const Duration(days: 1));
 
   @override
   void initState() {
@@ -173,7 +172,9 @@ class _WashersPageState extends State<WashersPage> {
   int _totalVisibleShiftsForDay(DateTime day) => _plannedForDay(day).length;
 
   int _assignedCount(Map<String, dynamic> p) {
-    final rows = ((p['washers'] as List?) ?? const []).whereType<Map>().toList();
+    final rows = ((p['washers'] as List?) ?? const [])
+        .whereType<Map>()
+        .toList();
     return rows.length;
   }
 
@@ -270,8 +271,7 @@ class _WashersPageState extends State<WashersPage> {
       final existingStart = _tryParseDate(existing['startAt'])?.toLocal();
       final existingEnd = _tryParseDate(existing['endAt'])?.toLocal();
 
-      startAt =
-          existingStart ?? DateTime(now.year, now.month, now.day, 8, 0);
+      startAt = existingStart ?? DateTime(now.year, now.month, now.day, 8, 0);
       endAt = existingEnd ?? startAt.add(const Duration(hours: 12));
       noteCtrl.text = (existing['note'] ?? '').toString();
     } else {
@@ -342,15 +342,16 @@ class _WashersPageState extends State<WashersPage> {
           final df = DateFormat('dd.MM HH:mm');
 
           InputDecoration deco(String label) => InputDecoration(
-                labelText: label,
-                filled: true,
-                fillColor: cs.surfaceContainerHighest.withValues(alpha: 0.10),
-                border:
-                    OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
-              );
+            labelText: label,
+            filled: true,
+            fillColor: cs.surfaceContainerHighest.withValues(alpha: 0.10),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+          );
 
           return AlertDialog(
-            title: Text(existing == null ? 'Новая смена' : 'Редактировать смену'),
+            title: Text(
+              existing == null ? 'Новая смена' : 'Редактировать смену',
+            ),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -371,8 +372,9 @@ class _WashersPageState extends State<WashersPage> {
                           Expanded(
                             child: Text(
                               'Старт: ${df.format(startAt)}',
-                              style:
-                                  const TextStyle(fontWeight: FontWeight.w800),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                              ),
                             ),
                           ),
                           TextButton(
@@ -387,8 +389,9 @@ class _WashersPageState extends State<WashersPage> {
                           Expanded(
                             child: Text(
                               'Конец: ${df.format(endAt)}',
-                              style:
-                                  const TextStyle(fontWeight: FontWeight.w800),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                              ),
                             ),
                           ),
                           TextButton(
@@ -455,7 +458,9 @@ class _WashersPageState extends State<WashersPage> {
     if (washersError != null) {
       messenger.showSnackBar(
         const SnackBar(
-          content: Text('Не удалось загрузить список мойщиков. Обновите экран.'),
+          content: Text(
+            'Не удалось загрузить список мойщиков. Обновите экран.',
+          ),
         ),
       );
       return;
@@ -485,8 +490,9 @@ class _WashersPageState extends State<WashersPage> {
       return;
     }
 
-    String? selectedWasherId =
-        (availableWashers.first['id'] ?? '').toString().trim();
+    String? selectedWasherId = (availableWashers.first['id'] ?? '')
+        .toString()
+        .trim();
     int plannedBayId = 1;
     final noteCtrl = TextEditingController();
 
@@ -505,12 +511,11 @@ class _WashersPageState extends State<WashersPage> {
           final cs = Theme.of(dialogCtx).colorScheme;
 
           InputDecoration deco(String label) => InputDecoration(
-                labelText: label,
-                filled: true,
-                fillColor: cs.surfaceContainerHighest.withValues(alpha: 0.10),
-                border:
-                    OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
-              );
+            labelText: label,
+            filled: true,
+            fillColor: cs.surfaceContainerHighest.withValues(alpha: 0.10),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+          );
 
           return AlertDialog(
             title: const Text('Назначить мойщика'),
@@ -518,7 +523,7 @@ class _WashersPageState extends State<WashersPage> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 DropdownButtonFormField<String>(
-                  value: selectedWasherId,
+                  initialValue: selectedWasherId,
                   decoration: deco('Мойщик'),
                   items: availableWashers.map((w) {
                     final id = (w['id'] ?? '').toString();
@@ -537,7 +542,7 @@ class _WashersPageState extends State<WashersPage> {
                 ),
                 const SizedBox(height: 10),
                 DropdownButtonFormField<int>(
-                  value: plannedBayId,
+                  initialValue: plannedBayId,
                   decoration: deco('Пост'),
                   items: const [
                     DropdownMenuItem(value: 1, child: Text('Пост 1')),
@@ -775,10 +780,10 @@ class _WashersPageState extends State<WashersPage> {
             child: Text(
               text,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    color: cs.onErrorContainer,
-                    height: 1.35,
-                  ),
+                fontWeight: FontWeight.w700,
+                color: cs.onErrorContainer,
+                height: 1.35,
+              ),
             ),
           ),
         ],
@@ -802,9 +807,8 @@ class _WashersPageState extends State<WashersPage> {
             children: [
               Expanded(
                 child: FilledButton.icon(
-                  onPressed: () => _createOrEditPlannedShift(
-                    presetDay: _selectedDay,
-                  ),
+                  onPressed: () =>
+                      _createOrEditPlannedShift(presetDay: _selectedDay),
                   icon: const Icon(Icons.add),
                   label: const Text('Новая смена'),
                 ),
@@ -843,7 +847,7 @@ class _WashersPageState extends State<WashersPage> {
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         itemCount: days.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        separatorBuilder: (_, _) => const SizedBox(width: 8),
         itemBuilder: (context, i) {
           final day = days[i];
           final selected = i == selectedDayIndex;
@@ -872,11 +876,11 @@ class _WashersPageState extends State<WashersPage> {
                   Text(
                     _formatDayShort(day),
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.w900,
-                          color: selected
-                              ? cs.primary
-                              : cs.onSurface.withValues(alpha: 0.88),
-                        ),
+                      fontWeight: FontWeight.w900,
+                      color: selected
+                          ? cs.primary
+                          : cs.onSurface.withValues(alpha: 0.88),
+                    ),
                   ),
                   const SizedBox(width: 8),
                   Container(
@@ -893,11 +897,11 @@ class _WashersPageState extends State<WashersPage> {
                     child: Text(
                       '$count',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            fontWeight: FontWeight.w900,
-                            color: selected
-                                ? cs.primary
-                                : cs.onSurface.withValues(alpha: 0.82),
-                          ),
+                        fontWeight: FontWeight.w900,
+                        color: selected
+                            ? cs.primary
+                            : cs.onSurface.withValues(alpha: 0.82),
+                      ),
                     ),
                   ),
                 ],
@@ -915,8 +919,8 @@ class _WashersPageState extends State<WashersPage> {
     final text = washersError != null
         ? 'Не удалось загрузить список мойщиков. Назначение временно отключено.'
         : washers.isEmpty
-            ? 'Список мойщиков пуст. Сначала владелец должен добавить мойщиков.'
-            : 'Доступно мойщиков: ${washers.length}';
+        ? 'Список мойщиков пуст. Сначала владелец должен добавить мойщиков.'
+        : 'Доступно мойщиков: ${washers.length}';
 
     final icon = washersError != null
         ? Icons.warning_amber_rounded
@@ -946,11 +950,11 @@ class _WashersPageState extends State<WashersPage> {
             child: Text(
               text,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    color: washersError != null
-                        ? cs.onErrorContainer
-                        : cs.onSurface.withValues(alpha: 0.85),
-                  ),
+                fontWeight: FontWeight.w800,
+                color: washersError != null
+                    ? cs.onErrorContainer
+                    : cs.onSurface.withValues(alpha: 0.85),
+              ),
             ),
           ),
         ],
@@ -973,10 +977,9 @@ class _WashersPageState extends State<WashersPage> {
         children: [
           Text(
             _formatDayLong(_selectedDay),
-            style: Theme.of(context)
-                .textTheme
-                .titleSmall
-                ?.copyWith(fontWeight: FontWeight.w900),
+            style: Theme.of(
+              context,
+            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900),
           ),
           const SizedBox(height: 10),
           Text(
@@ -984,9 +987,9 @@ class _WashersPageState extends State<WashersPage> {
                 ? 'Для этого дня нет смен.'
                 : 'Для этого дня нет активных или черновых смен.',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  color: cs.onSurface.withValues(alpha: 0.72),
-                ),
+              fontWeight: FontWeight.w700,
+              color: cs.onSurface.withValues(alpha: 0.72),
+            ),
           ),
           const SizedBox(height: 14),
           FilledButton.icon(
@@ -1009,9 +1012,9 @@ class _WashersPageState extends State<WashersPage> {
       child: Text(
         _statusText(raw),
         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: _statusFg(context, raw),
-              fontWeight: FontWeight.w900,
-            ),
+          color: _statusFg(context, raw),
+          fontWeight: FontWeight.w900,
+        ),
       ),
     );
   }
@@ -1037,9 +1040,9 @@ class _WashersPageState extends State<WashersPage> {
         child: Text(
           'Мойщики не назначены',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: cs.onSurface.withValues(alpha: 0.72),
-                fontWeight: FontWeight.w700,
-              ),
+            color: cs.onSurface.withValues(alpha: 0.72),
+            fontWeight: FontWeight.w700,
+          ),
         ),
       );
     }
@@ -1075,17 +1078,17 @@ class _WashersPageState extends State<WashersPage> {
                     Text(
                       washerTitle,
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            fontWeight: FontWeight.w900,
-                          ),
+                        fontWeight: FontWeight.w900,
+                      ),
                     ),
                     if (phone.isNotEmpty) ...[
                       const SizedBox(height: 2),
                       Text(
                         phone,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: cs.onSurface.withValues(alpha: 0.72),
-                              fontWeight: FontWeight.w700,
-                            ),
+                          color: cs.onSurface.withValues(alpha: 0.72),
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ],
                     const SizedBox(height: 8),
@@ -1107,9 +1110,7 @@ class _WashersPageState extends State<WashersPage> {
                           ),
                           child: Text(
                             bayId == null ? 'Пост не указан' : 'Пост $bayId',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
+                            style: Theme.of(context).textTheme.bodySmall
                                 ?.copyWith(fontWeight: FontWeight.w900),
                           ),
                         ),
@@ -1120,8 +1121,9 @@ class _WashersPageState extends State<WashersPage> {
                               vertical: 6,
                             ),
                             decoration: BoxDecoration(
-                              color: cs.surfaceContainerHighest
-                                  .withValues(alpha: 0.18),
+                              color: cs.surfaceContainerHighest.withValues(
+                                alpha: 0.18,
+                              ),
                               borderRadius: BorderRadius.circular(999),
                               border: Border.all(
                                 color: cs.outlineVariant.withValues(
@@ -1131,9 +1133,7 @@ class _WashersPageState extends State<WashersPage> {
                             ),
                             child: Text(
                               note,
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodySmall
+                              style: Theme.of(context).textTheme.bodySmall
                                   ?.copyWith(fontWeight: FontWeight.w800),
                             ),
                           ),
@@ -1147,11 +1147,8 @@ class _WashersPageState extends State<WashersPage> {
                 tooltip: 'Снять мойщика',
                 onPressed: washerId.isEmpty
                     ? null
-                    : () => _removeAssignedWasher(
-                          shiftId,
-                          washerId,
-                          washerTitle,
-                        ),
+                    : () =>
+                          _removeAssignedWasher(shiftId, washerId, washerTitle),
                 icon: const Icon(Icons.person_remove_alt_1),
               ),
             ],
@@ -1195,10 +1192,9 @@ class _WashersPageState extends State<WashersPage> {
               Expanded(
                 child: Text(
                   _formatShiftTime(p),
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleSmall
-                      ?.copyWith(fontWeight: FontWeight.w900),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900),
                 ),
               ),
               _statusChip(context, status),
@@ -1216,9 +1212,9 @@ class _WashersPageState extends State<WashersPage> {
               Text(
                 'Назначено: ${_assignedCount(p)}',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      fontWeight: FontWeight.w800,
-                      color: cs.onSurface.withValues(alpha: 0.78),
-                    ),
+                  fontWeight: FontWeight.w800,
+                  color: cs.onSurface.withValues(alpha: 0.78),
+                ),
               ),
             ],
           ),
@@ -1237,9 +1233,9 @@ class _WashersPageState extends State<WashersPage> {
               child: Text(
                 'Примечание: $note',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: cs.onSurface.withValues(alpha: 0.75),
-                      fontWeight: FontWeight.w700,
-                    ),
+                  color: cs.onSurface.withValues(alpha: 0.75),
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
           ],
@@ -1256,13 +1252,16 @@ class _WashersPageState extends State<WashersPage> {
                 label: const Text('Назначить'),
               ),
               OutlinedButton.icon(
-                onPressed:
-                    isCanceled ? null : () => _createOrEditPlannedShift(existing: p),
+                onPressed: isCanceled
+                    ? null
+                    : () => _createOrEditPlannedShift(existing: p),
                 icon: const Icon(Icons.edit_outlined),
                 label: const Text('Изменить'),
               ),
               FilledButton.icon(
-                onPressed: isCanceled || isPublished ? null : () => _publish(id),
+                onPressed: isCanceled || isPublished
+                    ? null
+                    : () => _publish(id),
                 icon: const Icon(Icons.publish),
                 label: const Text('Опубликовать'),
               ),
@@ -1300,18 +1299,18 @@ class _WashersPageState extends State<WashersPage> {
               Text(
                 'Не удалось загрузить график смен.',
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w900,
-                      color: cs.onErrorContainer,
-                    ),
+                  fontWeight: FontWeight.w900,
+                  color: cs.onErrorContainer,
+                ),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 8),
               Text(
                 plannedError ?? 'Неизвестная ошибка',
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: cs.onErrorContainer,
-                      fontWeight: FontWeight.w700,
-                    ),
+                  color: cs.onErrorContainer,
+                  fontWeight: FontWeight.w700,
+                ),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 14),
@@ -1347,51 +1346,46 @@ class _WashersPageState extends State<WashersPage> {
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : hasFatalPlannedError
-              ? _plannedLoadFailedView(context)
-              : RefreshIndicator(
-                  onRefresh: load,
-                  child: ListView(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-                    children: [
-                      _headerCard(context),
-                      const SizedBox(height: 14),
-                      if (plannedError != null) ...[
-                        _warningCard(
-                          context,
-                          icon: Icons.warning_amber_rounded,
-                          text:
-                              'Не удалось обновить список смен. Показаны последние доступные данные.',
-                        ),
-                        const SizedBox(height: 12),
-                      ],
-                      _washersInfoCard(context),
-                      const SizedBox(height: 12),
-                      _toolbarCard(context),
-                      const SizedBox(height: 12),
-                      _dayTabs(context),
-                      const SizedBox(height: 14),
-                      Text(
-                        _formatDayLong(_selectedDay),
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleMedium
-                            ?.copyWith(fontWeight: FontWeight.w900),
-                      ),
-                      const SizedBox(height: 10),
-                      if (selectedRows.isEmpty)
-                        _emptySelectedDay(context)
-                      else
-                        ...selectedRows.map(
-                          (p) => _plannedCard(context, p),
-                        ),
-                    ],
+          ? _plannedLoadFailedView(context)
+          : RefreshIndicator(
+              onRefresh: load,
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                children: [
+                  _headerCard(context),
+                  const SizedBox(height: 14),
+                  if (plannedError != null) ...[
+                    _warningCard(
+                      context,
+                      icon: Icons.warning_amber_rounded,
+                      text:
+                          'Не удалось обновить список смен. Показаны последние доступные данные.',
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  _washersInfoCard(context),
+                  const SizedBox(height: 12),
+                  _toolbarCard(context),
+                  const SizedBox(height: 12),
+                  _dayTabs(context),
+                  const SizedBox(height: 14),
+                  Text(
+                    _formatDayLong(_selectedDay),
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w900,
+                    ),
                   ),
-                ),
+                  const SizedBox(height: 10),
+                  if (selectedRows.isEmpty)
+                    _emptySelectedDay(context)
+                  else
+                    ...selectedRows.map((p) => _plannedCard(context, p)),
+                ],
+              ),
+            ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _createOrEditPlannedShift(
-          presetDay: _selectedDay,
-        ),
+        onPressed: () => _createOrEditPlannedShift(presetDay: _selectedDay),
         icon: const Icon(Icons.add),
         label: const Text('Смена'),
       ),

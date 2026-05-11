@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import '../core/data/app_repository.dart';
 import '../core/models/service.dart';
 import '../features/bookings/create_booking_page.dart';
@@ -49,6 +50,7 @@ class ServiceDetailsPage extends StatelessWidget {
     final textTheme = Theme.of(context).textTheme;
     final bottomInset = MediaQuery.of(context).padding.bottom;
     final heroH = MediaQuery.of(context).size.width * 0.78;
+    final description = (service.description ?? '').trim();
 
     return Scaffold(
       body: Stack(
@@ -117,7 +119,9 @@ class ServiceDetailsPage extends StatelessWidget {
                   ),
                 ],
               ),
+
               const SizedBox(height: 18),
+
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Text(
@@ -129,7 +133,9 @@ class ServiceDetailsPage extends StatelessWidget {
                   ),
                 ),
               ),
+
               const SizedBox(height: 10),
+
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Wrap(
@@ -144,7 +150,9 @@ class ServiceDetailsPage extends StatelessWidget {
                   ],
                 ),
               ),
+
               const SizedBox(height: 18),
+
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Container(
@@ -173,16 +181,22 @@ class ServiceDetailsPage extends StatelessWidget {
                           color: cs.onSurface.withValues(alpha: 0.96),
                         ),
                       ),
+
                       const SizedBox(height: 8),
+
                       Text(
-                        'Описание услуги будет здесь. Что входит, ограничения, рекомендации и важные детали перед записью.',
+                        description.isEmpty
+                            ? 'Описание услуги пока не добавлено.'
+                            : description,
                         style: textTheme.bodyMedium?.copyWith(
                           color: cs.onSurface.withValues(alpha: 0.74),
                           fontWeight: FontWeight.w600,
                           height: 1.4,
                         ),
                       ),
+
                       const SizedBox(height: 16),
+
                       Row(
                         children: [
                           Expanded(
@@ -206,7 +220,9 @@ class ServiceDetailsPage extends StatelessWidget {
                   ),
                 ),
               ),
+
               const SizedBox(height: 16),
+
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Container(
@@ -266,6 +282,7 @@ class ServiceDetailsPage extends StatelessWidget {
               ),
             ],
           ),
+
           Positioned(
             left: 16,
             right: 16,
@@ -327,9 +344,7 @@ class _PrimaryPill extends StatelessWidget {
       decoration: BoxDecoration(
         color: cs.primary.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: cs.primary.withValues(alpha: 0.18),
-        ),
+        border: Border.all(color: cs.primary.withValues(alpha: 0.18)),
       ),
       child: Text(
         text,
@@ -346,10 +361,7 @@ class _SoftPill extends StatelessWidget {
   final IconData icon;
   final String text;
 
-  const _SoftPill({
-    required this.icon,
-    required this.text,
-  });
+  const _SoftPill({required this.icon, required this.text});
 
   @override
   Widget build(BuildContext context) {
@@ -360,18 +372,12 @@ class _SoftPill extends StatelessWidget {
       decoration: BoxDecoration(
         color: cs.surfaceContainerHighest.withValues(alpha: 0.16),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: cs.outlineVariant.withValues(alpha: 0.45),
-        ),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.45)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            icon,
-            size: 15,
-            color: cs.onSurface.withValues(alpha: 0.68),
-          ),
+          Icon(icon, size: 15, color: cs.onSurface.withValues(alpha: 0.68)),
           const SizedBox(width: 6),
           Text(
             text,
@@ -406,18 +412,12 @@ class _InfoCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: cs.surfaceContainerHigh.withValues(alpha: 0.48),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: cs.outlineVariant.withValues(alpha: 0.50),
-        ),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.50)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(
-            icon,
-            size: 18,
-            color: cs.onSurface.withValues(alpha: 0.72),
-          ),
+          Icon(icon, size: 18, color: cs.onSurface.withValues(alpha: 0.72)),
           const SizedBox(height: 10),
           Text(
             label,

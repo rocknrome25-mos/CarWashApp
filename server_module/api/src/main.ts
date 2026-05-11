@@ -22,7 +22,6 @@ async function bootstrap() {
 
   app.enableShutdownHooks();
 
-  // ✅ Global validation for DTOs
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
@@ -32,28 +31,29 @@ async function bootstrap() {
     }),
   );
 
-  // ✅ Production-ready body limits
   app.useBodyParser('json', { limit: '10mb' });
   app.useBodyParser('urlencoded', { limit: '10mb', extended: true });
 
-  // ✅ Serve uploaded files
   const uploadDir = process.env.UPLOAD_DIR?.trim() || 'uploads';
+
   app.useStaticAssets(join(process.cwd(), uploadDir), {
-    prefix: '/uploads',
+    prefix: '/uploads/',
+    setHeaders: (res) => {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', '*');
+    },
   });
 
-  // ✅ HTTP CORS
   const nodeEnv = (process.env.NODE_ENV ?? 'development').trim();
   const corsOrigins = parseCorsOrigins(process.env.CORS_ORIGINS);
 
   app.enableCors({
     origin: (origin, callback) => {
-      // no origin -> mobile apps / curl / server-to-server
       if (!origin) {
         return callback(null, true);
       }
 
-      // development fallback
       if (nodeEnv !== 'production' && corsOrigins.length === 0) {
         return callback(null, true);
       }
@@ -67,7 +67,6 @@ async function bootstrap() {
     credentials: true,
   });
 
-  // ✅ RAW WebSocket adapter (ws)
   app.useWebSocketAdapter(new WsAdapter(app));
 
   const port = Number(process.env.PORT ?? 3000);
@@ -76,6 +75,7 @@ async function bootstrap() {
   logger.log(`API started on port ${port}`);
   logger.log(`NODE_ENV=${nodeEnv}`);
   logger.log(`UPLOAD_DIR=${uploadDir}`);
+
   if (corsOrigins.length > 0) {
     logger.log(`CORS_ORIGINS=${corsOrigins.join(', ')}`);
   } else {

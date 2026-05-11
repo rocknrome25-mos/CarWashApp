@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.automoyka.owner"
+    namespace = "com.automoyka.client"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -19,7 +19,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.automoyka.owner"
+        applicationId = "com.automoyka.client"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
