@@ -3411,9 +3411,12 @@ export class OwnerService {
 
     const client = await this.prisma.client.findFirst({
       where: {
-        id,
-        locations: { some: { locationId: location.id } },
-      },
+  id,
+  OR: [
+    { locations: { some: { locationId: location.id } } },
+    { bookings: { some: { locationId: location.id } } },
+  ],
+},
       include: {
         locations: {
           where: { locationId: location.id },
