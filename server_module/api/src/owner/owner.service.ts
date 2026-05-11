@@ -3000,7 +3000,10 @@ export class OwnerService {
             orderBy: { createdAt: "desc" },
           },
           bookings: {
-            where: { locationId: location.id },
+  where: {
+    locationId: location.id,
+    status: BookingStatus.COMPLETED,
+  },
             orderBy: { dateTime: "desc" },
             include: {
               car: {
@@ -3056,10 +3059,11 @@ export class OwnerService {
       }),
 
       this.prisma.booking.findMany({
-        where: {
-          locationId: location.id,
-          clientId: { not: null },
-        },
+  where: {
+    locationId: location.id,
+    clientId: { not: null },
+    status: BookingStatus.COMPLETED,
+  },
         orderBy: { dateTime: "desc" },
         take: 50,
         include: {
@@ -3434,7 +3438,10 @@ export class OwnerService {
           orderBy: { createdAt: "desc" },
         },
         bookings: {
-          where: { locationId: location.id },
+  where: {
+    locationId: location.id,
+    status: BookingStatus.COMPLETED,
+  },
           orderBy: { dateTime: "desc" },
           include: {
             car: {
