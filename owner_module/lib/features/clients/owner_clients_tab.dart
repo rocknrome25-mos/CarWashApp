@@ -110,6 +110,7 @@ class _OwnerClientsTabState extends State<OwnerClientsTab> {
           clientId: clientId,
           fallbackName: (client['name'] ?? 'Клиент').toString(),
           period: _period,
+          initialClient: client,
         ),
       ),
     );
@@ -130,6 +131,7 @@ class _OwnerClientsTabState extends State<OwnerClientsTab> {
           clientId: clientId,
           fallbackName: (visit['clientName'] ?? 'Клиент').toString(),
           period: _period,
+          initialClient: _clientFromRecentVisit(visit),
         ),
       ),
     );
@@ -190,6 +192,7 @@ class _OwnerClientsTabState extends State<OwnerClientsTab> {
           final topClients = _list(
             data['topClients'],
           ).map(_clientWithComputedSegment).toList();
+
           final recentVisits =
               _list(data['recentVisits'] ?? data['gallery'])
                   .where(
@@ -202,6 +205,7 @@ class _OwnerClientsTabState extends State<OwnerClientsTab> {
                   final db = _visitComparableDate(b);
                   return db.compareTo(da);
                 });
+
           final byGender = _list(analytics['byGender']);
           final byBodyType = _list(analytics['byBodyType']);
 
@@ -461,11 +465,13 @@ class _OwnerClientDetailPage extends StatefulWidget {
   final String clientId;
   final String fallbackName;
   final String period;
+  final Map<String, dynamic>? initialClient;
 
   const _OwnerClientDetailPage({
     required this.clientId,
     required this.fallbackName,
     required this.period,
+    this.initialClient,
   });
 
   @override
@@ -551,12 +557,29 @@ class _OwnerClientDetailPageState extends State<_OwnerClientDetailPage> {
           }
 
           final data = snapshot.data ?? const <String, dynamic>{};
-          final client = _clientWithComputedSegment(_map(data['client']));
+
+          final serverClient = _clientWithComputedSegment(_map(data['client']));
+          final initialClient = _clientWithComputedSegment(
+            _map(widget.initialClient),
+          );
+
+          final client = _clientWithComputedSegment(
+            _mergeClientWithFallback(serverClient, initialClient),
+          );
+
           final totals = _map(client['totals']);
           final paymentMethods = _map(client['paymentMethods']);
-          final cars = _list(client['cars']);
+
+          final cars = _mergeCarLists(
+            _list(client['cars']),
+            _list(initialClient['cars']),
+          );
+
           final visits =
-              _list(client['visits'])
+              _mergeVisitLists(
+                    _list(client['visits']),
+                    _list(initialClient['visits']),
+                  )
                   .where(
                     (visit) =>
                         (visit['status'] ?? '').toString() == 'COMPLETED',
@@ -674,7 +697,8 @@ class _OwnerClientDetailPageState extends State<_OwnerClientDetailPage> {
                     ),
                     _MetricTile(
                       title: 'Визиты',
-                      value: '${_asInt(totals['visits'] ?? client['visits'])}',
+                      value:
+                          '${_asInt(totals['visits'] ?? client['visitsCount'] ?? visits.length)}',
                       subtitle:
                           client['visitsFrequencyLabel']?.toString() ??
                           'Завершённые',
@@ -923,7 +947,10 @@ class _ClientListCard extends StatelessWidget {
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  _SmallChip(text: 'Визитов: ${_asInt(client['visits'])}'),
+                  _SmallChip(
+                    text:
+                        'Визитов: ${_asInt(client['visitsCount'] ?? client['visits'])}',
+                  ),
                   _SmallChip(
                     text: 'Сумма: ${_rub(_asInt(client['totalSpent']))}',
                   ),
@@ -989,7 +1016,7 @@ class _TopClientCard extends StatelessWidget {
           ],
         ),
         subtitle: Text(
-          '${client['phone'] ?? ''} • ${_asInt(client['visits'])} визитов',
+          '${client['phone'] ?? ''} • ${_asInt(client['visitsCount'] ?? client['visits'])} визитов',
         ),
         trailing: Text(
           _rub(_asInt(client['totalSpent'])),
@@ -1347,7 +1374,7 @@ class _CarVisitPhotosSection extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             SizedBox(
-              height: 188,
+              height: 210,
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
                 itemCount: filteredVisits.length,
@@ -1389,7 +1416,7 @@ class _VisitPhotoStripCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               SizedBox(
-                height: 104,
+                height: 96,
                 width: double.infinity,
                 child: photoUrl == null
                     ? Container(
@@ -1883,11 +1910,18 @@ Map<String, dynamic> _clientWithComputedSegment(Map<String, dynamic> client) {
   final result = Map<String, dynamic>.from(client);
   final totals = _map(result['totals']);
 
+  final rawVisits = result['visits'];
+  final hasVisitsList = rawVisits is List;
+
   final totalSpent = _asInt(result['totalSpent'] ?? totals['totalSpent']);
   final periodSpent = _asInt(result['periodSpent'] ?? totals['periodSpent']);
-  final visits = _asInt(result['visits'] ?? totals['visits']);
+
+  final visitsCount = hasVisitsList
+      ? _asInt(totals['visits'] ?? result['visitsCount'] ?? rawVisits.length)
+      : _asInt(result['visits'] ?? totals['visits']);
+
   final visitsTotal = _asInt(
-    result['visitsTotal'] ?? totals['visitsTotal'] ?? visits,
+    result['visitsTotal'] ?? totals['visitsTotal'] ?? visitsCount,
   );
   final averageCheck = _asInt(result['averageCheck'] ?? totals['averageCheck']);
   final contractDebtRub = _asInt(
@@ -1897,7 +1931,8 @@ Map<String, dynamic> _clientWithComputedSegment(Map<String, dynamic> client) {
   final daysSinceLastVisit = _daysSince(result['lastVisitAt']);
   final hasDebt = contractDebtRub > 0;
   final isLost = daysSinceLastVisit >= 30 && visitsTotal > 0;
-  final isVip = totalSpent >= 50000 || visits >= 10 || averageCheck >= 7000;
+  final isVip =
+      totalSpent >= 50000 || visitsCount >= 10 || averageCheck >= 7000;
 
   String segment;
   if (hasDebt) {
@@ -1906,22 +1941,28 @@ Map<String, dynamic> _clientWithComputedSegment(Map<String, dynamic> client) {
     segment = 'LOST';
   } else if (isVip) {
     segment = 'VIP';
-  } else if (visits >= 5 || (daysSinceLastVisit <= 14 && visits >= 2)) {
+  } else if (visitsCount >= 5 ||
+      (daysSinceLastVisit <= 14 && visitsCount >= 2)) {
     segment = 'FREQUENT';
-  } else if (visits <= 1 || daysSinceLastVisit >= 45) {
+  } else if (visitsCount <= 1 || daysSinceLastVisit >= 45) {
     segment = 'RARE';
   } else {
     segment = 'REGULAR';
   }
 
   final frequencyLabel = _frequencyLabel(
-    visits: visits,
+    visits: visitsCount,
     daysSinceLastVisit: daysSinceLastVisit,
   );
 
   result['totalSpent'] = totalSpent;
   result['periodSpent'] = periodSpent;
-  result['visits'] = visits;
+  result['visitsCount'] = visitsCount;
+
+  if (!hasVisitsList) {
+    result['visits'] = visitsCount;
+  }
+
   result['visitsTotal'] = visitsTotal;
   result['averageCheck'] = averageCheck;
   result['contractDebtRub'] = contractDebtRub;
@@ -1935,6 +1976,175 @@ Map<String, dynamic> _clientWithComputedSegment(Map<String, dynamic> client) {
       result['visitsFrequencyLabel'] ?? frequencyLabel;
 
   return result;
+}
+
+Map<String, dynamic> _clientFromRecentVisit(Map<String, dynamic> visit) {
+  final car = _map(visit['car']);
+  final normalizedVisit = _normalizeVisitFromRecentVisit(visit);
+
+  return {
+    'clientId': visit['clientId'],
+    'name': visit['clientName'] ?? 'Клиент',
+    'phone': visit['clientPhone'] ?? '',
+    'cars': car.isEmpty ? <Map<String, dynamic>>[] : [car],
+    'visits': [normalizedVisit],
+    'visitsCount': 1,
+    'visitsTotal': 1,
+    'lastVisitAt': visit['finishedAt'] ?? visit['dateTime'],
+    'totalSpent': _asInt(visit['amountRub'] ?? visit['amount']),
+    'periodSpent': _asInt(visit['amountRub'] ?? visit['amount']),
+  };
+}
+
+Map<String, dynamic> _normalizeVisitFromRecentVisit(
+  Map<String, dynamic> visit,
+) {
+  final photoUrl = (visit['photoUrl'] ?? '').toString();
+
+  return {
+    'id': visit['id'] ?? visit['bookingId'],
+    'bookingId': visit['bookingId'] ?? visit['id'],
+    'status': visit['status'] ?? 'COMPLETED',
+    'dateTime': visit['dateTime'],
+    'startedAt': visit['startedAt'],
+    'finishedAt': visit['finishedAt'] ?? visit['dateTime'],
+    'amountRub': visit['amountRub'] ?? visit['amount'] ?? 0,
+    'paymentMethods': visit['paymentMethods'] ?? const <String, dynamic>{},
+    'service': visit['service'] ?? const <String, dynamic>{},
+    'addons': visit['addons'] ?? const <Map<String, dynamic>>[],
+    'car': visit['car'] ?? const <String, dynamic>{},
+    'photoUrl': photoUrl,
+    'photos': {
+      'afterUrl': photoUrl,
+      'beforeUrl': null,
+      'all': photoUrl.trim().isEmpty
+          ? <Map<String, dynamic>>[]
+          : [
+              {
+                'id':
+                    'initial_photo_${visit['bookingId'] ?? visit['id'] ?? ''}',
+                'kind': 'AFTER',
+                'url': photoUrl,
+                'note': '',
+                'createdAt': visit['finishedAt'] ?? visit['dateTime'],
+              },
+            ],
+    },
+    'timeControl': visit['timeControl'] ?? const <String, dynamic>{},
+  };
+}
+
+Map<String, dynamic> _mergeClientWithFallback(
+  Map<String, dynamic> client,
+  Map<String, dynamic> fallback,
+) {
+  if (fallback.isEmpty) return client;
+  if (client.isEmpty) return fallback;
+
+  final result = Map<String, dynamic>.from(client);
+
+  void useFallbackIfBlank(String key) {
+    final current = result[key];
+    final fb = fallback[key];
+    if (_isBlankValue(current) && !_isBlankValue(fb)) {
+      result[key] = fb;
+    }
+  }
+
+  for (final key in [
+    'clientId',
+    'name',
+    'phone',
+    'gender',
+    'lastVisitAt',
+    'totalSpent',
+    'periodSpent',
+    'contractDebtRub',
+    'visitsTotal',
+    'visitsCount',
+    'averageCheck',
+  ]) {
+    useFallbackIfBlank(key);
+  }
+
+  result['cars'] = _mergeCarLists(
+    _list(result['cars']),
+    _list(fallback['cars']),
+  );
+  result['visits'] = _mergeVisitLists(
+    _list(result['visits']),
+    _list(fallback['visits']),
+  );
+
+  return result;
+}
+
+List<Map<String, dynamic>> _mergeCarLists(
+  List<Map<String, dynamic>> primary,
+  List<Map<String, dynamic>> fallback,
+) {
+  final result = <Map<String, dynamic>>[];
+  final seen = <String>{};
+
+  void addCar(Map<String, dynamic> car) {
+    final id = (car['id'] ?? '').toString().trim();
+    final plate = (car['plate'] ?? '').toString().trim().toUpperCase();
+    final key = id.isNotEmpty ? 'id:$id' : 'plate:$plate';
+
+    if (key == 'plate:' || seen.contains(key)) return;
+
+    seen.add(key);
+    result.add(car);
+  }
+
+  for (final car in primary) {
+    addCar(car);
+  }
+  for (final car in fallback) {
+    addCar(car);
+  }
+
+  return result;
+}
+
+List<Map<String, dynamic>> _mergeVisitLists(
+  List<Map<String, dynamic>> primary,
+  List<Map<String, dynamic>> fallback,
+) {
+  final result = <Map<String, dynamic>>[];
+  final seen = <String>{};
+
+  void addVisit(Map<String, dynamic> visit) {
+    final id = (visit['id'] ?? visit['bookingId'] ?? '').toString().trim();
+    final key = id.isNotEmpty
+        ? id
+        : '${visit['dateTime']}_${visit['finishedAt']}_${_visitPlate(visit)}';
+
+    if (key.trim().isEmpty || seen.contains(key)) return;
+
+    seen.add(key);
+    result.add(visit);
+  }
+
+  for (final visit in primary) {
+    addVisit(visit);
+  }
+  for (final visit in fallback) {
+    addVisit(visit);
+  }
+
+  return result;
+}
+
+bool _isBlankValue(dynamic value) {
+  if (value == null) return true;
+  if (value is String) {
+    final v = value.trim();
+    return v.isEmpty || v == 'null' || v == '—';
+  }
+  if (value is List || value is Map) return false;
+  if (value is num) return value == 0;
+  return false;
 }
 
 bool _passesSegmentFilter(Map<String, dynamic> client, String filter) {
@@ -1963,7 +2173,9 @@ List<Map<String, dynamic>> _sortClientsForDisplay(
     ).compareTo(_asInt(a['totalSpent']));
     if (spentCompare != 0) return spentCompare;
 
-    final visitsCompare = _asInt(b['visits']).compareTo(_asInt(a['visits']));
+    final visitsCompare = _asInt(
+      b['visitsCount'] ?? b['visits'],
+    ).compareTo(_asInt(a['visitsCount'] ?? a['visits']));
     if (visitsCompare != 0) return visitsCompare;
 
     final lastA = DateTime.tryParse((a['lastVisitAt'] ?? '').toString());
